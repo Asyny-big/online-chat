@@ -1,0 +1,301 @@
+const express = require('express');
+const mongoose = require('mongoose');
+const cors = require('cors');
+const http = require('http');
+const socketIo = require('socket.io');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+
+const app = express();
+const server = http.createServer(app);
+const io = socketIo(server, { cors: { origin: '*' } });
+
+app.use(cors());
+app.use(express.json());
+app.use((req, res, next) => {
+  res.setHeader('Content-Language', 'ru');
+  next();
+});
+
+// --- Модели ---
+const userSchema = new mongoose.Schema({
+  username: { type: String, unique: true, required: true, trim: true },
+  password: String,
+  online: Boolean,
+  age: { type: Number, default: null },
+  city: { type: String, default: null },
+  status: { type: String, default: null },
+  avatarUrl: { type: String, default: null },
+});
+const messageSchema = new mongoose.Schema({
+  text: String,
+  sender: String,
+  channel: String,
+  fileUrl: String,
+  fileType: String, // добавлено
+  originalName: String, // добавлено
+  createdAt: { type: Date, default: Date.now },
+});
+const channelSchema = new mongoose.Schema({
+  name: String,
+  members: [String],
+});
+const User = mongoose.model('User', userSchema);
+const Message = mongoose.model('Message', messageSchema);
+const Channel = mongoose.model('Channel', channelSchema);
+
+// --- Аутентификация ---
+const SECRET = 'jwt_secret';
+function auth(req, res, next) {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.sendStatus(401);
+  jwt.verify(token, SECRET, (err, user) => {
+    if (err) return res.sendStatus(403);
+    req.user = user;
+    next();
+  });
+}
+
+// --- Регистрация и вход ---
+app.post('/api/register', async (req, res) => {
+  let { username, password } = req.body;
+  if (!username) {
+    return res.status(400).json({ error: 'Имя пользователя обязательно' });
+  }
+  username = username.trim();
+  if (username.length > 20) {
+    return res.status(400).json({ error: 'Имя пользователя не должно превышать 15 символов' });
+  }
+  // Проверка уникальности 
+  const exists = await User.findOne({ username });
+  if (exists) {
+    return res.status(400).json({ error: 'Пользователь с таким именем уже существует' });
+  }
+  try {
+    const hash = await bcrypt.hash(password, 10);
+    const fs = require('fs');
+    const defaultSource = path.join(__dirname, 'avatar-default.png');
+    const defaultDest = path.join(__dirname, 'uploads', 'avatar-default.png');
+    if (!fs.existsSync(defaultDest)) {
+      try {
+        fs.copyFileSync(defaultSource, defaultDest);
+      } catch (e) {
+        // Если файла нет, просто не ставим аватар
+      }
+    }
+    const defaultAvatar = "/uploads/avatar-default.png";
+    const user = new User({
+      username,
+      password: hash,
+      online: false,
+      avatarUrl: fs.existsSync(defaultDest) ? defaultAvatar : null,
+      age: null,
+      city: null,
+      status: null,
+    });
+    await user.save();
+    res.json({ ok: true });
+  } catch (err) {
+    if (err.code === 11000) {
+      return res.status(400).json({ error: 'Пользователь с таким именем уже существует' });
+    }
+    res.status(500).json({ error: 'Ошибка регистрации' });
+  }
+});
+app.post('/api/login', async (req, res) => {
+  const { username, password } = req.body;
+  const user = await User.findOne({ username });
+  if (!user || !(await bcrypt.compare(password, user.password)))
+    return res.status(401).json({ error: 'Неверные данные' });
+  const token = jwt.sign({ username }, SECRET);
+  user.online = true;
+  await user.save();
+  res.json({ token });
+});
+
+// --- Каналы ---
+app.post('/api/channels', auth, async (req, res) => {
+  const { name, members } = req.body;
+  const channel = new Channel({ name, members });
+  await channel.save();
+  res.json(channel);
+});
+app.get('/api/channels', auth, async (req, res) => {
+  // Возвращаем абсолютно все каналы для любого пользователя
+  const channels = await Channel.find();
+  res.json(channels);
+});
+
+// --- Сообщения ---
+app.get('/api/messages/:channel', auth, async (req, res) => {
+  const messages = await Message.find({ channel: req.params.channel });
+  res.json(messages);
+});
+
+// --- Загрузка файлов ---
+const upload = multer({ dest: path.join(__dirname, 'uploads') });
+app.post('/api/upload', auth, upload.single('file'), async (req, res) => {
+  // Если передан avatar=1, обновляем профиль пользователя (оставляем старое поведение)
+  let url;
+  let fileType = req.file.mimetype;
+  let originalName = req.file.originalname;
+
+  if (req.query.avatar === '1') {
+    url = `/uploads/${req.file.filename}`;
+    await User.updateOne(
+      { username: req.user.username },
+      { avatarUrl: url }
+    );
+    return res.json({ url, fileType, originalName });
+  }
+
+  // Для обычных файлов сохраняем в папку пользователя с оригинальным именем (UTF-8)
+  const username = req.user.username;
+  const uploadsDir = path.join(__dirname, 'uploads');
+  const userDir = path.join(uploadsDir, username);
+
+  if (!fs.existsSync(userDir)) {
+    fs.mkdirSync(userDir, { recursive: true });
+  }
+
+  // Попытка исправить некорректно декодированные имена (например, "Ð¡Ð½Ð¸Ð¼Ð¾Ðº ÑÐºÑÐ°Ð½Ð°")
+  let fixedOriginalName = req.file.originalname;
+  function fixCyrillic(str) {
+    try {
+      return Buffer.from(str, 'latin1').toString('utf8');
+    } catch {
+      return str;
+    }
+  }
+  fixedOriginalName = fixCyrillic(fixedOriginalName);
+
+  let baseName = path.basename(fixedOriginalName, path.extname(fixedOriginalName));
+  let ext = path.extname(fixedOriginalName);
+  let destName = fixedOriginalName;
+  let destPath = path.join(userDir, destName);
+  let counter = 1;
+  while (fs.existsSync(destPath)) {
+    destName = `${baseName}_${counter}${ext}`;
+    destPath = path.join(userDir, destName);
+    counter++;
+  }
+
+  // --- Исправление: корректное перемещение файла, чтобы не портить видео ---
+  try {
+    fs.renameSync(req.file.path, destPath);
+  } catch (err) {
+    // Если не удалось переименовать (например, разные диски), копируем потоками
+    await new Promise((resolve, reject) => {
+      const readStream = fs.createReadStream(req.file.path);
+      const writeStream = fs.createWriteStream(destPath);
+      readStream.on('error', reject);
+      writeStream.on('error', reject);
+      writeStream.on('finish', resolve);
+      readStream.pipe(writeStream);
+    });
+    fs.unlinkSync(req.file.path);
+  }
+  // --- /Исправление ---
+
+  url = `/uploads/${username}/${destName}`;
+  // Возвращаем и оригинальное имя, и имя на сервере
+  res.json({ url, fileType, originalName: fixedOriginalName, savedName: destName });
+});
+
+// --- Только express.static для отдачи файлов ---
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// --- Профиль пользователя ---
+app.get('/api/profile', auth, async (req, res) => {
+  const user = await User.findOne({ username: req.user.username });
+  if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
+  res.json({
+    username: user.username,
+    age: user.age ?? null,
+    city: user.city ?? null,
+    status: user.status ?? null,
+    avatarUrl: user.avatarUrl ?? null,
+  });
+});
+
+// PATCH /api/profile — изменение профиля
+app.patch('/api/profile', auth, async (req, res) => {
+  // Сохраняем старый username для поиска
+  const oldUsername = req.user.username;
+  const user = await User.findOne({ username: oldUsername });
+  if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
+  const { username, password, city, status, age, avatarUrl } = req.body;
+  let token = null;
+  // Проверка и изменение ника
+  if (username && username !== user.username) {
+    if (username.length > 20) return res.status(400).json({ error: 'Имя пользователя не должно превышать 15 символов' });
+    const exists = await User.findOne({ username });
+    if (exists) return res.status(400).json({ error: 'Пользователь с таким именем уже существует' });
+    user.username = username.trim();
+    token = jwt.sign({ username: user.username }, SECRET);
+  }
+  // Изменение пароля
+  if (password && password.length > 0) {
+    user.password = await bcrypt.hash(password, 10);
+  }
+  if (city !== undefined) user.city = city;
+  if (status !== undefined) user.status = status;
+  if (age !== undefined && age !== "" && !isNaN(Number(age))) user.age = Number(age);
+  if (avatarUrl !== undefined) user.avatarUrl = avatarUrl; // обновление аватара
+  await user.save();
+  const resp = {
+    username: user.username,
+    age: user.age ?? null,
+    city: user.city ?? null,
+    status: user.status ?? null,
+    avatarUrl: user.avatarUrl ?? null,
+  };
+  if (token) resp.token = token;
+  res.json(resp);
+});
+
+// --- Socket.IO ---
+io.use(async (socket, next) => {
+  const token = socket.handshake.auth.token;
+  if (!token) return next(new Error('Нет токена'));
+  jwt.verify(token, SECRET, (err, user) => {
+    if (err) return next(new Error('Ошибка токена'));
+    socket.user = user;
+    next();
+  });
+});
+io.on('connection', (socket) => {
+  socket.on('join', (channel) => {
+    socket.join(channel);
+  });
+  socket.on('message', async (msg) => {
+    // Добавляем время, если не пришло с клиента
+    if (!msg.createdAt) msg.createdAt = new Date();
+    // Если есть fileUrl, fileType, originalName — сохраняем их
+    const message = new Message({
+      text: msg.text,
+      sender: msg.sender,
+      channel: msg.channel,
+      fileUrl: msg.fileUrl,
+      fileType: msg.fileType,
+      originalName: msg.originalName,
+      createdAt: msg.createdAt,
+    });
+    await message.save();
+    io.to(msg.channel).emit('message', message);
+  });
+  socket.on('typing', (data) => {
+    socket.to(data.channel).emit('typing', { user: socket.user.username });
+  });
+  socket.on('disconnect', async () => {
+    await User.updateOne({ username: socket.user.username }, { online: false });
+  });
+});
+
+// --- Запуск ---
+mongoose.connect('mongodb://localhost:27017/chat', { useNewUrlParser: true, useUnifiedTopology: true })
+  .then(() => server.listen(5000, () => console.log('Сервер запущен на 5000')))
+  .catch(console.error);
