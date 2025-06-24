@@ -193,14 +193,14 @@ app.post('/api/upload', auth, upload.single('file'), async (req, res) => {
       const writeStream = fs.createWriteStream(destPath);
       readStream.on('error', reject);
       writeStream.on('error', reject);
-      writeStream.on('finish', resolve);
+      writeStream.on('close', resolve);
       readStream.pipe(writeStream);
     });
     fs.unlinkSync(req.file.path);
   }
   // --- /Исправление ---
 
-  url = `/uploads/${username}/${destName}`;
+  url = `/uploads/${username}/${encodeURIComponent(destName)}`;
   // Возвращаем и оригинальное имя, и имя на сервере
   res.json({ url, fileType, originalName: fixedOriginalName, savedName: destName });
 });
