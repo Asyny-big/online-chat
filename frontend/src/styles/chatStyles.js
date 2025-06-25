@@ -719,8 +719,8 @@ export const responsive = `
   }
   /* --- Поднять значки профиля и кастомизации выше в мобильном меню --- */
   .govchat-mobile-profile-actions {
-    margin-top: 10px !important;
-    margin-bottom: 18px !important;
+    margin-top: 32px !important; /* увеличено */
+    margin-bottom: 32px !important; /* увеличено */
     gap: 18px !important;
     display: flex !important;
     flex-direction: row !important;

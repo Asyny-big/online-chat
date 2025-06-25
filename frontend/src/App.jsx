@@ -574,15 +574,17 @@ function App() {
           )}
         </div>
         {/* Кнопки профиля и кастомизации как в десктопе */}
-        <div style={{
-          display: "flex",
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 18,
-          margin: "8px 0 10px 0",
-          marginTop: 50, // поднять на 50px выше (8 - 50 = -42)
-        }}>
+        <div
+          className="govchat-mobile-profile-actions"
+          style={{
+            display: "flex",
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 18,
+            margin: "32px 0 32px 0", // увеличено для видимости
+          }}
+        >
           {/* Профиль */}
           <button
             style={{
