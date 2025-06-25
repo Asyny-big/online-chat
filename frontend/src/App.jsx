@@ -580,7 +580,8 @@ function App() {
           alignItems: "center",
           justifyContent: "center",
           gap: 18,
-          margin: "8px 0 10px 0" // было 18px, стало 8px (подняли выше)
+          margin: "8px 0 10px 0",
+          marginTop: 8 - 50, // поднять на 50px выше (8 - 50 = -42)
         }}>
           {/* Профиль */}
           <button
@@ -605,7 +606,7 @@ function App() {
               <circle cx="13" cy="10" r="4" fill="#fff" />
               <ellipse cx="13" cy="19" rx="7" ry="4" fill="#fff" />
             </svg>
-            <span style={{ fontSize: 12, color: "#00c3ff", marginTop: 2 }}>Профиль</span>
+            {/* подпись убрана */}
           </button>
           {/* Кастомизация */}
           <button
@@ -635,28 +636,11 @@ function App() {
               <rect x="10" y="6" width="6" height="8" rx="2" fill="#fff" stroke="#ffb347" strokeWidth="1.5"/>
               <rect x="8" y="14" width="10" height="4" rx="2" fill="#ffb347" stroke="#fff" strokeWidth="1.5"/>
             </svg>
-            <span style={{ fontSize: 12, color: "#ffb347", marginTop: 2 }}>Тема</span>
+            {/* подпись убрана */}
           </button>
         </div>
         <div style={chatStyles.mobileMenuFooter}>
-          <button
-            style={{
-              ...chatStyles.logoutBtn,
-              marginTop: 10,
-              width: "100%",
-              border: "1px solid #ff7675",
-              color: "#ff7675",
-              background: "none",
-              fontSize: 15,
-              fontWeight: 600,
-            }}
-            onClick={() => {
-              localStorage.removeItem("token");
-              window.location.reload();
-            }}
-          >
-            Выйти
-          </button>
+          {/* Кнопка "Выйти" убрана из мобильного меню */}
         </div>
       </div>
     </div>
