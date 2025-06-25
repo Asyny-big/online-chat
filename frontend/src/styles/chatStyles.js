@@ -401,6 +401,45 @@ export const profileCloseBtn = {
   zIndex: 101,
 };
 
+export const profileSectionTitle = {
+  color: "#b2bec3",
+  fontWeight: 500,
+  fontSize: 15,
+  marginTop: 22,
+  marginBottom: 2,
+  letterSpacing: 0.2,
+};
+
+export const profileField = {
+  marginBottom: 6, // уменьшили отступ между полями
+  display: "flex",
+  flexDirection: "column",
+  gap: 2,
+};
+
+export const profileLabel = {
+  color: "#b2bec3",
+  fontWeight: 400,
+  fontSize: 14,
+  marginBottom: 0,
+};
+
+export const profileValue = {
+  color: "#fff",
+  fontWeight: 500,
+  fontSize: 16,
+  marginBottom: 0,
+  wordBreak: "break-word",
+};
+
+export const profilePhone = {
+  color: "#fff",
+  fontWeight: 500,
+  fontSize: 17,
+  letterSpacing: 0.5,
+  marginBottom: 0,
+};
+
 export const profileLogoutBtn = {
   marginTop: 0, // убран верхний отступ для выравнивания по горизонтали
   background: "#35363a",
@@ -415,6 +454,14 @@ export const profileLogoutBtn = {
   transition: "background 0.2s, color 0.2s",
   boxShadow: "0 2px 8px #0002",
   marginLeft: 0,
+};
+
+export const profileInfoNote = {
+  color: "#b2bec3",
+  fontSize: 13,
+  marginTop: 18,
+  textAlign: "center",
+  opacity: 0.8,
 };
 
 export const profileEditBtn = {
@@ -446,20 +493,6 @@ export const profileInput = {
   transition: "border 0.2s",
 };
 
-export const profileField = {
-  marginBottom: 6,
-  display: "flex",
-  flexDirection: "column",
-  gap: 2,
-};
-
-export const profileLabel = {
-  color: "#b2bec3",
-  fontWeight: 400,
-  fontSize: 14,
-  marginBottom: 0,
-};
-
 export const themes = [
   {
     name: "Классика",
@@ -482,6 +515,15 @@ export const themes = [
     chatBg: "#e3f6fd"
   }
 ];
+
+// Можно добавить стили для превью файлов и модального окна, если потребуется
+
+// Для кнопки записи используем attachBtn, можно добавить отдельный стиль при необходимости
+export const recordBtn = {
+  ...attachBtn,
+  background: "#fff",
+  color: "#222",
+};
 
 export const mobileHeader = {
   position: "fixed",
@@ -577,6 +619,37 @@ export const mobileMenuTitle = {
   color: "#00c3ff",
   textShadow: "0 2px 8px #0002",
   textAlign: "center",
+};
+
+export const mobileMenuBtnAction = {
+  background: "linear-gradient(90deg,#00c3ff,#3a7bd5)",
+  color: "#fff",
+  border: "none",
+  borderRadius: 8,
+  padding: "10px 0",
+  fontWeight: 600,
+  fontSize: 16,
+  cursor: "pointer",
+  marginBottom: 0,
+  marginTop: 0,
+  boxShadow: "0 2px 8px #00c3ff33",
+  transition: "background 0.2s, box-shadow 0.2s",
+  width: "100%",
+};
+
+export const mobileMenuBtnSecondary = {
+  background: "none",
+  color: "#00c3ff",
+  border: "1px solid #00c3ff",
+  borderRadius: 8,
+  padding: "10px 0",
+  fontWeight: 600,
+  fontSize: 16,
+  cursor: "pointer",
+  marginBottom: 0,
+  marginTop: 0,
+  transition: "background 0.2s, color 0.2s",
+  width: "100%",
 };
 
 // --- Адаптивные стили ---
