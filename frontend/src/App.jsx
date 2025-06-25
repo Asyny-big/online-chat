@@ -322,10 +322,10 @@ function App() {
         setError("Ошибка автоматического входа: не удалось получить reCAPTCHA");
       }
     } catch (e) {
-      setError(
-        e?.response?.data?.error ||
-          "Ошибка регистрации или входа"
-      );
+      let msg = "Ошибка регистрации или входа";
+      if (e?.response?.data?.error) msg = e.response.data.error;
+      else if (typeof e?.message === "string" && e.message) msg = e.message;
+      setError(msg);
     }
     setRegistering(false);
   };
@@ -349,10 +349,10 @@ function App() {
       localStorage.setItem("token", res.data.token);
       setToken(res.data.token);
     } catch (e) {
-      setError(
-        e?.response?.data?.error ||
-          "Неверный логин или пароль"
-      );
+      let msg = "Неверный логин или пароль";
+      if (e?.response?.data?.error) msg = e.response.data.error;
+      else if (typeof e?.message === "string" && e.message) msg = e.message;
+      setError(msg);
     }
     setRegistering(false);
   };

@@ -94,6 +94,9 @@ app.post('/api/register', async (req, res) => {
   if (uname.length > 15) { // исправлено с 20 на 15
     return res.status(400).json({ error: 'Имя пользователя не должно превышать 15 символов' });
   }
+  if (!pass) {
+    return res.status(400).json({ error: 'Пароль обязателен' });
+  }
   // Проверка уникальности 
   const exists = await User.findOne({ username: uname });
   if (exists) {
@@ -319,7 +322,7 @@ app.patch('/api/profile', auth, async (req, res) => {
   let token = null;
   // Проверка и изменение ника
   if (username && username !== user.username) {
-    if (username.length > 20) return res.status(400).json({ error: 'Имя пользователя не должно превышать 15 символов' });
+    if (username.length > 15) return res.status(400).json({ error: 'Имя пользователя не должно превышать 15 символов' });
     const exists = await User.findOne({ username });
     if (exists) return res.status(400).json({ error: 'Пользователь с таким именем уже существует' });
     user.username = username.trim();
