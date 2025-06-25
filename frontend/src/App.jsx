@@ -965,36 +965,35 @@ function App() {
           </div>
         )}
 
-        {/* --- Мобильная и десктопная строка ввода --- */}
-        {/* На мобильном аудиосообщение показываем над inputRow, на десктопе — внутри inputRow */}
-        {isMobile && audioBlob && audioUrl && (
+        {/* --- Блок предпрослушивания и отправки голосового сообщения --- */}
+        {audioBlob && audioUrl && (
           <div style={{
             display: "flex",
             alignItems: "center",
-            gap: 6,
+            gap: 8,
             margin: "8px 0 0 0",
             background: "#35363a",
             borderRadius: 8,
-            padding: "6px 10px",
-            maxWidth: 320
+            padding: isMobile ? "6px 10px" : "8px 16px",
+            maxWidth: 420
           }}>
-            <audio src={audioUrl} controls style={{ height: 24 }} />
+            <audio src={audioUrl} controls style={{ height: isMobile ? 24 : 32, maxWidth: 220, borderRadius: 8 }} />
             <button
               style={{
                 background: "#ff7675",
                 color: "#fff",
                 border: "none",
                 borderRadius: 8,
-                padding: "4px 8px",
+                padding: isMobile ? "4px 8px" : "6px 14px",
                 fontWeight: 600,
-                fontSize: 12,
+                fontSize: isMobile ? 13 : 15,
                 cursor: "pointer",
                 marginLeft: 4
               }}
               onClick={sendAudioMessage}
               title="Отправить голосовое"
             >
-              <span>➤</span>
+              {isMobile ? <span>➤</span> : "Отправить"}
             </button>
             <button
               style={{
@@ -1002,7 +1001,7 @@ function App() {
                 color: "#ff7675",
                 border: "none",
                 fontWeight: 700,
-                fontSize: 14,
+                fontSize: isMobile ? 16 : 18,
                 cursor: "pointer"
               }}
               title="Удалить запись"
