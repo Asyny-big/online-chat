@@ -339,18 +339,18 @@ export const profilePopup = {
   left: 0,
   bottom: 0,
   top: "auto",
-  width: 370,
-  minWidth: 320,
-  maxWidth: 420,
+  width: 280,
+  minWidth: 180,
+  maxWidth: 320,
   height: "auto",
-  maxHeight: "80vh",
+  maxHeight: "70vh",
   background: "#232526",
   color: "#fff",
-  borderRadius: "18px 18px 0 0",
-  boxShadow: "2px 4px 24px #00c3ff44",
-  padding: "28px 32px 18px 32px",
+  borderRadius: "12px 12px 0 0",
+  boxShadow: "2px 4px 18px #00c3ff44",
+  padding: "16px 14px 10px 14px",
   zIndex: 100,
-  fontSize: 16,
+  fontSize: 14,
   display: "flex",
   flexDirection: "column",
   gap: 0,
@@ -691,16 +691,19 @@ export const responsive = `
     min-height: 0 !important;
     overflow-y: auto !important;
   }
-  /* --- Меньше окно профиля справа --- */
+  /* --- Меньше окно профиля по центру на мобильном --- */
   .govchat-profile-popup {
-    left: 0 !important;
-    right: 0 !important;
-    margin: 0 auto !important;
-    width: 94vw !important;
+    left: 50% !important;
+    top: 50% !important;
+    right: auto !important;
+    bottom: auto !important;
+    transform: translate(-50%, -50%) !important;
+    margin: 0 !important;
+    width: 92vw !important;
     max-width: 340px !important;
     min-width: 0 !important;
-    height: 92vh !important;
-    max-height: 92vh !important;
+    height: auto !important;
+    max-height: 80vh !important;
     border-radius: 14px !important;
     padding: 10px 6px 8px 6px !important;
     box-shadow: 0 2px 16px #00c3ff33 !important;
