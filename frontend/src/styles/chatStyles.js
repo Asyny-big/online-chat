@@ -336,8 +336,8 @@ export const profileBtn = {
 
 export const profilePopup = {
   position: "fixed",
-  left: 0, // без отступа от левого края
-  bottom: 0, // без отступа от нижнего края
+  left: 0,
+  bottom: 0,
   top: "auto",
   width: 370,
   minWidth: 320,
@@ -346,7 +346,7 @@ export const profilePopup = {
   maxHeight: "80vh",
   background: "#232526",
   color: "#fff",
-  borderRadius: "18px 18px 0 0", // только верхние углы скруглены
+  borderRadius: "18px 18px 0 0",
   boxShadow: "2px 4px 24px #00c3ff44",
   padding: "28px 32px 18px 32px",
   zIndex: 100,
@@ -665,6 +665,9 @@ export const responsive = `
     padding: 0 !important;
     min-width: 100vw !important;
     min-height: 100vh !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    overflow: hidden !important;
   }
   .govchat-sidebar {
     display: none !important;
@@ -672,4 +675,31 @@ export const responsive = `
   .govchat-mobile-header {
     display: flex !important;
   }
-}`;
+  .govchat-chat-container {
+    padding-top: 56px !important;
+    height: calc(100vh - 56px) !important;
+    max-height: calc(100vh - 56px) !important;
+    overflow: hidden !important;
+  }
+  .govchat-chat-box {
+    max-height: calc(100vh - 180px) !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+  }
+  /* --- Меньше окно профиля справа --- */
+  .govchat-profile-popup {
+    left: 0 !important;
+    right: 0 !important;
+    margin: 0 auto !important;
+    width: 94vw !important;
+    max-width: 340px !important;
+    min-width: 0 !important;
+    height: 92vh !important;
+    max-height: 92vh !important;
+    border-radius: 14px !important;
+    padding: 10px 6px 8px 6px !important;
+    box-shadow: 0 2px 16px #00c3ff33 !important;
+    font-size: 15px !important;
+  }
+}
+`;
