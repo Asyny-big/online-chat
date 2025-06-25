@@ -714,7 +714,7 @@ export const responsive = `
     position: fixed !important;
     left: 0 !important;
     right: 0 !important;
-    bottom: 60px !important; /* поднято выше на 60px от нижнего края */
+    bottom: 20px !important; /* поднято выше на 60px от нижнего края */
     width: 100vw !important;
     background: rgba(40,42,44,0.98) !important;
     z-index: 20 !important;
@@ -724,8 +724,8 @@ export const responsive = `
     box-shadow: none !important;
   }
   .govchat-mobile-profile-actions {
-    margin-top: 64px !important;  /* поднято выше */
-    margin-bottom: 48px !important; /* поднято выше */
+    margin-top: 164px !important;  /* поднято выше */
+    margin-bottom: 148px !important; /* поднято выше */
     gap: 18px !important;
     display: flex !important;
     flex-direction: row !important;
