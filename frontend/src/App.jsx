@@ -534,6 +534,72 @@ function App() {
           aria-label="Закрыть"
         >✕</button>
         <div style={chatStyles.mobileMenuTitle}>Каналы</div>
+        {/* Кнопки профиля и кастомизации теперь сразу под заголовком */}
+        <div
+          className="govchat-mobile-profile-actions"
+          style={{
+            display: "flex",
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 18,
+            margin: "32px 0 16px 0",
+          }}
+        >
+          {/* Профиль */}
+          <button
+            style={{
+              ...chatStyles.profileBtn,
+              width: 48,
+              height: 48,
+              fontSize: 24,
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center"
+            }}
+            onClick={() => {
+              setShowProfile(true);
+              setMobileMenuOpen(false);
+              setEditMode(false);
+            }}
+            title="Профиль"
+          >
+            <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
+              <circle cx="13" cy="13" r="13" fill="#00c3ff" />
+              <circle cx="13" cy="10" r="4" fill="#fff" />
+              <ellipse cx="13" cy="19" rx="7" ry="4" fill="#fff" />
+            </svg>
+          </button>
+          {/* Кастомизация */}
+          <button
+            style={{
+              ...chatStyles.profileBtn,
+              width: 48,
+              height: 48,
+              fontSize: 24,
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              background: "none",
+              border: "none",
+              marginRight: 0,
+              marginLeft: 0,
+              boxShadow: "0 2px 8px #00c3ff33"
+            }}
+            onClick={() => {
+              setShowCustomizer(true);
+              setMobileMenuOpen(false);
+            }}
+            title="Кастомизация"
+          >
+            <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
+              <circle cx="13" cy="13" r="13" fill="#ffb347" />
+              <path d="M7 19c0-2 2-4 4-4s4 2 4 4" stroke="#fff" strokeWidth="2" />
+              <rect x="10" y="6" width="6" height="8" rx="2" fill="#fff" stroke="#ffb347" strokeWidth="1.5"/>
+              <rect x="8" y="14" width="10" height="4" rx="2" fill="#ffb347" stroke="#fff" strokeWidth="1.5"/>
+            </svg>
+          </button>
+        </div>
         <div style={chatStyles.mobileMenuChannels}>
           {channels.length === 0 ? (
             <div style={{ color: "#b2bec3", marginBottom: 8 }}>
@@ -572,74 +638,6 @@ function App() {
               </button>
             </div>
           )}
-        </div>
-        {/* Кнопки профиля и кастомизации как в десктопе */}
-        <div
-          className="govchat-mobile-profile-actions"
-          style={{
-            display: "flex",
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 18,
-            margin: "32px 0 32px 0", // увеличено для видимости
-          }}
-        >
-          {/* Профиль */}
-          <button
-            style={{
-              ...chatStyles.profileBtn,
-              width: 48,
-              height: 48,
-              fontSize: 24,
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center"
-            }}
-            onClick={() => {
-              setShowProfile(true);
-              setMobileMenuOpen(false);
-              setEditMode(false);
-            }}
-            title="Профиль"
-          >
-            <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
-              <circle cx="13" cy="13" r="13" fill="#00c3ff" />
-              <circle cx="13" cy="10" r="4" fill="#fff" />
-              <ellipse cx="13" cy="19" rx="7" ry="4" fill="#fff" />
-            </svg>
-            {/* подпись убрана */}
-          </button>
-          {/* Кастомизация */}
-          <button
-            style={{
-              ...chatStyles.profileBtn,
-              width: 48,
-              height: 48,
-              fontSize: 24,
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center",
-              background: "none",
-              border: "none",
-              marginRight: 0,
-              marginLeft: 0,
-              boxShadow: "0 2px 8px #00c3ff33"
-            }}
-            onClick={() => {
-              setShowCustomizer(true);
-              setMobileMenuOpen(false);
-            }}
-            title="Кастомизация"
-          >
-            <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
-              <circle cx="13" cy="13" r="13" fill="#ffb347" />
-              <path d="M7 19c0-2 2-4 4-4s4 2 4 4" stroke="#fff" strokeWidth="2" />
-              <rect x="10" y="6" width="6" height="8" rx="2" fill="#fff" stroke="#ffb347" strokeWidth="1.5"/>
-              <rect x="8" y="14" width="10" height="4" rx="2" fill="#ffb347" stroke="#fff" strokeWidth="1.5"/>
-            </svg>
-            {/* подпись убрана */}
-          </button>
         </div>
         <div style={chatStyles.mobileMenuFooter}>
           {/* Кнопка "Выйти" убрана из мобильного меню */}
