@@ -714,7 +714,7 @@ export const responsive = `
     position: fixed !important;
     left: 0 !important;
     right: 0 !important;
-    bottom: 10px !important; /* поднято выше на 60px от нижнего края */
+    bottom: 2px !important; /* поднято выше на 60px от нижнего края */
     width: 100vw !important;
     background: rgba(40,42,44,0.98) !important;
     z-index: 20 !important;
