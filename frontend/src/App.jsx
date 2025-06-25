@@ -765,7 +765,8 @@ function App() {
           justifyContent: "center",
           width: "100%",
           marginBottom: 10,
-          minHeight: 32
+          minHeight: 32,
+          marginTop: isMobile ? 18 : 0 // добавлено для мобильных
         }}>
           <div style={chatStyles.chatTitle}>Чат</div>
         </div>
@@ -1318,16 +1319,16 @@ function App() {
               ...chatStyles.profilePopup,
               ...(isMobile
                 ? {
-                    // Центрируем и делаем окно на полэкрана
+                    // Центрируем и делаем окно меньше на мобильных
                     position: "fixed",
                     left: "50%",
                     top: "50%",
                     transform: "translate(-50%, -50%)",
                     width: "90vw",
-                    maxWidth: 400,
+                    maxWidth: 340,
                     minWidth: 0,
-                    height: "50vh",
-                    maxHeight: "60vh",
+                    height: "auto",
+                    maxHeight: "70vh",
                     minHeight: 320,
                     borderRadius: 16,
                     padding: "16px 8px 8px 8px",
