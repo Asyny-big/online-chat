@@ -3,7 +3,7 @@ import axios from "axios";
 import * as chatStyles from "./styles/chatStyles";
 import io from "socket.io-client";
 
-const API_URL = "http://localhost:5000/api";
+const API_URL = "/api";
 
 function parseToken(token) {
   if (!token) return "";
@@ -182,7 +182,7 @@ function App() {
       .then((res) => setChannels(res.data))
       .catch(() => setChannels([]));
 
-    socketRef.current = io("http://localhost:5000", {
+    socketRef.current = io("/", {
       auth: { token },
     });
 
