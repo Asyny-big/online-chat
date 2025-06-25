@@ -665,6 +665,54 @@ function App() {
               </div>
             )}
           </div>
+          {/* --- Кнопки профиля и кастомизации для десктопа --- */}
+          <div style={{
+            ...chatStyles.profileBtnBox,
+            left: "auto",
+            right: 178,
+            bottom: 70,
+            display: "flex",
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 10,
+            zIndex: 10
+          }}>
+            {/* Кнопка профиля */}
+            <button
+              style={chatStyles.profileBtn}
+              onClick={() => {
+                setShowProfile(v => !v);
+                setEditMode(false);
+              }}
+              title="Профиль"
+            >
+              <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
+                <circle cx="13" cy="13" r="13" fill="#00c3ff" />
+                <circle cx="13" cy="10" r="4" fill="#fff" />
+                <ellipse cx="13" cy="19" rx="7" ry="4" fill="#fff" />
+              </svg>
+            </button>
+            {/* Кнопка кастомизации */}
+            <button
+              style={{
+                ...chatStyles.profileBtn,
+                background: "none",
+                border: "none",
+                marginRight: 0,
+                marginLeft: 0,
+                boxShadow: "0 2px 8px #00c3ff33"
+              }}
+              onClick={() => setShowCustomizer(v => !v)}
+              title="Кастомизация"
+            >
+              <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
+                <circle cx="13" cy="13" r="13" fill="#ffb347" />
+                <path d="M7 19c0-2 2-4 4-4s4 2 4 4" stroke="#fff" strokeWidth="2" />
+                <rect x="10" y="6" width="6" height="8" rx="2" fill="#fff" stroke="#ffb347" strokeWidth="1.5"/>
+                <rect x="8" y="14" width="10" height="4" rx="2" fill="#ffb347" stroke="#fff" strokeWidth="1.5"/>
+              </svg>
+            </button>
+          </div>
         </div>
       )}
       {/* Чат всегда на экране, но с отступом сверху на мобиле */}
@@ -852,11 +900,30 @@ function App() {
           </div>
         )}
 
-        <div style={chatStyles.inputRow} className="govchat-input-row">
-          {/* Кнопка выбора файла */}
+        {/* --- Мобильная и десктопная строка ввода --- */}
+        <div
+          style={{
+            ...chatStyles.inputRow,
+            ...(isMobile ? { padding: "6px 2vw 6px 2vw" } : {}),
+          }}
+          className="govchat-input-row"
+        >
+          {/* Кнопка вложения */}
           <button
             style={{
-              ...(attachBtnHover ? { ...chatStyles.attachBtn, ...chatStyles.attachBtnHover } : chatStyles.attachBtn),
+              ...(attachBtnHover
+                ? { ...chatStyles.attachBtn, ...chatStyles.attachBtnHover }
+                : chatStyles.attachBtn),
+              ...(isMobile
+                ? {
+                    width: 34,
+                    height: 34,
+                    minWidth: 34,
+                    minHeight: 34,
+                    fontSize: 18,
+                    marginRight: 2,
+                  }
+                : {}),
             }}
             type="button"
             onClick={() => fileInputRefChat.current && fileInputRefChat.current.click()}
@@ -866,7 +933,12 @@ function App() {
             onMouseLeave={() => setAttachBtnHover(false)}
             disabled={false}
           >
-            <span style={{ color: "#222", fontSize: 22, display: "flex", alignItems: "center" }}>📎</span>
+            <span style={{
+              color: "#222",
+              fontSize: isMobile ? 18 : 22,
+              display: "flex",
+              alignItems: "center"
+            }}>📎</span>
           </button>
           <input
             ref={fileInputRefChat}
@@ -876,8 +948,68 @@ function App() {
               if (e.target.files?.[0]) setFileToSend(e.target.files[0]);
             }}
           />
+          {/* Кнопка записи голосового (всегда показывать, уменьшить на мобиле) */}
+          <button
+            style={{
+              ...chatStyles.attachBtn,
+              background: recording ? "#ff7675" : "#fff",
+              color: recording ? "#fff" : "#222",
+              marginRight: 2,
+              marginLeft: 0,
+              border: recording ? "2px solid #ff7675" : "none",
+              ...(isMobile
+                ? {
+                    width: 34,
+                    height: 34,
+                    minWidth: 34,
+                    minHeight: 34,
+                    fontSize: 18,
+                  }
+                : {}),
+            }}
+            type="button"
+            onClick={() => {
+              if (!recording) startRecording();
+              else stopRecording();
+            }}
+            title={recording ? "Остановить запись" : "Записать голосовое"}
+            disabled={fileToSend || audioBlob}
+          >
+            {recording ? (
+              <span style={{
+                color: "#fff",
+                fontSize: isMobile ? 18 : 22,
+                display: "flex",
+                alignItems: "center"
+              }}>⏺</span>
+            ) : (
+              <span style={{
+                color: "#222",
+                fontSize: isMobile ? 18 : 22,
+                display: "flex",
+                alignItems: "center"
+              }}>🎤</span>
+            )}
+          </button>
+          {/* Отображение времени записи */}
+          {recording && (
+            <span style={{
+              color: "#ff7675",
+              fontWeight: 600,
+              minWidth: isMobile ? 28 : 40,
+              fontSize: isMobile ? 13 : 16,
+            }}>
+              {`${Math.floor(recordTime / 60)
+                .toString()
+                .padStart(2, "0")}:${(recordTime % 60).toString().padStart(2, "0")}`}
+            </span>
+          )}
+          {/* Поле ввода */}
           <input
-            style={chatStyles.input}
+            style={{
+              ...chatStyles.input,
+              ...(isMobile ? { fontSize: 14, padding: "8px 10px" } : {}),
+            }}
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => {
@@ -893,65 +1025,62 @@ function App() {
                 : "Выберите канал"
             }
           />
-          <button
-            style={chatStyles.sendBtn}
-            onClick={handleSend}
-            disabled={!selectedChannel || (!input.trim() && !fileToSend)}
-          >
-            Отправить
-          </button>
-          {/* Кнопка записи голосового */}
+          {/* Кнопка отправки */}
           <button
             style={{
-              ...chatStyles.attachBtn,
-              background: recording ? "#ff7675" : "#fff",
-              color: recording ? "#fff" : "#222",
-              marginRight: 2,
-              marginLeft: 0,
-              border: recording ? "2px solid #ff7675" : "none"
+              ...(isMobile
+                ? {
+                    background: "linear-gradient(90deg,#00c3ff,#3a7bd5)",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: 8,
+                    width: 34,
+                    height: 34,
+                    minWidth: 34,
+                    minHeight: 34,
+                    padding: 0,
+                    fontSize: 18,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    boxShadow: "0 2px 8px #00c3ff33",
+                    marginLeft: 2,
+                  }
+                : chatStyles.sendBtn),
             }}
-            type="button"
-            onClick={() => {
-              if (!recording) startRecording();
-              else stopRecording();
-            }}
-            title={recording ? "Остановить запись" : "Записать голосовое"}
-            disabled={fileToSend || audioBlob}
+            onClick={handleSend}
+            disabled={!selectedChannel || (!input.trim() && !fileToSend)}
+            title="Отправить"
           >
-            {recording ? (
-              <span style={{ color: "#fff", fontSize: 22, display: "flex", alignItems: "center" }}>⏺</span>
-            ) : (
-              <span style={{ color: "#222", fontSize: 22, display: "flex", alignItems: "center" }}>🎤</span>
-            )}
+            {isMobile
+              ? <span style={{ fontSize: 18, color: "#fff" }}>➤</span>
+              : "Отправить"}
           </button>
-          {/* Отображение времени записи */}
-          {recording && (
-            <span style={{ color: "#ff7675", fontWeight: 600, minWidth: 40 }}>
-              {`${Math.floor(recordTime / 60)
-                .toString()
-                .padStart(2, "0")}:${(recordTime % 60).toString().padStart(2, "0")}`}
-            </span>
-          )}
           {/* Отображение превью аудиосообщения */}
           {audioBlob && audioUrl && (
-            <span style={{ display: "flex", alignItems: "center", gap: 6, marginRight: 8 }}>
-              <audio src={audioUrl} controls style={{ height: 32 }} />
+            <span style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              marginRight: isMobile ? 2 : 8
+            }}>
+              <audio src={audioUrl} controls style={{ height: isMobile ? 24 : 32 }} />
               <button
                 style={{
                   background: "#ff7675",
                   color: "#fff",
                   border: "none",
                   borderRadius: 8,
-                  padding: "6px 12px",
+                  padding: isMobile ? "4px 8px" : "6px 12px",
                   fontWeight: 600,
-                  fontSize: 14,
+                  fontSize: isMobile ? 12 : 14,
                   cursor: "pointer",
                   marginLeft: 4
                 }}
                 onClick={sendAudioMessage}
                 title="Отправить голосовое"
               >
-                Отправить
+                {isMobile ? <span>➤</span> : "Отправить"}
               </button>
               <button
                 style={{
@@ -959,7 +1088,7 @@ function App() {
                   color: "#ff7675",
                   border: "none",
                   fontWeight: 700,
-                  fontSize: 16,
+                  fontSize: isMobile ? 14 : 16,
                   cursor: "pointer"
                 }}
                 title="Удалить запись"
