@@ -923,26 +923,77 @@ function App() {
         </div>
         {/* Превью выбранного файла теперь над inputRow (и на мобильном, и на десктопе) */}
         {fileToSend && (
-          <div style={{
-            margin: "0 0 8px 0",
-            padding: "6px 10px",
-            background: "#35363a",
-            borderRadius: 8,
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            maxWidth: 320
-          }}>
+          <div
+            style={{
+              ...(isMobile
+                ? {
+                    position: "fixed",
+                    left: 0,
+                    right: 0,
+                    bottom: 58, // чуть выше inputRow
+                    zIndex: 1002,
+                    background: "#35363a",
+                    borderRadius: "12px 12px 0 0",
+                    padding: "10px 16px 10px 16px",
+                    maxWidth: "100vw",
+                    width: "100vw",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 14,
+                    boxShadow: "0 -2px 12px #0005",
+                    justifyContent: "flex-start",
+                    minHeight: 56,
+                  }
+                : {
+                    margin: "0 0 8px 0",
+                    padding: "6px 10px",
+                    background: "#35363a",
+                    borderRadius: 8,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    maxWidth: 320,
+                  }),
+            }}
+          >
             {fileToSend.type.startsWith("image/") && filePreviewUrl && (
-              <img src={filePreviewUrl} alt="preview" style={{ maxWidth: 48, maxHeight: 48, borderRadius: 6 }} />
+              <img
+                src={filePreviewUrl}
+                alt="preview"
+                style={{
+                  maxWidth: isMobile ? 72 : 48,
+                  maxHeight: isMobile ? 72 : 48,
+                  borderRadius: 8,
+                  objectFit: "cover",
+                }}
+              />
             )}
             {fileToSend.type.startsWith("video/") && filePreviewUrl && (
-              <video src={filePreviewUrl} style={{ maxWidth: 48, maxHeight: 48, borderRadius: 6 }} controls />
+              <video
+                src={filePreviewUrl}
+                style={{
+                  maxWidth: isMobile ? 72 : 48,
+                  maxHeight: isMobile ? 72 : 48,
+                  borderRadius: 8,
+                  objectFit: "cover",
+                }}
+                controls
+              />
             )}
             {!fileToSend.type.startsWith("image/") && !fileToSend.type.startsWith("video/") && (
-              <span role="img" aria-label="file">📎</span>
+              <span role="img" aria-label="file" style={{ fontSize: isMobile ? 32 : 22 }}>📎</span>
             )}
-            <span style={{ color: "#fff", fontSize: 14, wordBreak: "break-all" }}>{fileToSend.name}</span>
+            <span
+              style={{
+                color: "#fff",
+                fontSize: isMobile ? 16 : 14,
+                wordBreak: "break-all",
+                flex: 1,
+                minWidth: 0,
+              }}
+            >
+              {fileToSend.name}
+            </span>
             <button
               style={{
                 marginLeft: "auto",
@@ -950,8 +1001,9 @@ function App() {
                 border: "none",
                 color: "#ff7675",
                 fontWeight: 700,
-                fontSize: 16,
-                cursor: "pointer"
+                fontSize: isMobile ? 22 : 16,
+                cursor: "pointer",
+                padding: 0,
               }}
               title="Удалить файл"
               onClick={() => {
