@@ -164,9 +164,9 @@ export const inputRow = {
   gap: 8,
   marginTop: 8,
   marginBottom: 8,
-  position: "sticky", // закрепить
+  position: "sticky",
   bottom: 0,
-  background: "rgba(40,42,44,0.98)", // совпадает с chatBox
+  background: "rgba(40,42,44,0.98)",
   zIndex: 2,
   padding: "8px 0 8px 0",
 };
@@ -700,6 +700,32 @@ export const responsive = `
     padding: 10px 6px 8px 6px !important;
     box-shadow: 0 2px 16px #00c3ff33 !important;
     font-size: 15px !important;
+    background: #232526 !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+  /* --- Поднять строку ввода выше на мобильном --- */
+  .govchat-input-row {
+    position: fixed !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 12px !important;
+    width: 100vw !important;
+    background: rgba(40,42,44,0.98) !important;
+    z-index: 20 !important;
+    margin-bottom: 0 !important;
+    border-radius: 0 !important;
+    padding-bottom: 0 !important;
+  }
+  /* --- Поднять значки профиля и кастомизации выше в мобильном меню --- */
+  .govchat-mobile-profile-actions {
+    margin-top: 10px !important;
+    margin-bottom: 18px !important;
+    gap: 18px !important;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: center !important;
   }
 }
 `;
