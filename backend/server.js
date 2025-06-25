@@ -8,6 +8,7 @@ const bcrypt = require('bcryptjs');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const axios = require('axios'); // добавить импорт axios для проверки reCAPTCHA
 
 const app = express();
 const server = http.createServer(app);
@@ -65,21 +66,38 @@ function auth(req, res, next) {
 
 // --- Регистрация и вход ---
 app.post('/api/register', async (req, res) => {
-  let { username, password } = req.body;
-  if (!username) {
+  let { username, password, recaptcha } = req.body;
+  // Проверка reCAPTCHA
+  if (!recaptcha) return res.status(400).json({ error: 'reCAPTCHA не пройдена' });
+  try {
+    const verifyRes = await axios.post(
+      `https://www.google.com/recaptcha/api/siteverify`,
+      new URLSearchParams({
+        secret: '6Lddfm0rAAAAAOcsDbF3F-f38QZQGeOUeI2EKGlE',
+        response: recaptcha,
+      })
+    );
+    if (!verifyRes.data.success) {
+      return res.status(400).json({ error: 'Ошибка reCAPTCHA' });
+    }
+  } catch {
+    return res.status(400).json({ error: 'Ошибка проверки reCAPTCHA' });
+  }
+  let { username: uname, password: pass } = req.body;
+  if (!uname) {
     return res.status(400).json({ error: 'Имя пользователя обязательно' });
   }
-  username = username.trim();
-  if (username.length > 20) {
+  uname = uname.trim();
+  if (uname.length > 20) {
     return res.status(400).json({ error: 'Имя пользователя не должно превышать 15 символов' });
   }
   // Проверка уникальности 
-  const exists = await User.findOne({ username });
+  const exists = await User.findOne({ username: uname });
   if (exists) {
     return res.status(400).json({ error: 'Пользователь с таким именем уже существует' });
   }
   try {
-    const hash = await bcrypt.hash(password, 10);
+    const hash = await bcrypt.hash(pass, 10);
     const fs = require('fs');
     const defaultSource = path.join(__dirname, 'avatar-default.png');
     const defaultDest = path.join(__dirname, 'uploads', 'avatar-default.png');
@@ -92,7 +110,7 @@ app.post('/api/register', async (req, res) => {
     }
     const defaultAvatar = "/uploads/avatar-default.png";
     const user = new User({
-      username,
+      username: uname,
       password: hash,
       online: false,
       avatarUrl: fs.existsSync(defaultDest) ? defaultAvatar : null,
@@ -111,7 +129,23 @@ app.post('/api/register', async (req, res) => {
   }
 });
 app.post('/api/login', async (req, res) => {
-  const { username, password } = req.body;
+  const { username, password, recaptcha } = req.body;
+  // Проверка reCAPTCHA
+  if (!recaptcha) return res.status(400).json({ error: 'reCAPTCHA не пройдена' });
+  try {
+    const verifyRes = await axios.post(
+      `https://www.google.com/recaptcha/api/siteverify`,
+      new URLSearchParams({
+        secret: '6Lddfm0rAAAAAOcsDbF3F-f38QZQGeOUeI2EKGlE',
+        response: recaptcha,
+      })
+    );
+    if (!verifyRes.data.success) {
+      return res.status(400).json({ error: 'Ошибка reCAPTCHA' });
+    }
+  } catch {
+    return res.status(400).json({ error: 'Ошибка проверки reCAPTCHA' });
+  }
   const user = await User.findOne({ username });
   if (!user || !(await bcrypt.compare(password, user.password)))
     return res.status(401).json({ error: 'Неверные данные' });

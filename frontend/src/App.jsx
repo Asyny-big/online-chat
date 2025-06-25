@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import * as chatStyles from "./styles/chatStyles";
 import io from "socket.io-client";
+import ReCAPTCHA from "react-google-recaptcha";
 
 const API_URL = "/api";
 
@@ -70,6 +71,7 @@ function App() {
   const [audioUrl, setAudioUrl] = useState(null);
   const recordTimerRef = useRef(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [recaptchaToken, setRecaptchaToken] = useState("");
 
   // Функция для старта записи аудио
   const startRecording = async () => {
@@ -292,15 +294,22 @@ function App() {
     e.preventDefault();
     setError("");
     setRegistering(true);
+    if (!recaptchaToken) {
+      setError("Пожалуйста, подтвердите, что вы не робот");
+      setRegistering(false);
+      return;
+    }
     try {
       await axios.post(`${API_URL}/register`, {
         username,
         password,
+        recaptcha: recaptchaToken,
       });
       // После успешной регистрации сразу логиним
       const res = await axios.post(`${API_URL}/login`, {
         username,
         password,
+        recaptcha: recaptchaToken,
       });
       localStorage.setItem("token", res.data.token);
       setToken(res.data.token);
@@ -318,10 +327,16 @@ function App() {
     e.preventDefault();
     setError("");
     setRegistering(true);
+    if (!recaptchaToken) {
+      setError("Пожалуйста, подтвердите, что вы не робот");
+      setRegistering(false);
+      return;
+    }
     try {
       const res = await axios.post(`${API_URL}/login`, {
         username,
         password,
+        recaptcha: recaptchaToken,
       });
       localStorage.setItem("token", res.data.token);
       setToken(res.data.token);
@@ -475,10 +490,18 @@ function App() {
               required
               autoComplete="current-password"
             />
+            {/* reCAPTCHA */}
+            <div style={{ margin: "12px 0", display: "flex", justifyContent: "center" }}>
+              <ReCAPTCHA
+                sitekey="6Lddfm0rAAAAAGiUK6xobnuL-5YsdM3eFWbykEB9"
+                onChange={token => setRecaptchaToken(token)}
+                onExpired={() => setRecaptchaToken("")}
+              />
+            </div>
             <button
               style={chatStyles.authBtn}
               type="submit"
-              disabled={registering}
+              disabled={registering || !recaptchaToken}
             >
               {authMode === "register" ? "Зарегистрироваться" : "Войти"}
             </button>
@@ -489,6 +512,7 @@ function App() {
             onClick={() => {
               setAuthMode(authMode === "register" ? "login" : "register");
               setError("");
+              setRecaptchaToken("");
             }}
           >
             {authMode === "register" ? "Войти" : "Регистрация"}
