@@ -306,7 +306,9 @@ io.on('connection', (socket) => {
 });
 
 // --- Запуск ---
-mongoose.connect('mongodb://localhost:27017/chat', { useNewUrlParser: true, useUnifiedTopology: true })
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://sanya210105:KBu09c0aYFWCdBaU@cluster0.fav8tsg.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0';
+
+mongoose.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true })
   .then(() => {
     const PORT = process.env.PORT || 5000;
     server.listen(PORT, () => console.log(`Сервер запущен на ${PORT}`));
