@@ -930,19 +930,19 @@ function App() {
                     position: "fixed",
                     left: 0,
                     right: 0,
-                    bottom: 58, // чуть выше inputRow
+                    bottom: 58,
                     zIndex: 1002,
                     background: "#35363a",
                     borderRadius: "12px 12px 0 0",
-                    padding: "10px 16px 10px 16px",
+                    padding: "6px 8px 6px 8px", // уменьшили паддинги
                     maxWidth: "100vw",
                     width: "100vw",
                     display: "flex",
                     alignItems: "center",
-                    gap: 14,
+                    gap: 10, // уменьшили gap
                     boxShadow: "0 -2px 12px #0005",
                     justifyContent: "flex-start",
-                    minHeight: 56,
+                    minHeight: 44, // уменьшили высоту
                   }
                 : {
                     margin: "0 0 8px 0",
@@ -954,66 +954,106 @@ function App() {
                     gap: 10,
                     maxWidth: 320,
                   }),
+              position: isMobile ? "fixed" : undefined,
             }}
           >
-            {fileToSend.type.startsWith("image/") && filePreviewUrl && (
-              <img
-                src={filePreviewUrl}
-                alt="preview"
+            {/* Кнопка крестика для отмены - на мобильном абсолютная слева */}
+            {isMobile && (
+              <button
                 style={{
-                  maxWidth: isMobile ? 72 : 48,
-                  maxHeight: isMobile ? 72 : 48,
-                  borderRadius: 8,
-                  objectFit: "cover",
+                  position: "absolute",
+                  left: 8,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  background: "none",
+                  border: "none",
+                  color: "#ff7675",
+                  fontWeight: 700,
+                  fontSize: 22,
+                  cursor: "pointer",
+                  padding: 0,
+                  zIndex: 2,
                 }}
-              />
+                title="Удалить файл"
+                onClick={() => {
+                  setFileToSend(null);
+                  setFilePreviewUrl(null);
+                  if (fileInputRefChat.current) fileInputRefChat.current.value = "";
+                }}
+              >
+                ✕
+              </button>
             )}
-            {fileToSend.type.startsWith("video/") && filePreviewUrl && (
-              <video
-                src={filePreviewUrl}
+            {/* Сдвигаем содержимое вправо если мобильный */}
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              width: "100%",
+              marginLeft: isMobile ? 36 : 0, // отступ под крестик
+            }}>
+              {fileToSend.type.startsWith("image/") && filePreviewUrl && (
+                <img
+                  src={filePreviewUrl}
+                  alt="preview"
+                  style={{
+                    maxWidth: isMobile ? 56 : 48, // уменьшили размер
+                    maxHeight: isMobile ? 56 : 48,
+                    borderRadius: 8,
+                    objectFit: "cover",
+                  }}
+                />
+              )}
+              {fileToSend.type.startsWith("video/") && filePreviewUrl && (
+                <video
+                  src={filePreviewUrl}
+                  style={{
+                    maxWidth: isMobile ? 56 : 48,
+                    maxHeight: isMobile ? 56 : 48,
+                    borderRadius: 8,
+                    objectFit: "cover",
+                  }}
+                  controls
+                />
+              )}
+              {!fileToSend.type.startsWith("image/") && !fileToSend.type.startsWith("video/") && (
+                <span role="img" aria-label="file" style={{ fontSize: isMobile ? 26 : 22 }}>📎</span>
+              )}
+              <span
                 style={{
-                  maxWidth: isMobile ? 72 : 48,
-                  maxHeight: isMobile ? 72 : 48,
-                  borderRadius: 8,
-                  objectFit: "cover",
+                  color: "#fff",
+                  fontSize: isMobile ? 14 : 14,
+                  wordBreak: "break-all",
+                  flex: 1,
+                  minWidth: 0,
                 }}
-                controls
-              />
-            )}
-            {!fileToSend.type.startsWith("image/") && !fileToSend.type.startsWith("video/") && (
-              <span role="img" aria-label="file" style={{ fontSize: isMobile ? 32 : 22 }}>📎</span>
-            )}
-            <span
-              style={{
-                color: "#fff",
-                fontSize: isMobile ? 16 : 14,
-                wordBreak: "break-all",
-                flex: 1,
-                minWidth: 0,
-              }}
-            >
-              {fileToSend.name}
-            </span>
-            <button
-              style={{
-                marginLeft: "auto",
-                background: "none",
-                border: "none",
-                color: "#ff7675",
-                fontWeight: 700,
-                fontSize: isMobile ? 22 : 16,
-                cursor: "pointer",
-                padding: 0,
-              }}
-              title="Удалить файл"
-              onClick={() => {
-                setFileToSend(null);
-                setFilePreviewUrl(null);
-                if (fileInputRefChat.current) fileInputRefChat.current.value = "";
-              }}
-            >
-              ✕
-            </button>
+              >
+                {fileToSend.name}
+              </span>
+              {/* На десктопе крестик справа, на мобиле убираем */}
+              {!isMobile && (
+                <button
+                  style={{
+                    marginLeft: "auto",
+                    background: "none",
+                    border: "none",
+                    color: "#ff7675",
+                    fontWeight: 700,
+                    fontSize: 16,
+                    cursor: "pointer",
+                    padding: 0,
+                  }}
+                  title="Удалить файл"
+                  onClick={() => {
+                    setFileToSend(null);
+                    setFilePreviewUrl(null);
+                    if (fileInputRefChat.current) fileInputRefChat.current.value = "";
+                  }}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
           </div>
         )}
 
