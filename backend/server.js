@@ -215,6 +215,46 @@ app.post('/api/upload', auth, upload.single('file'), async (req, res) => {
 // --- Только express.static для отдачи файлов ---
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+// --- Раздача production фронтенда ---
+// Исправлено: отдаём index.html если build существует, иначе показываем заглушку
+const pathToFrontendBuild = path.join(__dirname, '..', 'frontend', 'build');
+if (fs.existsSync(path.join(pathToFrontendBuild, 'index.html'))) {
+  app.use(express.static(pathToFrontendBuild));
+  // SPA fallback: отдаём index.html для всех не-API маршрутов
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) return next();
+    res.sendFile(path.join(pathToFrontendBuild, 'index.html'));
+  });
+} else {
+  // Если build отсутствует, показываем простую заглушку
+  app.get('*', (req, res) => {
+    res.send(`
+      <html>
+        <head>
+          <title>ГоВЧат</title>
+          <style>
+            body { background: #232526; color: #fff; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+            .msg { background: #35363a; padding: 32px 48px; border-radius: 16px; box-shadow: 0 2px 16px #00c3ff33; }
+          </style>
+        </head>
+        <body>
+          <div class="msg">
+            <h2>Фронтенд не собран</h2>
+            <p>Соберите React-фронтенд командой <code>npm run build</code> в папке <b>frontend</b>.<br/>
+            Или откройте <a href="http://localhost:3000" style="color:#00c3ff">http://localhost:3000</a> если используете dev-сервер.</p>
+          </div>
+        </body>
+      </html>
+    `);
+  });
+}
+
+// SPA fallback: отдаём index.html для всех не-API маршрутов
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) return next();
+  res.sendFile(path.join(pathToFrontendBuild, 'index.html'));
+});
+
 // --- Профиль пользователя ---
 app.get('/api/profile', auth, async (req, res) => {
   const user = await User.findOne({ username: req.user.username });
