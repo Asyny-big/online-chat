@@ -336,17 +336,18 @@ export const profileBtn = {
 
 export const profilePopup = {
   position: "fixed",
-  left: 0,
-  top: "35vh", // было 50vh, теперь окно начинается выше
-  // bottom: 0, // убираем bottom, чтобы не растягивалось до низа
+  left: 24, // отступ от левого края
+  bottom: 24, // прижато к низу
+  top: "auto",
   width: 370,
   minWidth: 320,
   maxWidth: 420,
-  height: "65vh", // было 50vh, теперь окно выше
+  height: "auto",
+  maxHeight: "80vh",
   background: "#232526",
   color: "#fff",
-  borderRadius: "0 18px 0 0",
-  boxShadow: "2px 0 24px #00c3ff44",
+  borderRadius: "18px 18px 0 18px",
+  boxShadow: "2px 4px 24px #00c3ff44",
   padding: "28px 32px 18px 32px", // уменьшили верхний и нижний padding
   zIndex: 100,
   fontSize: 16,
@@ -671,4 +672,4 @@ export const responsive = `
   .govchat-mobile-header {
     display: flex !important;
   }
-`;
+}`;

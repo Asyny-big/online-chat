@@ -580,7 +580,7 @@ function App() {
           alignItems: "center",
           justifyContent: "center",
           gap: 18,
-          margin: "18px 0 10px 0"
+          margin: "8px 0 10px 0" // было 18px, стало 8px (подняли выше)
         }}>
           {/* Профиль */}
           <button
@@ -1330,6 +1330,7 @@ function App() {
                 ? {
                     left: 0,
                     top: 0,
+                    bottom: 0,
                     width: "100vw",
                     minWidth: 0,
                     maxWidth: "100vw",
@@ -1347,7 +1348,7 @@ function App() {
               display: "flex",
               flexDirection: "column",
               justifyContent: "flex-start",
-              position: "relative"
+              position: "fixed"
             }}
             className="govchat-profile-popup"
             onClick={e => e.stopPropagation()}
@@ -1368,15 +1369,17 @@ function App() {
                 minHeight: 36,
                 marginBottom: 8
               }}>
-                <div style={{ fontWeight: 700, fontSize: 17, color: "#00c3ff", marginLeft: 8 }}>Профиль</div>
+                {/* Крестик для выхода из профиля в чат (слева) */}
                 <button
                   style={{
                     ...chatStyles.profileCloseBtn,
                     position: "static",
+                    left: 0,
+                    top: 0,
                     width: 32,
                     height: 32,
                     fontSize: 22,
-                    marginLeft: 0,
+                    marginLeft: 4,
                     marginTop: 0,
                     marginBottom: 0,
                     background: "none",
@@ -1386,6 +1389,9 @@ function App() {
                   onClick={() => setShowProfile(false)}
                   title="Закрыть"
                 >✕</button>
+                <div style={{ fontWeight: 700, fontSize: 17, color: "#00c3ff", marginLeft: 8, flex: 1, textAlign: "center" }}>Профиль</div>
+                {/* Пустой div для выравнивания */}
+                <div style={{ width: 32 }} />
               </div>
             )}
             {/* Новый аватар/значок профиля */}
