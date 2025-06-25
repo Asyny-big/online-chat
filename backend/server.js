@@ -307,5 +307,8 @@ io.on('connection', (socket) => {
 
 // --- Запуск ---
 mongoose.connect('mongodb://localhost:27017/chat', { useNewUrlParser: true, useUnifiedTopology: true })
-  .then(() => server.listen(5000, () => console.log('Сервер запущен на 5000')))
+  .then(() => {
+    const PORT = process.env.PORT || 5000;
+    server.listen(PORT, () => console.log(`Сервер запущен на ${PORT}`));
+  })
   .catch(console.error);
