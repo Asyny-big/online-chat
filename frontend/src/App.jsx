@@ -305,18 +305,16 @@ function App() {
         password,
         recaptcha: recaptchaToken,
       });
-      // После успешной регистрации сразу логиним
-      const res = await axios.post(`${API_URL}/login`, {
-        username,
-        password,
-        recaptcha: recaptchaToken,
-      });
-      localStorage.setItem("token", res.data.token);
-      setToken(res.data.token);
+      // После успешной регистрации НЕ логиним автоматически!
+      setError("Регистрация успешна! Теперь войдите под своими данными.");
+      setAuthMode("login");
+      setRecaptchaToken("");
+      setUsername("");
+      setPassword("");
     } catch (e) {
       setError(
         e?.response?.data?.error ||
-          "Ошибка регистрации или логина"
+          "Ошибка регистрации"
       );
     }
     setRegistering(false);
