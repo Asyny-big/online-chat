@@ -573,26 +573,72 @@ function App() {
             </div>
           )}
         </div>
-        <div style={chatStyles.mobileMenuFooter}>
+        {/* Кнопки профиля и кастомизации как в десктопе */}
+        <div style={{
+          display: "flex",
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 18,
+          margin: "18px 0 10px 0"
+        }}>
+          {/* Профиль */}
           <button
-            style={chatStyles.mobileMenuBtnAction}
+            style={{
+              ...chatStyles.profileBtn,
+              width: 48,
+              height: 48,
+              fontSize: 24,
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center"
+            }}
             onClick={() => {
               setShowProfile(true);
               setMobileMenuOpen(false);
               setEditMode(false);
             }}
+            title="Профиль"
           >
-            Профиль
+            <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
+              <circle cx="13" cy="13" r="13" fill="#00c3ff" />
+              <circle cx="13" cy="10" r="4" fill="#fff" />
+              <ellipse cx="13" cy="19" rx="7" ry="4" fill="#fff" />
+            </svg>
+            <span style={{ fontSize: 12, color: "#00c3ff", marginTop: 2 }}>Профиль</span>
           </button>
+          {/* Кастомизация */}
           <button
-            style={chatStyles.mobileMenuBtnSecondary}
+            style={{
+              ...chatStyles.profileBtn,
+              width: 48,
+              height: 48,
+              fontSize: 24,
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              background: "none",
+              border: "none",
+              marginRight: 0,
+              marginLeft: 0,
+              boxShadow: "0 2px 8px #00c3ff33"
+            }}
             onClick={() => {
               setShowCustomizer(true);
               setMobileMenuOpen(false);
             }}
+            title="Кастомизация"
           >
-            Кастомизация
+            <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
+              <circle cx="13" cy="13" r="13" fill="#ffb347" />
+              <path d="M7 19c0-2 2-4 4-4s4 2 4 4" stroke="#fff" strokeWidth="2" />
+              <rect x="10" y="6" width="6" height="8" rx="2" fill="#fff" stroke="#ffb347" strokeWidth="1.5"/>
+              <rect x="8" y="14" width="10" height="4" rx="2" fill="#ffb347" stroke="#fff" strokeWidth="1.5"/>
+            </svg>
+            <span style={{ fontSize: 12, color: "#ffb347", marginTop: 2 }}>Тема</span>
           </button>
+        </div>
+        <div style={chatStyles.mobileMenuFooter}>
           <button
             style={{
               ...chatStyles.logoutBtn,
@@ -1271,12 +1317,29 @@ function App() {
             background: "rgba(0,0,0,0.12)",
             zIndex: 99,
             transition: "background 0.2s",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center"
           }}
           onClick={handleProfilePopupBgClick}
         >
           <div
             style={{
               ...chatStyles.profilePopup,
+              ...(isMobile
+                ? {
+                    left: 0,
+                    top: 0,
+                    width: "100vw",
+                    minWidth: 0,
+                    maxWidth: "100vw",
+                    height: "100vh",
+                    borderRadius: 0,
+                    padding: "16px 8px 8px 8px",
+                    boxShadow: "none",
+                    fontSize: 15,
+                  }
+                : {}),
               transform: showProfile ? "translateY(0)" : "translateY(120%)",
               opacity: showProfile ? 1 : 0,
               pointerEvents: showProfile ? "auto" : "none",
@@ -1284,17 +1347,62 @@ function App() {
               display: "flex",
               flexDirection: "column",
               justifyContent: "flex-start",
+              position: "relative"
             }}
             className="govchat-profile-popup"
             onClick={e => e.stopPropagation()}
           >
+            {/* Фиксированная шапка для мобильного */}
+            {isMobile && (
+              <div style={{
+                position: "sticky",
+                top: 0,
+                left: 0,
+                width: "100%",
+                background: "#232526",
+                zIndex: 2,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "0 4px 0 0",
+                minHeight: 36,
+                marginBottom: 8
+              }}>
+                <div style={{ fontWeight: 700, fontSize: 17, color: "#00c3ff", marginLeft: 8 }}>Профиль</div>
+                <button
+                  style={{
+                    ...chatStyles.profileCloseBtn,
+                    position: "static",
+                    width: 32,
+                    height: 32,
+                    fontSize: 22,
+                    marginLeft: 0,
+                    marginTop: 0,
+                    marginBottom: 0,
+                    background: "none",
+                    color: "#b2bec3",
+                    boxShadow: "none",
+                  }}
+                  onClick={() => setShowProfile(false)}
+                  title="Закрыть"
+                >✕</button>
+              </div>
+            )}
             {/* Новый аватар/значок профиля */}
-            <div style={chatStyles.profileAvatar} className="govchat-profile-avatar">
+            <div
+              style={{
+                ...chatStyles.profileAvatar,
+                ...(isMobile
+                  ? { width: 70, height: 70, margin: "8px auto 8px auto", fontSize: 36 }
+                  : {}),
+              }}
+              className="govchat-profile-avatar"
+            >
               <div
                 style={{
                   position: "relative",
-                  width: 90,
-                  height: 90,
+                  width: isMobile ? 70 : 90,
+                  height: isMobile ? 70 : 90,
                   borderRadius: "50%",
                   overflow: "hidden",
                   cursor: "pointer",
@@ -1320,8 +1428,8 @@ function App() {
                     }
                     alt="avatar"
                     style={{
-                      width: 90,
-                      height: 90,
+                      width: isMobile ? 70 : 90,
+                      height: isMobile ? 70 : 90,
                       borderRadius: "50%",
                       objectFit: "cover",
                       display: "block",
@@ -1338,8 +1446,8 @@ function App() {
                     src={"/uploads/avatar-default.png"}
                     alt="avatar"
                     style={{
-                      width: 90,
-                      height: 90,
+                      width: isMobile ? 70 : 90,
+                      height: isMobile ? 70 : 90,
                       borderRadius: "50%",
                       objectFit: "cover",
                       display: "block",
@@ -1391,11 +1499,14 @@ function App() {
               marginBottom: 10,
               display: "flex",
               flexDirection: "column",
-              justifyContent: "flex-start"
+              justifyContent: "flex-start",
+              ...(isMobile ? { padding: "0 4px" } : {})
             }}>
               {userProfile && !editMode && (
                 <>
-                  <div style={chatStyles.profileTitle} className="govchat-profile-title">Профиль</div>
+                  {!isMobile && (
+                    <div style={chatStyles.profileTitle} className="govchat-profile-title">Профиль</div>
+                  )}
                   <div style={chatStyles.profileField}>
                     <span style={chatStyles.profileLabel}>Ник:</span> {userProfile.username}
                   </div>
@@ -1409,9 +1520,18 @@ function App() {
                     <span style={chatStyles.profileLabel}>Семейный статус:</span> {userProfile.status ?? "—"}
                   </div>
                   {/* Кнопки теперь внутри скроллируемой области, сразу после информации */}
-                  <div style={{ display: "flex", gap: 8, marginTop: 18, justifyContent: "flex-end" }}>
+                  <div style={{
+                    display: "flex",
+                    gap: 8,
+                    marginTop: 18,
+                    justifyContent: "flex-end",
+                    flexWrap: isMobile ? "wrap" : "nowrap"
+                  }}>
                     <button
-                      style={chatStyles.profileEditBtn}
+                      style={{
+                        ...chatStyles.profileEditBtn,
+                        ...(isMobile ? { fontSize: 14, padding: "7px 12px" } : {})
+                      }}
                       onClick={() => {
                         setEditData({
                           username: userProfile.username || "",
@@ -1426,7 +1546,10 @@ function App() {
                       Редактировать
                     </button>
                     <button
-                      style={chatStyles.profileLogoutBtn}
+                      style={{
+                        ...chatStyles.profileLogoutBtn,
+                        ...(isMobile ? { fontSize: 14, padding: "7px 12px" } : {})
+                      }}
                       onClick={() => {
                         localStorage.removeItem("token");
                         window.location.reload();
@@ -1439,11 +1562,16 @@ function App() {
               )}
               {userProfile && editMode && (
                 <>
-                  <div style={chatStyles.profileTitle}>Редактирование профиля</div>
+                  {!isMobile && (
+                    <div style={chatStyles.profileTitle}>Редактирование профиля</div>
+                  )}
                   <div style={chatStyles.profileField}>
                     <span style={chatStyles.profileLabel}>Ник:</span>
                     <input
-                      style={chatStyles.profileInput}
+                      style={{
+                        ...chatStyles.profileInput,
+                        ...(isMobile ? { fontSize: 14, padding: "6px 8px" } : {})
+                      }}
                       value={editData.username}
                       onChange={e => setEditData(d => ({ ...d, username: e.target.value }))}
                     />
@@ -1451,7 +1579,10 @@ function App() {
                   <div style={chatStyles.profileField}>
                     <span style={chatStyles.profileLabel}>Пароль:</span>
                     <input
-                      style={chatStyles.profileInput}
+                      style={{
+                        ...chatStyles.profileInput,
+                        ...(isMobile ? { fontSize: 14, padding: "6px 8px" } : {})
+                      }}
                       type="password"
                       value={editData.password}
                       placeholder="Новый пароль"
@@ -1461,7 +1592,10 @@ function App() {
                   <div style={chatStyles.profileField}>
                     <span style={chatStyles.profileLabel}>Возраст:</span>
                     <input
-                      style={chatStyles.profileInput}
+                      style={{
+                        ...chatStyles.profileInput,
+                        ...(isMobile ? { fontSize: 14, padding: "6px 8px" } : {})
+                      }}
                       type="number"
                       min={0}
                       value={editData.age}
@@ -1471,7 +1605,10 @@ function App() {
                   <div style={chatStyles.profileField}>
                     <span style={chatStyles.profileLabel}>Город:</span>
                     <input
-                      style={chatStyles.profileInput}
+                      style={{
+                        ...chatStyles.profileInput,
+                        ...(isMobile ? { fontSize: 14, padding: "6px 8px" } : {})
+                      }}
                       value={editData.city}
                       onChange={e => setEditData(d => ({ ...d, city: e.target.value }))}
                     />
@@ -1479,15 +1616,27 @@ function App() {
                   <div style={chatStyles.profileField}>
                     <span style={chatStyles.profileLabel}>Семейный статус:</span>
                     <input
-                      style={chatStyles.profileInput}
+                      style={{
+                        ...chatStyles.profileInput,
+                        ...(isMobile ? { fontSize: 14, padding: "6px 8px" } : {})
+                      }}
                       value={editData.status}
                       onChange={e => setEditData(d => ({ ...d, status: e.target.value }))}
                     />
                   </div>
                   {/* Кнопки теперь внутри скроллируемой области, сразу после полей */}
-                  <div style={{ display: "flex", gap: 8, marginTop: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                  <div style={{
+                    display: "flex",
+                    gap: 8,
+                    marginTop: 10,
+                    justifyContent: "flex-end",
+                    flexWrap: isMobile ? "wrap" : "nowrap"
+                  }}>
                     <button
-                      style={chatStyles.profileEditBtn}
+                      style={{
+                        ...chatStyles.profileEditBtn,
+                        ...(isMobile ? { fontSize: 14, padding: "7px 12px" } : {})
+                      }}
                       onClick={handleProfileSave}
                     >
                       Сохранить
@@ -1498,13 +1647,14 @@ function App() {
                         position: "static",
                         width: "auto",
                         height: "auto",
-                        fontSize: 15,
+                        fontSize: isMobile ? 14 : 15,
                         marginLeft: 0,
                         marginTop: 0,
                         marginBottom: 0,
                         background: "#35363a",
                         color: "#b2bec3",
                         boxShadow: "0 2px 8px #0002",
+                        ...(isMobile ? { padding: "7px 12px" } : {})
                       }}
                       onClick={() => setEditMode(false)}
                     >
