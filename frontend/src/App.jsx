@@ -69,6 +69,7 @@ function App() {
   const [audioBlob, setAudioBlob] = useState(null);
   const [audioUrl, setAudioUrl] = useState(null);
   const recordTimerRef = useRef(null);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Функция для старта записи аудио
   const startRecording = async () => {
@@ -437,6 +438,14 @@ function App() {
     }
   }, []);
 
+  // Для определения мобильного режима
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 700);
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth <= 700);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
   if (!token) {
     return (
       <div style={chatStyles.page}>
@@ -489,28 +498,60 @@ function App() {
     );
   }
 
-  return (
-    <div style={themedPageStyle} className="govchat-page">
-      <div style={chatStyles.sidebar} className="govchat-sidebar">
-        <div style={chatStyles.sidebarTitle}>ГоВЧат 2.1 Beta</div>
-        <div style={chatStyles.channelList} className="govchat-channel-list">
-          <div style={{ fontWeight: 600, color: "#fff", marginBottom: 10 }}>Каналы</div>
+  // --- Мобильный header ---
+  const mobileHeader = (
+    <div style={chatStyles.mobileHeader} className="govchat-mobile-header">
+      <button
+        style={chatStyles.mobileMenuBtn}
+        onClick={() => setMobileMenuOpen(true)}
+        aria-label="Меню"
+      >
+        <span style={{ fontSize: 28 }}>☰</span>
+      </button>
+      <div style={{
+        fontWeight: 700,
+        fontSize: 20,
+        color: "#00c3ff",
+        letterSpacing: 1,
+        textShadow: "0 2px 8px #0002",
+        margin: "0 auto",
+      }}>
+        ГоВЧат 2.1 Beta
+      </div>
+    </div>
+  );
+
+  // --- Мобильное меню ---
+  const mobileMenu = (
+    <div style={chatStyles.mobileMenuOverlay} onClick={() => setMobileMenuOpen(false)}>
+      <div
+        style={chatStyles.mobileMenu}
+        onClick={e => e.stopPropagation()}
+      >
+        <button
+          style={chatStyles.mobileMenuCloseBtn}
+          onClick={() => setMobileMenuOpen(false)}
+          aria-label="Закрыть"
+        >✕</button>
+        <div style={chatStyles.mobileMenuTitle}>Каналы</div>
+        <div style={chatStyles.mobileMenuChannels}>
           {channels.length === 0 ? (
             <div style={{ color: "#b2bec3", marginBottom: 8 }}>
               Нет доступных каналов
             </div>
           ) : (
-            <>
-              {channels.map((ch) => (
-                <div
-                  key={ch._id}
-                  style={chatStyles.channelItem(selectedChannel === ch._id)}
-                  onClick={() => setSelectedChannel(ch._id)}
-                >
-                  {ch.name}
-                </div>
-              ))}
-            </>
+            channels.map((ch) => (
+              <div
+                key={ch._id}
+                style={chatStyles.channelItem(selectedChannel === ch._id)}
+                onClick={() => {
+                  setSelectedChannel(ch._id);
+                  setMobileMenuOpen(false);
+                }}
+              >
+                {ch.name}
+              </div>
+            ))
           )}
           <button
             style={chatStyles.createBtn}
@@ -532,413 +573,108 @@ function App() {
             </div>
           )}
         </div>
-        {/* Кнопки профиля и кастомизации в одном боксе справа внизу */}
-        <div style={{
-          ...chatStyles.profileBtnBox,
-          left: "auto",
-          right: 178,
-          bottom: 70,
-          display: "flex",
-          flexDirection: "row",
-          alignItems: "center",
-          gap: 10,
-          zIndex: 10
-        }}>
-          {/* Кнопка профиля */}
+        <div style={chatStyles.mobileMenuFooter}>
           <button
-            style={chatStyles.profileBtn}
+            style={chatStyles.mobileMenuBtnAction}
             onClick={() => {
-              setShowProfile(v => !v);
+              setShowProfile(true);
+              setMobileMenuOpen(false);
               setEditMode(false);
             }}
-            title="Профиль"
           >
-            <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
-              <circle cx="13" cy="13" r="13" fill="#00c3ff" />
-              <circle cx="13" cy="10" r="4" fill="#fff" />
-              <ellipse cx="13" cy="19" rx="7" ry="4" fill="#fff" />
-            </svg>
+            Профиль
           </button>
-          {/* Кнопка кастомизации */}
+          <button
+            style={chatStyles.mobileMenuBtnSecondary}
+            onClick={() => {
+              setShowCustomizer(true);
+              setMobileMenuOpen(false);
+            }}
+          >
+            Кастомизация
+          </button>
           <button
             style={{
-              ...chatStyles.profileBtn,
+              ...chatStyles.logoutBtn,
+              marginTop: 10,
+              width: "100%",
+              border: "1px solid #ff7675",
+              color: "#ff7675",
               background: "none",
-              border: "none",
-              marginRight: 0,
-              marginLeft: 0,
-              boxShadow: "0 2px 8px #00c3ff33"
+              fontSize: 15,
+              fontWeight: 600,
             }}
-            onClick={() => setShowCustomizer(v => !v)}
-            title="Кастомизация"
+            onClick={() => {
+              localStorage.removeItem("token");
+              window.location.reload();
+            }}
           >
-            <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
-              <circle cx="13" cy="13" r="13" fill="#ffb347" />
-              <path d="M7 19c0-2 2-4 4-4s4 2 4 4" stroke="#fff" strokeWidth="2" />
-              <rect x="10" y="6" width="6" height="8" rx="2" fill="#fff" stroke="#ffb347" strokeWidth="1.5"/>
-              <rect x="8" y="14" width="10" height="4" rx="2" fill="#ffb347" stroke="#fff" strokeWidth="1.5"/>
-            </svg>
+            Выйти
           </button>
-          {/* Модальное окно профиля */}
-          {showProfile && (
-            <div
-              style={{
-                position: "fixed",
-                left: 0,
-                top: 0,
-                width: "100vw",
-                height: "100vh",
-                background: "rgba(0,0,0,0.12)",
-                zIndex: 99,
-                transition: "background 0.2s",
-              }}
-              onClick={handleProfilePopupBgClick}
-            >
-              <div
-                style={{
-                  ...chatStyles.profilePopup,
-                  transform: showProfile ? "translateY(0)" : "translateY(120%)",
-                  opacity: showProfile ? 1 : 0,
-                  pointerEvents: showProfile ? "auto" : "none",
-                  transition: "transform 0.32s cubic-bezier(.4,1.4,.6,1), opacity 0.22s",
-                  display: "flex",
-                  flexDirection: "column",
-                  justifyContent: "flex-start",
-                }}
-                className="govchat-profile-popup"
-                onClick={e => e.stopPropagation()}
-              >
-                {/* Новый аватар/значок профиля */}
-                <div style={chatStyles.profileAvatar} className="govchat-profile-avatar">
-                  <div
-                    style={{
-                      position: "relative",
-                      width: 90,
-                      height: 90,
-                      borderRadius: "50%",
-                      overflow: "hidden",
-                      cursor: "pointer",
-                      border: "2px solid #00c3ff",
-                      margin: "0 auto",
-                      background: "#35363a",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                    onClick={() => fileInputRefAvatar.current && fileInputRefAvatar.current.click()}
-                    title="Изменить фото"
-                  >
-                    {/* Показываем пользовательский аватар только если он есть и не дефолтный */}
-                    {userProfile?.avatarUrl &&
-                      userProfile.avatarUrl !== "/uploads/avatar-default.png" ? (
-                      <img
-                        key={userProfile.avatarUrl + avatarVersion}
-                        src={
-                          userProfile.avatarUrl
-                            ? userProfile.avatarUrl + "?t=" + avatarVersion
-                            : "/uploads/avatar-default.png"
-                        }
-                        alt="avatar"
-                        style={{
-                          width: 90,
-                          height: 90,
-                          borderRadius: "50%",
-                          objectFit: "cover",
-                          display: "block",
-                        }}
-                        onError={e => {
-                          e.target.onerror = null;
-                          e.target.src =
-                            `${window.location.protocol}//${window.location.hostname}:5000/uploads/avatar-default.png`;
-                        }}
-                      />
-                    ) : (
-                      // Показываем дефолтную картинку, если нет пользовательской
-                      <img
-                        src={"/uploads/avatar-default.png"}
-                        alt="avatar"
-                        style={{
-                          width: 90,
-                          height: 90,
-                          borderRadius: "50%",
-                          objectFit: "cover",
-                          display: "block",
-                        }}
-                        onError={e => {
-                          e.target.onerror = null;
-                          e.target.src =
-                            "https://ui-avatars.com/api/?name=" +
-                            encodeURIComponent(userProfile?.username || "U") +
-                            "&background=00c3ff&color=fff&size=90";
-                        }}
-                      />
-                    )}
-                    <input
-                      ref={fileInputRefAvatar}
-                      type="file"
-                      accept="image/*"
-                      style={{ display: "none" }}
-                      onChange={async e => {
-                        if (!e.target.files?.[0]) return;
-                        const formData = new FormData();
-                        formData.append("file", e.target.files[0]);
-                        const uploadRes = await axios.post(
-                          `${API_URL}/upload?avatar=1`,
-                          formData,
-                          {
-                            headers: { Authorization: `Bearer ${token}` },
-                          }
-                        );
-                        await axios.patch(
-                          `${API_URL}/profile`,
-                          { avatarUrl: uploadRes.data.url },
-                          { headers: { Authorization: `Bearer ${token}` } }
-                        );
-                        const profileRes = await axios.get(`${API_URL}/profile`, {
-                          headers: { Authorization: `Bearer ${token}` },
-                        });
-                        setUserProfile(profileRes.data);
-                        setAvatarVersion(Date.now());
-                      }}
-                    />
-                  </div>
-                </div>
-                {/* Содержимое профиля с прокруткой */}
-                <div style={{
-                  flex: 1,
-                  overflowY: "auto",
-                  minHeight: 0,
-                  marginBottom: 10,
-                  display: "flex",
-                  flexDirection: "column",
-                  justifyContent: "flex-start"
-                }}>
-                  {userProfile && !editMode && (
-                    <>
-                      <div style={chatStyles.profileTitle} className="govchat-profile-title">Профиль</div>
-                      <div style={chatStyles.profileField}>
-                        <span style={chatStyles.profileLabel}>Ник:</span> {userProfile.username}
-                      </div>
-                      <div style={chatStyles.profileField}>
-                        <span style={chatStyles.profileLabel}>Возраст:</span> {userProfile.age ?? "—"}
-                      </div>
-                      <div style={chatStyles.profileField}>
-                        <span style={chatStyles.profileLabel}>Город:</span> {userProfile.city ?? "—"}
-                      </div>
-                      <div style={chatStyles.profileField}>
-                        <span style={chatStyles.profileLabel}>Семейный статус:</span> {userProfile.status ?? "—"}
-                      </div>
-                      {/* Кнопки теперь внутри скроллируемой области, сразу после информации */}
-                      <div style={{ display: "flex", gap: 8, marginTop: 18, justifyContent: "flex-end" }}>
-                        <button
-                          style={chatStyles.profileEditBtn}
-                          onClick={() => {
-                            setEditData({
-                              username: userProfile.username || "",
-                              password: "",
-                              city: userProfile.city || "",
-                              status: userProfile.status || "",
-                              age: userProfile.age || "",
-                            });
-                            setEditMode(true);
-                          }}
-                        >
-                          Редактировать
-                        </button>
-                        <button
-                          style={chatStyles.profileLogoutBtn}
-                          onClick={() => {
-                            localStorage.removeItem("token");
-                            window.location.reload();
-                          }}
-                        >
-                          Выйти
-                        </button>
-                      </div>
-                    </>
-                  )}
-                  {userProfile && editMode && (
-                    <>
-                      <div style={chatStyles.profileTitle}>Редактирование профиля</div>
-                      <div style={chatStyles.profileField}>
-                        <span style={chatStyles.profileLabel}>Ник:</span>
-                        <input
-                          style={chatStyles.profileInput}
-                          value={editData.username}
-                          onChange={e => setEditData(d => ({ ...d, username: e.target.value }))}
-                        />
-                      </div>
-                      <div style={chatStyles.profileField}>
-                        <span style={chatStyles.profileLabel}>Пароль:</span>
-                        <input
-                          style={chatStyles.profileInput}
-                          type="password"
-                          value={editData.password}
-                          placeholder="Новый пароль"
-                          onChange={e => setEditData(d => ({ ...d, password: e.target.value }))}
-                        />
-                      </div>
-                      <div style={chatStyles.profileField}>
-                        <span style={chatStyles.profileLabel}>Возраст:</span>
-                        <input
-                          style={chatStyles.profileInput}
-                          type="number"
-                          min={0}
-                          value={editData.age}
-                          onChange={e => setEditData(d => ({ ...d, age: e.target.value }))}
-                        />
-                      </div>
-                      <div style={chatStyles.profileField}>
-                        <span style={chatStyles.profileLabel}>Город:</span>
-                        <input
-                          style={chatStyles.profileInput}
-                          value={editData.city}
-                          onChange={e => setEditData(d => ({ ...d, city: e.target.value }))}
-                        />
-                      </div>
-                      <div style={chatStyles.profileField}>
-                        <span style={chatStyles.profileLabel}>Семейный статус:</span>
-                        <input
-                          style={chatStyles.profileInput}
-                          value={editData.status}
-                          onChange={e => setEditData(d => ({ ...d, status: e.target.value }))}
-                        />
-                      </div>
-                      {/* Кнопки теперь внутри скроллируемой области, сразу после полей */}
-                      <div style={{ display: "flex", gap: 8, marginTop: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
-                        <button
-                          style={chatStyles.profileEditBtn}
-                          onClick={handleProfileSave}
-                        >
-                          Сохранить
-                        </button>
-                        <button
-                          style={{
-                            ...chatStyles.profileCloseBtn,
-                            position: "static",
-                            width: "auto",
-                            height: "auto",
-                            fontSize: 15,
-                            marginLeft: 0,
-                            marginTop: 0,
-                            marginBottom: 0,
-                            background: "#35363a",
-                            color: "#b2bec3",
-                            boxShadow: "0 2px 8px #0002",
-                          }}
-                          onClick={() => setEditMode(false)}
-                        >
-                          Отмена
-                        </button>
-                      </div>
-                    </>
-                  )}
-                  {!userProfile && (
-                    <div style={{ color: "#b2bec3", marginBottom: 8 }}>Загрузка...</div>
-                  )}
-                </div>
-                {/* Кнопки убраны из нижней части popup */}
-              </div>
-            </div>
-          )}
         </div>
-        {/* Модальное окно кастомизации */}
-        {showCustomizer && (
-          <div
-            style={{
-              position: "fixed",
-              left: 0,
-              top: 0,
-              width: "100vw",
-              height: "100vh",
-              background: "rgba(0,0,0,0.12)",
-              zIndex: 120,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center"
-            }}
-            onClick={() => setShowCustomizer(false)}
-          >
-            <div
-              style={{
-                background: "#232526",
-                borderRadius: 16,
-                boxShadow: "0 2px 16px #00c3ff33",
-                padding: "32px 32px 24px 32px",
-                minWidth: 320,
-                maxWidth: 420,
-                zIndex: 121,
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                position: "relative"
-              }}
-              onClick={e => e.stopPropagation()}
-            >
-              <button
-                style={{
-                  position: "absolute",
-                  top: 10,
-                  right: 16,
-                  background: "none",
-                  color: "#b2bec3",
-                  border: "none",
-                  borderRadius: "50%",
-                  width: 32,
-                  height: 32,
-                  fontSize: 22,
-                  fontWeight: 700,
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  transition: "background 0.2s, color 0.2s",
-                  zIndex: 122,
-                }}
-                onClick={() => setShowCustomizer(false)}
-                title="Закрыть"
-              >✕</button>
-              <div style={{ fontWeight: 700, fontSize: 20, color: "#ffb347", marginBottom: 18 }}>
-                Кастомизация оформления
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 18, width: "100%" }}>
-                {chatStyles.themes.map((t, idx) => (
-                  <button
-                    key={t.name}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 16,
-                      width: "100%",
-                      background: t.pageBg,
-                      border: theme.name === t.name ? "2px solid #00c3ff" : "2px solid transparent",
-                      borderRadius: 10,
-                      padding: "12px 18px",
-                      cursor: "pointer",
-                      color: "#222",
-                      fontWeight: 600,
-                      fontSize: 16,
-                      boxShadow: theme.name === t.name ? "0 2px 12px #00c3ff44" : "0 2px 8px #0002",
-                      transition: "border 0.2s, box-shadow 0.2s"
-                    }}
-                    onClick={() => handleThemeSelect(t)}
-                  >
-                    <span style={{
-                      width: 32, height: 32, borderRadius: 8, background: t.chatBg,
-                      border: "1.5px solid #fff", display: "inline-block", marginRight: 8
-                    }} />
-                    <span style={{ color: "#fff", textShadow: "0 1px 4px #0005" }}>{t.name}</span>
-                    {theme.name === t.name && (
-                      <span style={{ marginLeft: "auto", color: "#00c3ff", fontSize: 22 }}>✔</span>
-                    )}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
       </div>
-      <div style={chatStyles.chatContainer} className="govchat-chat-container">
+    </div>
+  );
+
+  return (
+    <div style={themedPageStyle} className="govchat-page">
+      {/* Мобильный header */}
+      {isMobile && mobileHeader}
+      {/* Мобильное меню */}
+      {isMobile && mobileMenuOpen && mobileMenu}
+      {/* Сайдбар только на десктопе */}
+      {!isMobile && (
+        <div style={chatStyles.sidebar} className="govchat-sidebar">
+          <div style={chatStyles.sidebarTitle}>ГоВЧат 2.1 Beta</div>
+          <div style={chatStyles.channelList} className="govchat-channel-list">
+            <div style={{ fontWeight: 600, color: "#fff", marginBottom: 10 }}>Каналы</div>
+            {channels.length === 0 ? (
+              <div style={{ color: "#b2bec3", marginBottom: 8 }}>
+                Нет доступных каналов
+              </div>
+            ) : (
+              <>
+                {channels.map((ch) => (
+                  <div
+                    key={ch._id}
+                    style={chatStyles.channelItem(selectedChannel === ch._id)}
+                    onClick={() => setSelectedChannel(ch._id)}
+                  >
+                    {ch.name}
+                  </div>
+                ))}
+              </>
+            )}
+            <button
+              style={chatStyles.createBtn}
+              onClick={() => setShowCreate((v) => !v)}
+            >
+              {showCreate ? "Скрыть создание" : "Создать канал"}
+            </button>
+            {showCreate && (
+              <div style={{ marginTop: 10 }}>
+                <input
+                  style={chatStyles.input}
+                  placeholder="Название канала"
+                  value={newChannel}
+                  onChange={e => setNewChannel(e.target.value)}
+                />
+                <button style={chatStyles.createBtn} onClick={handleCreateChannel}>
+                  Создать
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      {/* Чат всегда на экране, но с отступом сверху на мобиле */}
+      <div
+        style={{
+          ...chatStyles.chatContainer,
+          ...(isMobile ? { paddingTop: 64 } : {}),
+        }}
+        className="govchat-chat-container"
+      >
         <div style={{
           display: "flex",
           alignItems: "center",
@@ -1394,6 +1130,363 @@ function App() {
           </div>
         )}
       </div>
+      {/* Модальное окно профиля */}
+      {showProfile && (
+        <div
+          style={{
+            position: "fixed",
+            left: 0,
+            top: 0,
+            width: "100vw",
+            height: "100vh",
+            background: "rgba(0,0,0,0.12)",
+            zIndex: 99,
+            transition: "background 0.2s",
+          }}
+          onClick={handleProfilePopupBgClick}
+        >
+          <div
+            style={{
+              ...chatStyles.profilePopup,
+              transform: showProfile ? "translateY(0)" : "translateY(120%)",
+              opacity: showProfile ? 1 : 0,
+              pointerEvents: showProfile ? "auto" : "none",
+              transition: "transform 0.32s cubic-bezier(.4,1.4,.6,1), opacity 0.22s",
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "flex-start",
+            }}
+            className="govchat-profile-popup"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Новый аватар/значок профиля */}
+            <div style={chatStyles.profileAvatar} className="govchat-profile-avatar">
+              <div
+                style={{
+                  position: "relative",
+                  width: 90,
+                  height: 90,
+                  borderRadius: "50%",
+                  overflow: "hidden",
+                  cursor: "pointer",
+                  border: "2px solid #00c3ff",
+                  margin: "0 auto",
+                  background: "#35363a",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+                onClick={() => fileInputRefAvatar.current && fileInputRefAvatar.current.click()}
+                title="Изменить фото"
+              >
+                {/* Показываем пользовательский аватар только если он есть и не дефолтный */}
+                {userProfile?.avatarUrl &&
+                  userProfile.avatarUrl !== "/uploads/avatar-default.png" ? (
+                  <img
+                    key={userProfile.avatarUrl + avatarVersion}
+                    src={
+                      userProfile.avatarUrl
+                        ? userProfile.avatarUrl + "?t=" + avatarVersion
+                        : "/uploads/avatar-default.png"
+                    }
+                    alt="avatar"
+                    style={{
+                      width: 90,
+                      height: 90,
+                      borderRadius: "50%",
+                      objectFit: "cover",
+                      display: "block",
+                    }}
+                    onError={e => {
+                      e.target.onerror = null;
+                      e.target.src =
+                        `${window.location.protocol}//${window.location.hostname}:5000/uploads/avatar-default.png`;
+                    }}
+                  />
+                ) : (
+                  // Показываем дефолтную картинку, если нет пользовательской
+                  <img
+                    src={"/uploads/avatar-default.png"}
+                    alt="avatar"
+                    style={{
+                      width: 90,
+                      height: 90,
+                      borderRadius: "50%",
+                      objectFit: "cover",
+                      display: "block",
+                    }}
+                    onError={e => {
+                      e.target.onerror = null;
+                      e.target.src =
+                        "https://ui-avatars.com/api/?name=" +
+                        encodeURIComponent(userProfile?.username || "U") +
+                        "&background=00c3ff&color=fff&size=90";
+                    }}
+                  />
+                )}
+                <input
+                  ref={fileInputRefAvatar}
+                  type="file"
+                  accept="image/*"
+                  style={{ display: "none" }}
+                  onChange={async e => {
+                    if (!e.target.files?.[0]) return;
+                    const formData = new FormData();
+                    formData.append("file", e.target.files[0]);
+                    const uploadRes = await axios.post(
+                      `${API_URL}/upload?avatar=1`,
+                      formData,
+                      {
+                        headers: { Authorization: `Bearer ${token}` },
+                      }
+                    );
+                    await axios.patch(
+                      `${API_URL}/profile`,
+                      { avatarUrl: uploadRes.data.url },
+                      { headers: { Authorization: `Bearer ${token}` } }
+                    );
+                    const profileRes = await axios.get(`${API_URL}/profile`, {
+                      headers: { Authorization: `Bearer ${token}` },
+                    });
+                    setUserProfile(profileRes.data);
+                    setAvatarVersion(Date.now());
+                  }}
+                />
+              </div>
+            </div>
+            {/* Содержимое профиля с прокруткой */}
+            <div style={{
+              flex: 1,
+              overflowY: "auto",
+              minHeight: 0,
+              marginBottom: 10,
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "flex-start"
+            }}>
+              {userProfile && !editMode && (
+                <>
+                  <div style={chatStyles.profileTitle} className="govchat-profile-title">Профиль</div>
+                  <div style={chatStyles.profileField}>
+                    <span style={chatStyles.profileLabel}>Ник:</span> {userProfile.username}
+                  </div>
+                  <div style={chatStyles.profileField}>
+                    <span style={chatStyles.profileLabel}>Возраст:</span> {userProfile.age ?? "—"}
+                  </div>
+                  <div style={chatStyles.profileField}>
+                    <span style={chatStyles.profileLabel}>Город:</span> {userProfile.city ?? "—"}
+                  </div>
+                  <div style={chatStyles.profileField}>
+                    <span style={chatStyles.profileLabel}>Семейный статус:</span> {userProfile.status ?? "—"}
+                  </div>
+                  {/* Кнопки теперь внутри скроллируемой области, сразу после информации */}
+                  <div style={{ display: "flex", gap: 8, marginTop: 18, justifyContent: "flex-end" }}>
+                    <button
+                      style={chatStyles.profileEditBtn}
+                      onClick={() => {
+                        setEditData({
+                          username: userProfile.username || "",
+                          password: "",
+                          city: userProfile.city || "",
+                          status: userProfile.status || "",
+                          age: userProfile.age || "",
+                        });
+                        setEditMode(true);
+                      }}
+                    >
+                      Редактировать
+                    </button>
+                    <button
+                      style={chatStyles.profileLogoutBtn}
+                      onClick={() => {
+                        localStorage.removeItem("token");
+                        window.location.reload();
+                      }}
+                    >
+                      Выйти
+                    </button>
+                  </div>
+                </>
+              )}
+              {userProfile && editMode && (
+                <>
+                  <div style={chatStyles.profileTitle}>Редактирование профиля</div>
+                  <div style={chatStyles.profileField}>
+                    <span style={chatStyles.profileLabel}>Ник:</span>
+                    <input
+                      style={chatStyles.profileInput}
+                      value={editData.username}
+                      onChange={e => setEditData(d => ({ ...d, username: e.target.value }))}
+                    />
+                  </div>
+                  <div style={chatStyles.profileField}>
+                    <span style={chatStyles.profileLabel}>Пароль:</span>
+                    <input
+                      style={chatStyles.profileInput}
+                      type="password"
+                      value={editData.password}
+                      placeholder="Новый пароль"
+                      onChange={e => setEditData(d => ({ ...d, password: e.target.value }))}
+                    />
+                  </div>
+                  <div style={chatStyles.profileField}>
+                    <span style={chatStyles.profileLabel}>Возраст:</span>
+                    <input
+                      style={chatStyles.profileInput}
+                      type="number"
+                      min={0}
+                      value={editData.age}
+                      onChange={e => setEditData(d => ({ ...d, age: e.target.value }))}
+                    />
+                  </div>
+                  <div style={chatStyles.profileField}>
+                    <span style={chatStyles.profileLabel}>Город:</span>
+                    <input
+                      style={chatStyles.profileInput}
+                      value={editData.city}
+                      onChange={e => setEditData(d => ({ ...d, city: e.target.value }))}
+                    />
+                  </div>
+                  <div style={chatStyles.profileField}>
+                    <span style={chatStyles.profileLabel}>Семейный статус:</span>
+                    <input
+                      style={chatStyles.profileInput}
+                      value={editData.status}
+                      onChange={e => setEditData(d => ({ ...d, status: e.target.value }))}
+                    />
+                  </div>
+                  {/* Кнопки теперь внутри скроллируемой области, сразу после полей */}
+                  <div style={{ display: "flex", gap: 8, marginTop: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                    <button
+                      style={chatStyles.profileEditBtn}
+                      onClick={handleProfileSave}
+                    >
+                      Сохранить
+                    </button>
+                    <button
+                      style={{
+                        ...chatStyles.profileCloseBtn,
+                        position: "static",
+                        width: "auto",
+                        height: "auto",
+                        fontSize: 15,
+                        marginLeft: 0,
+                        marginTop: 0,
+                        marginBottom: 0,
+                        background: "#35363a",
+                        color: "#b2bec3",
+                        boxShadow: "0 2px 8px #0002",
+                      }}
+                      onClick={() => setEditMode(false)}
+                    >
+                      Отмена
+                    </button>
+                  </div>
+                </>
+              )}
+              {!userProfile && (
+                <div style={{ color: "#b2bec3", marginBottom: 8 }}>Загрузка...</div>
+              )}
+            </div>
+            {/* Кнопки убраны из нижней части popup */}
+          </div>
+        </div>
+      )}
+      {/* Модальное окно кастомизации */}
+      {showCustomizer && (
+        <div
+          style={{
+            position: "fixed",
+            left: 0,
+            top: 0,
+            width: "100vw",
+            height: "100vh",
+            background: "rgba(0,0,0,0.12)",
+            zIndex: 120,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center"
+          }}
+          onClick={() => setShowCustomizer(false)}
+        >
+          <div
+            style={{
+              background: "#232526",
+              borderRadius: 16,
+              boxShadow: "0 2px 16px #00c3ff33",
+              padding: "32px 32px 24px 32px",
+              minWidth: 320,
+              maxWidth: 420,
+              zIndex: 121,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              position: "relative"
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <button
+              style={{
+                position: "absolute",
+                top: 10,
+                right: 16,
+                background: "none",
+                color: "#b2bec3",
+                border: "none",
+                borderRadius: "50%",
+                width: 32,
+                height: 32,
+                fontSize: 22,
+                fontWeight: 700,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                transition: "background 0.2s, color 0.2s",
+                zIndex: 122,
+              }}
+              onClick={() => setShowCustomizer(false)}
+              title="Закрыть"
+            >✕</button>
+            <div style={{ fontWeight: 700, fontSize: 20, color: "#ffb347", marginBottom: 18 }}>
+              Кастомизация оформления
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 18, width: "100%" }}>
+              {chatStyles.themes.map((t, idx) => (
+                <button
+                  key={t.name}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 16,
+                    width: "100%",
+                    background: t.pageBg,
+                    border: theme.name === t.name ? "2px solid #00c3ff" : "2px solid transparent",
+                    borderRadius: 10,
+                    padding: "12px 18px",
+                    cursor: "pointer",
+                    color: "#222",
+                    fontWeight: 600,
+                    fontSize: 16,
+                    boxShadow: theme.name === t.name ? "0 2px 12px #00c3ff44" : "0 2px 8px #0002",
+                    transition: "border 0.2s, box-shadow 0.2s"
+                  }}
+                  onClick={() => handleThemeSelect(t)}
+                >
+                  <span style={{
+                    width: 32, height: 32, borderRadius: 8, background: t.chatBg,
+                    border: "1.5px solid #fff", display: "inline-block", marginRight: 8
+                  }} />
+                  <span style={{ color: "#fff", textShadow: "0 1px 4px #0005" }}>{t.name}</span>
+                  {theme.name === t.name && (
+                    <span style={{ marginLeft: "auto", color: "#00c3ff", fontSize: 22 }}>✔</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

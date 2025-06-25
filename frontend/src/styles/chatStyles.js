@@ -524,6 +524,133 @@ export const recordBtn = {
   color: "#222",
 };
 
+export const mobileHeader = {
+  position: "fixed",
+  top: 0,
+  left: 0,
+  width: "100vw",
+  height: 56,
+  background: "rgba(30,32,34,0.98)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  zIndex: 100,
+  boxShadow: "0 2px 8px #0002",
+};
+
+export const mobileMenuBtn = {
+  position: "absolute",
+  left: 12,
+  top: 8,
+  width: 40,
+  height: 40,
+  background: "none",
+  border: "none",
+  borderRadius: "50%",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  fontSize: 26,
+  color: "#00c3ff",
+  cursor: "pointer",
+  zIndex: 101,
+};
+
+export const mobileMenuOverlay = {
+  position: "fixed",
+  top: 0,
+  left: 0,
+  width: "100vw",
+  height: "100vh",
+  background: "rgba(0,0,0,0.18)",
+  zIndex: 200,
+  display: "flex",
+  alignItems: "flex-start",
+  justifyContent: "flex-start",
+};
+
+export const mobileMenu = {
+  background: "rgba(30,32,34,0.98)",
+  width: "82vw",
+  maxWidth: 340,
+  minWidth: 220,
+  height: "100vh",
+  boxShadow: "2px 0 16px #0004",
+  borderRadius: "0 18px 18px 0",
+  padding: "18px 0 18px 0",
+  display: "flex",
+  flexDirection: "column",
+  zIndex: 201,
+  animation: "slideInLeft 0.22s",
+};
+
+export const mobileMenuCloseBtn = {
+  position: "absolute",
+  top: 12,
+  right: 18,
+  background: "none",
+  border: "none",
+  color: "#b2bec3",
+  fontSize: 26,
+  cursor: "pointer",
+  zIndex: 202,
+};
+
+export const mobileMenuChannels = {
+  flex: 1,
+  overflowY: "auto",
+  padding: "0 18px",
+  marginBottom: 18,
+};
+
+export const mobileMenuFooter = {
+  padding: "0 18px",
+  display: "flex",
+  flexDirection: "column",
+  gap: 10,
+};
+
+export const mobileMenuTitle = {
+  fontWeight: 700,
+  fontSize: 22,
+  marginBottom: 18,
+  letterSpacing: 1,
+  color: "#00c3ff",
+  textShadow: "0 2px 8px #0002",
+  textAlign: "center",
+};
+
+export const mobileMenuBtnAction = {
+  background: "linear-gradient(90deg,#00c3ff,#3a7bd5)",
+  color: "#fff",
+  border: "none",
+  borderRadius: 8,
+  padding: "10px 0",
+  fontWeight: 600,
+  fontSize: 16,
+  cursor: "pointer",
+  marginBottom: 0,
+  marginTop: 0,
+  boxShadow: "0 2px 8px #00c3ff33",
+  transition: "background 0.2s, box-shadow 0.2s",
+  width: "100%",
+};
+
+export const mobileMenuBtnSecondary = {
+  background: "none",
+  color: "#00c3ff",
+  border: "1px solid #00c3ff",
+  borderRadius: 8,
+  padding: "10px 0",
+  fontWeight: 600,
+  fontSize: 16,
+  cursor: "pointer",
+  marginBottom: 0,
+  marginTop: 0,
+  transition: "background 0.2s, color 0.2s",
+  width: "100%",
+};
+
 // --- Адаптивные стили ---
 export const responsive = `
 @media (max-width: 700px) {
@@ -539,51 +666,9 @@ export const responsive = `
     min-height: 100vh !important;
   }
   .govchat-sidebar {
-    width: 100vw !important;
-    min-width: 0 !important;
-    max-width: 100vw !important;
-    border-radius: 0 !important;
-    box-shadow: none !important;
-    padding: 16px 6vw 10px 6vw !important;
-    position: static !important;
+    display: none !important;
   }
-  .govchat-channel-list {
-    padding-bottom: 80px !important;
+  .govchat-mobile-header {
+    display: flex !important;
   }
-  .govchat-chat-container {
-    padding: 0 !important;
-    min-width: 100vw !important;
-    max-width: 100vw !important;
-    border-radius: 0 !important;
-  }
-  .govchat-chat-box {
-    border-radius: 0 !important;
-    min-width: 100vw !important;
-    max-width: 100vw !important;
-    padding: 10px 2vw 10px 2vw !important;
-  }
-  .govchat-profile-popup {
-    left: 0 !important;
-    top: 0 !important;
-    width: 100vw !important;
-    min-width: 0 !important;
-    max-width: 100vw !important;
-    height: 100vh !important;
-    border-radius: 0 !important;
-    padding: 18px 8vw 10px 8vw !important;
-  }
-  .govchat-profile-avatar {
-    width: 70px !important;
-    height: 70px !important;
-  }
-  .govchat-profile-title {
-    font-size: 17px !important;
-  }
-  .govchat-profile-field {
-    font-size: 15px !important;
-  }
-  .govchat-input-row {
-    padding: 6px 2vw 6px 2vw !important;
-  }
-}
 `;
