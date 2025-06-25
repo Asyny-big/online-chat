@@ -132,9 +132,7 @@ function App() {
       text: "",
       sender: t,
       channel: selectedChannel,
-      fileUrl: uploadRes.data.url.startsWith("http")
-        ? uploadRes.data.url
-        : `${window.location.protocol}//${window.location.hostname}:5000${uploadRes.data.url}`,
+      fileUrl: uploadRes.data.url,
       fileType: uploadRes.data.fileType,
       originalName: uploadRes.data.originalName || "voice-message.webm"
     };
@@ -276,9 +274,7 @@ function App() {
         formData,
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      msg.fileUrl = uploadRes.data.url.startsWith("http")
-        ? uploadRes.data.url
-        : `${window.location.protocol}//${window.location.hostname}:5000${uploadRes.data.url}`;
+      msg.fileUrl = uploadRes.data.url;
       msg.fileType = uploadRes.data.fileType;
       msg.originalName = uploadRes.data.originalName;
     }
@@ -626,9 +622,9 @@ function App() {
                       <img
                         key={userProfile.avatarUrl + avatarVersion}
                         src={
-                          userProfile.avatarUrl.startsWith("http")
+                          userProfile.avatarUrl
                             ? userProfile.avatarUrl + "?t=" + avatarVersion
-                            : `${window.location.protocol}//${window.location.hostname}:5000${userProfile.avatarUrl}?t=${avatarVersion}`
+                            : "/uploads/avatar-default.png"
                         }
                         alt="avatar"
                         style={{
@@ -647,7 +643,7 @@ function App() {
                     ) : (
                       // Показываем дефолтную картинку, если нет пользовательской
                       <img
-                        src={`${window.location.protocol}//${window.location.hostname}:5000/uploads/avatar-default.png`}
+                        src={"/uploads/avatar-default.png"}
                         alt="avatar"
                         style={{
                           width: 90,
