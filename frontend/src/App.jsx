@@ -534,7 +534,46 @@ function App() {
           aria-label="Закрыть"
         >✕</button>
         <div style={chatStyles.mobileMenuTitle}>Каналы</div>
-        {/* Кнопки профиля и кастомизации теперь сразу под заголовком */}
+        <div style={chatStyles.mobileMenuChannels}>
+          {channels.length === 0 ? (
+            <div style={{ color: "#b2bec3", marginBottom: 8 }}>
+              Нет доступных каналов
+            </div>
+          ) : (
+            channels.map((ch) => (
+              <div
+                key={ch._id}
+                style={chatStyles.channelItem(selectedChannel === ch._id)}
+                onClick={() => {
+                  setSelectedChannel(ch._id);
+                  setMobileMenuOpen(false);
+                }}
+              >
+                {ch.name}
+              </div>
+            ))
+          )}
+          <button
+            style={chatStyles.createBtn}
+            onClick={() => setShowCreate((v) => !v)}
+          >
+            {showCreate ? "Скрыть создание" : "Создать канал"}
+          </button>
+          {showCreate && (
+            <div style={{ marginTop: 10 }}>
+              <input
+                style={chatStyles.input}
+                placeholder="Название канала"
+                value={newChannel}
+                onChange={e => setNewChannel(e.target.value)}
+              />
+              <button style={chatStyles.createBtn} onClick={handleCreateChannel}>
+                Создать
+              </button>
+            </div>
+          )}
+        </div>
+        {/* Кнопки профиля и кастомизации теперь после списка каналов */}
         <div
           className="govchat-mobile-profile-actions"
           style={{
@@ -543,7 +582,7 @@ function App() {
             alignItems: "center",
             justifyContent: "center",
             gap: 18,
-            margin: "32px 0 16px 0",
+            margin: "18px 0 16px 0",
           }}
         >
           {/* Профиль */}
@@ -599,45 +638,6 @@ function App() {
               <rect x="8" y="14" width="10" height="4" rx="2" fill="#ffb347" stroke="#fff" strokeWidth="1.5"/>
             </svg>
           </button>
-        </div>
-        <div style={chatStyles.mobileMenuChannels}>
-          {channels.length === 0 ? (
-            <div style={{ color: "#b2bec3", marginBottom: 8 }}>
-              Нет доступных каналов
-            </div>
-          ) : (
-            channels.map((ch) => (
-              <div
-                key={ch._id}
-                style={chatStyles.channelItem(selectedChannel === ch._id)}
-                onClick={() => {
-                  setSelectedChannel(ch._id);
-                  setMobileMenuOpen(false);
-                }}
-              >
-                {ch.name}
-              </div>
-            ))
-          )}
-          <button
-            style={chatStyles.createBtn}
-            onClick={() => setShowCreate((v) => !v)}
-          >
-            {showCreate ? "Скрыть создание" : "Создать канал"}
-          </button>
-          {showCreate && (
-            <div style={{ marginTop: 10 }}>
-              <input
-                style={chatStyles.input}
-                placeholder="Название канала"
-                value={newChannel}
-                onChange={e => setNewChannel(e.target.value)}
-              />
-              <button style={chatStyles.createBtn} onClick={handleCreateChannel}>
-                Создать
-              </button>
-            </div>
-          )}
         </div>
         <div style={chatStyles.mobileMenuFooter}>
           {/* Кнопка "Выйти" убрана из мобильного меню */}
@@ -749,7 +749,13 @@ function App() {
       <div
         style={{
           ...chatStyles.chatContainer,
-          ...(isMobile ? { paddingTop: 64 } : {}),
+          ...(isMobile
+            ? {
+                paddingTop: 40, // уменьшено с 64 до 40
+                height: "calc(100vh - 40px)", // уменьшить высоту чата на мобильном
+                maxHeight: "calc(100vh - 40px)",
+              }
+            : {}),
         }}
         className="govchat-chat-container"
       >
