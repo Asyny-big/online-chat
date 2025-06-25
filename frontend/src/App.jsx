@@ -426,20 +426,20 @@ function App() {
   const themedPageStyle = { ...chatStyles.page, background: theme.pageBg };
   const themedChatBoxStyle = { ...chatStyles.chatBox, background: theme.chatBg };
 
-  // Responsive styles
-  const [responsive, setResponsive] = useState(chatStyles.getResponsiveStyles());
+  // Вставляем адаптивные стили в <head>
   useEffect(() => {
-    function handleResize() {
-      setResponsive(chatStyles.getResponsiveStyles());
+    const styleId = "govchat-responsive-style";
+    if (!document.getElementById(styleId)) {
+      const style = document.createElement("style");
+      style.id = styleId;
+      style.innerHTML = chatStyles.responsive;
+      document.head.appendChild(style);
     }
-    window.addEventListener("resize", handleResize);
-    handleResize();
-    return () => window.removeEventListener("resize", handleResize);
   }, []);
 
   if (!token) {
     return (
-      <div style={responsive.page}>
+      <div style={chatStyles.page}>
         <div style={chatStyles.authContainer}>
           <div style={chatStyles.authTitle}>
             {authMode === "register" ? "Регистрация" : "Вход"}
@@ -490,10 +490,10 @@ function App() {
   }
 
   return (
-    <div style={responsive.page}>
-      <div style={responsive.sidebar}>
-        <div style={responsive.sidebarTitle}>ГоВЧат 2.1 Beta</div>
-        <div style={responsive.channelList}>
+    <div style={themedPageStyle} className="govchat-page">
+      <div style={chatStyles.sidebar} className="govchat-sidebar">
+        <div style={chatStyles.sidebarTitle}>ГоВЧат 2.1 Beta</div>
+        <div style={chatStyles.channelList} className="govchat-channel-list">
           <div style={{ fontWeight: 600, color: "#fff", marginBottom: 10 }}>Каналы</div>
           {channels.length === 0 ? (
             <div style={{ color: "#b2bec3", marginBottom: 8 }}>
@@ -605,10 +605,11 @@ function App() {
                   flexDirection: "column",
                   justifyContent: "flex-start",
                 }}
+                className="govchat-profile-popup"
                 onClick={e => e.stopPropagation()}
               >
                 {/* Новый аватар/значок профиля */}
-                <div style={chatStyles.profileAvatar}>
+                <div style={chatStyles.profileAvatar} className="govchat-profile-avatar">
                   <div
                     style={{
                       position: "relative",
@@ -714,7 +715,7 @@ function App() {
                 }}>
                   {userProfile && !editMode && (
                     <>
-                      <div style={chatStyles.profileTitle}>Профиль</div>
+                      <div style={chatStyles.profileTitle} className="govchat-profile-title">Профиль</div>
                       <div style={chatStyles.profileField}>
                         <span style={chatStyles.profileLabel}>Ник:</span> {userProfile.username}
                       </div>
@@ -937,7 +938,7 @@ function App() {
           </div>
         )}
       </div>
-      <div style={responsive.chatContainer}>
+      <div style={chatStyles.chatContainer} className="govchat-chat-container">
         <div style={{
           display: "flex",
           alignItems: "center",
@@ -949,8 +950,8 @@ function App() {
           <div style={chatStyles.chatTitle}>Чат</div>
         </div>
         <div
-          className="chat-box"
-          style={responsive.chatBox}
+          className="govchat-chat-box"
+          style={themedChatBoxStyle}
         >
           {messages.map((msg) => {
             const isMine = msg.sender === username;
@@ -1115,7 +1116,7 @@ function App() {
           </div>
         )}
 
-        <div style={responsive.inputRow}>
+        <div style={chatStyles.inputRow} className="govchat-input-row">
           {/* Кнопка выбора файла */}
           <button
             style={{

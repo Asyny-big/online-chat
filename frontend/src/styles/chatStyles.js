@@ -524,51 +524,66 @@ export const recordBtn = {
   color: "#222",
 };
 
-// Responsive helper
-export function getResponsiveStyles() {
-  const isMobile = typeof window !== "undefined" && window.innerWidth <= 600;
-  return {
-    page: {
-      ...page,
-      flexDirection: isMobile ? "column" : "row",
-      alignItems: isMobile ? "stretch" : "stretch",
-      justifyContent: isMobile ? "flex-start" : "center",
-      minHeight: "100vh",
-      height: "100vh",
-      width: "100vw",
-      overflow: "hidden",
-    },
-    sidebar: {
-      ...sidebar,
-      width: isMobile ? "100vw" : 260,
-      minWidth: isMobile ? "100vw" : 260,
-      maxWidth: isMobile ? "100vw" : 260,
-      minHeight: isMobile ? "auto" : "100vh",
-      position: isMobile ? "relative" : "relative",
-      padding: isMobile ? "18px 8px 8px 8px" : sidebar.padding,
-      boxShadow: isMobile ? "none" : sidebar.boxShadow,
-      borderRight: isMobile ? "none" : sidebar.borderRight,
-    },
-    chatContainer: {
-      ...chatContainer,
-      padding: isMobile ? "8px 0 8px 0" : chatContainer.padding,
-    },
-    chatBox: {
-      ...chatBox,
-      padding: isMobile ? "10px 4px 10px 4px" : chatBox.padding,
-      borderRadius: isMobile ? "0 0 12px 12px" : chatBox.borderRadius,
-    },
-    inputRow: {
-      ...inputRow,
-      flexDirection: isMobile ? "column" : "row",
-      gap: isMobile ? 4 : 8,
-      padding: isMobile ? "6px 0 6px 0" : inputRow.padding,
-    },
-    sidebarTitle: {
-      ...sidebarTitle,
-      fontSize: isMobile ? 18 : sidebarTitle.fontSize,
-      marginBottom: isMobile ? 10 : sidebarTitle.marginBottom,
-    },
-    // Можно добавить другие стили по необходимости
-  };
+// --- Адаптивные стили ---
+export const responsive = `
+@media (max-width: 700px) {
+  body, #root {
+    min-width: 100vw !important;
+    min-height: 100vh !important;
+    overflow-x: hidden !important;
+  }
+  .govchat-page {
+    flex-direction: column !important;
+    padding: 0 !important;
+    min-width: 100vw !important;
+    min-height: 100vh !important;
+  }
+  .govchat-sidebar {
+    width: 100vw !important;
+    min-width: 0 !important;
+    max-width: 100vw !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    padding: 16px 6vw 10px 6vw !important;
+    position: static !important;
+  }
+  .govchat-channel-list {
+    padding-bottom: 80px !important;
+  }
+  .govchat-chat-container {
+    padding: 0 !important;
+    min-width: 100vw !important;
+    max-width: 100vw !important;
+    border-radius: 0 !important;
+  }
+  .govchat-chat-box {
+    border-radius: 0 !important;
+    min-width: 100vw !important;
+    max-width: 100vw !important;
+    padding: 10px 2vw 10px 2vw !important;
+  }
+  .govchat-profile-popup {
+    left: 0 !important;
+    top: 0 !important;
+    width: 100vw !important;
+    min-width: 0 !important;
+    max-width: 100vw !important;
+    height: 100vh !important;
+    border-radius: 0 !important;
+    padding: 18px 8vw 10px 8vw !important;
+  }
+  .govchat-profile-avatar {
+    width: 70px !important;
+    height: 70px !important;
+  }
+  .govchat-profile-title {
+    font-size: 17px !important;
+  }
+  .govchat-profile-field {
+    font-size: 15px !important;
+  }
+  .govchat-input-row {
+    padding: 6px 2vw 6px 2vw !important;
+  }
 }
+`;

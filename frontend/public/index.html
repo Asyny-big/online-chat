@@ -13,6 +13,14 @@
         overflow: hidden;
         background: none;
       }
+      /* --- Адаптивность для мобильных устройств --- */
+      @media (max-width: 700px) {
+        html, body, #root {
+          height: 100vh;
+          width: 100vw;
+          overflow: auto;
+        }
+      }
     </style>
   </head>
   <body>
