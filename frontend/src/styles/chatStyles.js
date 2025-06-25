@@ -726,8 +726,8 @@ export const responsive = `
     padding-right: 2vw !important;
   }
   .govchat-input-row button[title="Отправить"] {
-    margin-left: 2vw !important;
-    margin-right: 0 !important;
+    margin-left: 0vw !important;
+    margin-right: 7vw !important; /* добавьте или увеличьте это значение */
   }
   .govchat-mobile-profile-actions {
     margin-top: 114px !important;
