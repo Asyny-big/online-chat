@@ -44,13 +44,6 @@ function App() {
     status: "",
     age: "",
   });
-  const [showProfile, setShowProfile] = useState(false);
-  const [showProfileModal, setShowProfileModal] = useState(false);
-  const [profileModalData, setProfileModalData] = useState({
-    city: "",
-    status: "",
-    age: "",
-  });
   const [registering, setRegistering] = useState(false);
   const socketRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -365,14 +358,6 @@ function App() {
     // Если клик по фону (а не по самому popup), закрываем
     setShowProfile(false);
   };
-
-  useEffect(() => {
-    if (userProfile) {
-      setEditData(d => ({
-        ...d,
-      }));
-    }
-  }, [userProfile]);
 
   useEffect(() => {
     document.title = "ГоВЧат 2.1 Beta";
