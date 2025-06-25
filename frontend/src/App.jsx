@@ -496,6 +496,8 @@ function App() {
                 sitekey="6Lddfm0rAAAAAGiUK6xobnuL-5YsdM3eFWbykEB9"
                 onChange={token => setRecaptchaToken(token)}
                 onExpired={() => setRecaptchaToken("")}
+                // Добавлено: сбрасывать токен при смене режима
+                key={authMode}
               />
             </div>
             <button
@@ -513,6 +515,8 @@ function App() {
               setAuthMode(authMode === "register" ? "login" : "register");
               setError("");
               setRecaptchaToken("");
+              setUsername("");
+              setPassword("");
             }}
           >
             {authMode === "register" ? "Войти" : "Регистрация"}

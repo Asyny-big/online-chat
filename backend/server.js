@@ -77,10 +77,13 @@ app.post('/api/register', async (req, res) => {
         response: recaptcha,
       })
     );
+    // Добавлено логирование для отладки
     if (!verifyRes.data.success) {
+      console.log("reCAPTCHA fail:", verifyRes.data);
       return res.status(400).json({ error: 'Ошибка reCAPTCHA' });
     }
-  } catch {
+  } catch (e) {
+    console.log("reCAPTCHA error:", e?.response?.data || e.message);
     return res.status(400).json({ error: 'Ошибка проверки reCAPTCHA' });
   }
   let { username: uname, password: pass } = req.body;
@@ -88,7 +91,7 @@ app.post('/api/register', async (req, res) => {
     return res.status(400).json({ error: 'Имя пользователя обязательно' });
   }
   uname = uname.trim();
-  if (uname.length > 20) {
+  if (uname.length > 15) { // исправлено с 20 на 15
     return res.status(400).json({ error: 'Имя пользователя не должно превышать 15 символов' });
   }
   // Проверка уникальности 
@@ -140,10 +143,13 @@ app.post('/api/login', async (req, res) => {
         response: recaptcha,
       })
     );
+    // Добавлено логирование для отладки
     if (!verifyRes.data.success) {
+      console.log("reCAPTCHA fail:", verifyRes.data);
       return res.status(400).json({ error: 'Ошибка reCAPTCHA' });
     }
-  } catch {
+  } catch (e) {
+    console.log("reCAPTCHA error:", e?.response?.data || e.message);
     return res.status(400).json({ error: 'Ошибка проверки reCAPTCHA' });
   }
   const user = await User.findOne({ username });
