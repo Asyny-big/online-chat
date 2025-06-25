@@ -426,9 +426,20 @@ function App() {
   const themedPageStyle = { ...chatStyles.page, background: theme.pageBg };
   const themedChatBoxStyle = { ...chatStyles.chatBox, background: theme.chatBg };
 
+  // Responsive styles
+  const [responsive, setResponsive] = useState(chatStyles.getResponsiveStyles());
+  useEffect(() => {
+    function handleResize() {
+      setResponsive(chatStyles.getResponsiveStyles());
+    }
+    window.addEventListener("resize", handleResize);
+    handleResize();
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
   if (!token) {
     return (
-      <div style={chatStyles.page}>
+      <div style={responsive.page}>
         <div style={chatStyles.authContainer}>
           <div style={chatStyles.authTitle}>
             {authMode === "register" ? "Регистрация" : "Вход"}
@@ -479,10 +490,10 @@ function App() {
   }
 
   return (
-    <div style={themedPageStyle}>
-      <div style={chatStyles.sidebar}>
-        <div style={chatStyles.sidebarTitle}>ГоВЧат 2.1 Beta</div>
-        <div style={chatStyles.channelList}>
+    <div style={responsive.page}>
+      <div style={responsive.sidebar}>
+        <div style={responsive.sidebarTitle}>ГоВЧат 2.1 Beta</div>
+        <div style={responsive.channelList}>
           <div style={{ fontWeight: 600, color: "#fff", marginBottom: 10 }}>Каналы</div>
           {channels.length === 0 ? (
             <div style={{ color: "#b2bec3", marginBottom: 8 }}>
@@ -926,7 +937,7 @@ function App() {
           </div>
         )}
       </div>
-      <div style={chatStyles.chatContainer}>
+      <div style={responsive.chatContainer}>
         <div style={{
           display: "flex",
           alignItems: "center",
@@ -939,7 +950,7 @@ function App() {
         </div>
         <div
           className="chat-box"
-          style={themedChatBoxStyle}
+          style={responsive.chatBox}
         >
           {messages.map((msg) => {
             const isMine = msg.sender === username;
@@ -1104,7 +1115,7 @@ function App() {
           </div>
         )}
 
-        <div style={chatStyles.inputRow}>
+        <div style={responsive.inputRow}>
           {/* Кнопка выбора файла */}
           <button
             style={{

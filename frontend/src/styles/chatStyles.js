@@ -523,3 +523,52 @@ export const recordBtn = {
   background: "#fff",
   color: "#222",
 };
+
+// Responsive helper
+export function getResponsiveStyles() {
+  const isMobile = typeof window !== "undefined" && window.innerWidth <= 600;
+  return {
+    page: {
+      ...page,
+      flexDirection: isMobile ? "column" : "row",
+      alignItems: isMobile ? "stretch" : "stretch",
+      justifyContent: isMobile ? "flex-start" : "center",
+      minHeight: "100vh",
+      height: "100vh",
+      width: "100vw",
+      overflow: "hidden",
+    },
+    sidebar: {
+      ...sidebar,
+      width: isMobile ? "100vw" : 260,
+      minWidth: isMobile ? "100vw" : 260,
+      maxWidth: isMobile ? "100vw" : 260,
+      minHeight: isMobile ? "auto" : "100vh",
+      position: isMobile ? "relative" : "relative",
+      padding: isMobile ? "18px 8px 8px 8px" : sidebar.padding,
+      boxShadow: isMobile ? "none" : sidebar.boxShadow,
+      borderRight: isMobile ? "none" : sidebar.borderRight,
+    },
+    chatContainer: {
+      ...chatContainer,
+      padding: isMobile ? "8px 0 8px 0" : chatContainer.padding,
+    },
+    chatBox: {
+      ...chatBox,
+      padding: isMobile ? "10px 4px 10px 4px" : chatBox.padding,
+      borderRadius: isMobile ? "0 0 12px 12px" : chatBox.borderRadius,
+    },
+    inputRow: {
+      ...inputRow,
+      flexDirection: isMobile ? "column" : "row",
+      gap: isMobile ? 4 : 8,
+      padding: isMobile ? "6px 0 6px 0" : inputRow.padding,
+    },
+    sidebarTitle: {
+      ...sidebarTitle,
+      fontSize: isMobile ? 18 : sidebarTitle.fontSize,
+      marginBottom: isMobile ? 10 : sidebarTitle.marginBottom,
+    },
+    // Можно добавить другие стили по необходимости
+  };
+}
