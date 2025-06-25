@@ -296,18 +296,14 @@ function App() {
     e.preventDefault();
     setError("");
     setRegistering(true);
-    if (!recaptchaToken) {
-      setError("Пожалуйста, подтвердите, что вы не робот");
-      setRegistering(false);
-      return;
-    }
+    // Убрана проверка reCAPTCHA для регистрации
     try {
       await axios.post(`${API_URL}/register`, {
         username,
         password,
-        recaptcha: recaptchaToken,
+        // recaptcha: recaptchaToken, // убрано
       });
-      // После успешной регистрации запускаем невидимую капчу для автологина
+      // После успешной регистрации сразу логинимся (через капчу)
       if (recaptchaInvisibleRef.current) {
         const newToken = await recaptchaInvisibleRef.current.executeAsync();
         recaptchaInvisibleRef.current.reset();
@@ -498,16 +494,18 @@ function App() {
               required
               autoComplete="current-password"
             />
-            {/* Обычная reCAPTCHA для ручного входа/регистрации */}
+            {/* Обычная reCAPTCHA только для входа */}
             <div style={{ margin: "12px 0", display: "flex", justifyContent: "center" }}>
-              <ReCAPTCHA
-                ref={recaptchaRef}
-                sitekey="6Lddfm0rAAAAAGiUK6xobnuL-5YsdM3eFWbykEB9"
-                onChange={token => setRecaptchaToken(token)}
-                onExpired={() => setRecaptchaToken("")}
-                key={authMode}
-                size="normal"
-              />
+              {authMode === "login" && (
+                <ReCAPTCHA
+                  ref={recaptchaRef}
+                  sitekey="6Lddfm0rAAAAAGiUK6xobnuL-5YsdM3eFWbykEB9"
+                  onChange={token => setRecaptchaToken(token)}
+                  onExpired={() => setRecaptchaToken("")}
+                  key={authMode}
+                  size="normal"
+                />
+              )}
               {/* Невидимая reCAPTCHA для автологина после регистрации */}
               <ReCAPTCHA
                 ref={recaptchaInvisibleRef}
@@ -519,7 +517,7 @@ function App() {
             <button
               style={chatStyles.authBtn}
               type="submit"
-              disabled={registering || !recaptchaToken}
+              disabled={registering || (authMode === "login" && !recaptchaToken)}
             >
               {authMode === "register" ? "Зарегистрироваться" : "Войти"}
             </button>

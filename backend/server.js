@@ -66,32 +66,15 @@ function auth(req, res, next) {
 
 // --- Регистрация и вход ---
 app.post('/api/register', async (req, res) => {
-  let { username, password, recaptcha } = req.body;
-  // Проверка reCAPTCHA
-  if (!recaptcha) return res.status(400).json({ error: 'reCAPTCHA не пройдена' });
-  try {
-    const verifyRes = await axios.post(
-      `https://www.google.com/recaptcha/api/siteverify`,
-      new URLSearchParams({
-        secret: '6Lddfm0rAAAAAOcsDbF3F-f38QZQGeOUeI2EKGlE',
-        response: recaptcha,
-      })
-    );
-    // Добавлено логирование для отладки
-    if (!verifyRes.data.success) {
-      console.log("reCAPTCHA fail:", verifyRes.data);
-      return res.status(400).json({ error: 'Ошибка reCAPTCHA' });
-    }
-  } catch (e) {
-    console.log("reCAPTCHA error:", e?.response?.data || e.message);
-    return res.status(400).json({ error: 'Ошибка проверки reCAPTCHA' });
-  }
-  let { username: uname, password: pass } = req.body;
+  let { username, password } = req.body;
+  // Убрана проверка reCAPTCHA
+  let uname = username;
+  let pass = password;
   if (!uname) {
     return res.status(400).json({ error: 'Имя пользователя обязательно' });
   }
   uname = uname.trim();
-  if (uname.length > 15) { // исправлено с 20 на 15
+  if (uname.length > 15) {
     return res.status(400).json({ error: 'Имя пользователя не должно превышать 15 символов' });
   }
   if (!pass) {
@@ -123,7 +106,7 @@ app.post('/api/register', async (req, res) => {
       age: null,
       city: null,
       status: null,
-      theme: { pageBg: "", chatBg: "" } // добавлено
+      theme: { pageBg: "", chatBg: "" }
     });
     await user.save();
     res.json({ ok: true });
