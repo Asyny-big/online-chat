@@ -1364,22 +1364,23 @@ function App() {
                 zIndex: 2,
                 display: "flex",
                 alignItems: "center",
-                justifyContent: "space-between",
+                justifyContent: "center",
                 padding: "0 4px 0 0",
                 minHeight: 36,
                 marginBottom: 8
               }}>
-                {/* Крестик для выхода из профиля в чат (слева) */}
+                <div style={{ fontWeight: 700, fontSize: 17, color: "#00c3ff", flex: 1, textAlign: "center" }}>Профиль</div>
+                {/* Крестик справа сверху */}
                 <button
                   style={{
                     ...chatStyles.profileCloseBtn,
                     position: "static",
-                    left: 0,
+                    right: 0,
                     top: 0,
                     width: 32,
                     height: 32,
                     fontSize: 22,
-                    marginLeft: 4,
+                    marginRight: 4,
                     marginTop: 0,
                     marginBottom: 0,
                     background: "none",
@@ -1389,9 +1390,6 @@ function App() {
                   onClick={() => setShowProfile(false)}
                   title="Закрыть"
                 >✕</button>
-                <div style={{ fontWeight: 700, fontSize: 17, color: "#00c3ff", marginLeft: 8, flex: 1, textAlign: "center" }}>Профиль</div>
-                {/* Пустой div для выравнивания */}
-                <div style={{ width: 32 }} />
               </div>
             )}
             {/* Новый аватар/значок профиля */}

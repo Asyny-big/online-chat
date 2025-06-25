@@ -336,8 +336,8 @@ export const profileBtn = {
 
 export const profilePopup = {
   position: "fixed",
-  left: 24, // отступ от левого края
-  bottom: 24, // прижато к низу
+  left: 0, // без отступа от левого края
+  bottom: 0, // без отступа от нижнего края
   top: "auto",
   width: 370,
   minWidth: 320,
@@ -346,9 +346,9 @@ export const profilePopup = {
   maxHeight: "80vh",
   background: "#232526",
   color: "#fff",
-  borderRadius: "18px 18px 0 18px",
+  borderRadius: "18px 18px 0 0", // только верхние углы скруглены
   boxShadow: "2px 4px 24px #00c3ff44",
-  padding: "28px 32px 18px 32px", // уменьшили верхний и нижний padding
+  padding: "28px 32px 18px 32px",
   zIndex: 100,
   fontSize: 16,
   display: "flex",
