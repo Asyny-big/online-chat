@@ -581,7 +581,7 @@ function App() {
           justifyContent: "center",
           gap: 18,
           margin: "8px 0 10px 0",
-          marginTop: 8 - 50, // поднять на 50px выше (8 - 50 = -42)
+          marginTop: 50, // поднять на 50px выше (8 - 50 = -42)
         }}>
           {/* Профиль */}
           <button
@@ -1312,27 +1312,31 @@ function App() {
               ...chatStyles.profilePopup,
               ...(isMobile
                 ? {
-                    left: 0,
-                    top: 0,
-                    bottom: 0,
-                    width: "100vw",
+                    // Центрируем и делаем окно на полэкрана
+                    position: "fixed",
+                    left: "50%",
+                    top: "50%",
+                    transform: "translate(-50%, -50%)",
+                    width: "90vw",
+                    maxWidth: 400,
                     minWidth: 0,
-                    maxWidth: "100vw",
-                    height: "100vh",
-                    borderRadius: 0,
+                    height: "50vh",
+                    maxHeight: "60vh",
+                    minHeight: 320,
+                    borderRadius: 16,
                     padding: "16px 8px 8px 8px",
-                    boxShadow: "none",
+                    boxShadow: "0 2px 16px #00c3ff33",
                     fontSize: 15,
+                    display: "flex",
+                    flexDirection: "column",
                   }
-                : {}),
-              transform: showProfile ? "translateY(0)" : "translateY(120%)",
-              opacity: showProfile ? 1 : 0,
-              pointerEvents: showProfile ? "auto" : "none",
+                : {
+                    transform: showProfile ? "translateY(0)" : "translateY(120%)",
+                    opacity: showProfile ? 1 : 0,
+                    pointerEvents: showProfile ? "auto" : "none",
+                  }),
               transition: "transform 0.32s cubic-bezier(.4,1.4,.6,1), opacity 0.22s",
-              display: "flex",
-              flexDirection: "column",
               justifyContent: "flex-start",
-              position: "fixed"
             }}
             className="govchat-profile-popup"
             onClick={e => e.stopPropagation()}
