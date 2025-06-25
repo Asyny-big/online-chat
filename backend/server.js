@@ -29,6 +29,10 @@ const userSchema = new mongoose.Schema({
   city: { type: String, default: null },
   status: { type: String, default: null },
   avatarUrl: { type: String, default: null },
+  theme: {
+    pageBg: { type: String, default: "" },
+    chatBg: { type: String, default: "" }
+  }
 });
 const messageSchema = new mongoose.Schema({
   text: String,
@@ -95,6 +99,7 @@ app.post('/api/register', async (req, res) => {
       age: null,
       city: null,
       status: null,
+      theme: { pageBg: "", chatBg: "" } // добавлено
     });
     await user.save();
     res.json({ ok: true });
@@ -122,6 +127,8 @@ app.post('/api/channels', auth, async (req, res) => {
   const channel = new Channel({ name, members });
   await channel.save();
   res.json(channel);
+  // Новое: уведомить всех клиентов о новом канале
+  io.emit('new-channel');
 });
 app.get('/api/channels', auth, async (req, res) => {
   // Возвращаем абсолютно все каналы для любого пользователя
@@ -218,6 +225,7 @@ app.get('/api/profile', auth, async (req, res) => {
     city: user.city ?? null,
     status: user.status ?? null,
     avatarUrl: user.avatarUrl ?? null,
+    theme: user.theme ?? { pageBg: "", chatBg: "" } // добавлено
   });
 });
 
@@ -227,7 +235,7 @@ app.patch('/api/profile', auth, async (req, res) => {
   const oldUsername = req.user.username;
   const user = await User.findOne({ username: oldUsername });
   if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
-  const { username, password, city, status, age, avatarUrl } = req.body;
+  const { username, password, city, status, age, avatarUrl, theme } = req.body;
   let token = null;
   // Проверка и изменение ника
   if (username && username !== user.username) {
@@ -245,6 +253,7 @@ app.patch('/api/profile', auth, async (req, res) => {
   if (status !== undefined) user.status = status;
   if (age !== undefined && age !== "" && !isNaN(Number(age))) user.age = Number(age);
   if (avatarUrl !== undefined) user.avatarUrl = avatarUrl; // обновление аватара
+  if (theme !== undefined) user.theme = theme; // добавлено
   await user.save();
   const resp = {
     username: user.username,
@@ -252,6 +261,7 @@ app.patch('/api/profile', auth, async (req, res) => {
     city: user.city ?? null,
     status: user.status ?? null,
     avatarUrl: user.avatarUrl ?? null,
+    theme: user.theme ?? { pageBg: "", chatBg: "" } // добавлено
   };
   if (token) resp.token = token;
   res.json(resp);

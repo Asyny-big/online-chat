@@ -310,9 +310,13 @@ export const error = {
 
 export const profileBtnBox = {
   position: "absolute",
-  left: 18,
+  right: 70, // было 38, теперь ещё левее
   bottom: 70,
   zIndex: 10,
+  display: "flex",
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 10,
 };
 
 export const profileBtn = {
@@ -488,4 +492,34 @@ export const profileInput = {
   transition: "border 0.2s",
 };
 
+export const themes = [
+  {
+    name: "Классика",
+    pageBg: "linear-gradient(120deg, #232526 0%, #414345 100%)",
+    chatBg: "rgba(40,42,44,0.98)"
+  },
+  {
+    name: "Светлая",
+    pageBg: "linear-gradient(120deg, #e0eafc 0%, #cfdef3 100%)",
+    chatBg: "#fff"
+  },
+  {
+    name: "Розовый закат",
+    pageBg: "linear-gradient(120deg, #ffafbd 0%, #ffc3a0 100%)",
+    chatBg: "#fff0f6"
+  },
+  {
+    name: "Голубая волна",
+    pageBg: "linear-gradient(120deg, #43cea2 0%, #185a9d 100%)",
+    chatBg: "#e3f6fd"
+  }
+];
+
 // Можно добавить стили для превью файлов и модального окна, если потребуется
+
+// Для кнопки записи используем attachBtn, можно добавить отдельный стиль при необходимости
+export const recordBtn = {
+  ...attachBtn,
+  background: "#fff",
+  color: "#222",
+};

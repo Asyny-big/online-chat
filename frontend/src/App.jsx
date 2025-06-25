@@ -54,12 +54,95 @@ function App() {
   const [registering, setRegistering] = useState(false);
   const socketRef = useRef(null);
   const messagesEndRef = useRef(null);
-  const fileInputRef = React.useRef(null);
+  const fileInputRefChat = React.useRef(null); // для вложений в чат
+  const fileInputRefAvatar = React.useRef(null); // для аватара профиля
   const [avatarVersion, setAvatarVersion] = useState(Date.now());
   const [fileToSend, setFileToSend] = useState(null);
   const [filePreviewUrl, setFilePreviewUrl] = useState(null);
   const [modalMedia, setModalMedia] = useState(null); // {type, url, name}
   const [attachBtnHover, setAttachBtnHover] = useState(false); // Состояние для ховера кнопки вложений
+  const [showCustomizer, setShowCustomizer] = useState(false); // новое состояние
+  const [theme, setTheme] = useState(chatStyles.themes[0]); // выбранная тема
+  const [recording, setRecording] = useState(false);
+  const [recordTime, setRecordTime] = useState(0);
+  const [mediaRecorder, setMediaRecorder] = useState(null);
+  const [audioBlob, setAudioBlob] = useState(null);
+  const [audioUrl, setAudioUrl] = useState(null);
+  const recordTimerRef = useRef(null);
+
+  // Функция для старта записи аудио
+  const startRecording = async () => {
+    if (!navigator.mediaDevices || !window.MediaRecorder) {
+      alert("Ваш браузер не поддерживает запись аудио");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new window.MediaRecorder(stream);
+      let chunks = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
+      };
+      recorder.onstop = () => {
+        const blob = new Blob(chunks, { type: "audio/webm" });
+        setAudioBlob(blob);
+        setAudioUrl(URL.createObjectURL(blob));
+        setRecording(false);
+        setRecordTime(0);
+        stream.getTracks().forEach(track => track.stop());
+      };
+      setMediaRecorder(recorder);
+      setRecording(true);
+      setRecordTime(0);
+      recordTimerRef.current = setInterval(() => {
+        setRecordTime(rt => rt + 1);
+      }, 1000);
+      chunks = [];
+      recorder.start();
+    } catch (err) {
+      alert("Ошибка доступа к микрофону");
+    }
+  };
+
+  // Функция для остановки записи аудио
+  const stopRecording = () => {
+    if (mediaRecorder) {
+      mediaRecorder.stop();
+      setMediaRecorder(null);
+    }
+    setRecording(false);
+    if (recordTimerRef.current) {
+      clearInterval(recordTimerRef.current);
+      recordTimerRef.current = null;
+    }
+  };
+
+  // Функция для отправки аудиосообщения
+  const sendAudioMessage = async () => {
+    if (!audioBlob || !selectedChannel) return;
+    const t = parseToken(token);
+    const formData = new FormData();
+    formData.append("file", audioBlob, "voice-message.webm");
+    const uploadRes = await axios.post(
+      `${API_URL}/upload`,
+      formData,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    const msg = {
+      text: "",
+      sender: t,
+      channel: selectedChannel,
+      fileUrl: uploadRes.data.url.startsWith("http")
+        ? uploadRes.data.url
+        : `${window.location.protocol}//${window.location.hostname}:5000${uploadRes.data.url}`,
+      fileType: uploadRes.data.fileType,
+      originalName: uploadRes.data.originalName || "voice-message.webm"
+    };
+    socketRef.current && socketRef.current.emit("join", selectedChannel);
+    socketRef.current.emit("message", msg);
+    setAudioBlob(null);
+    setAudioUrl(null);
+  };
 
   useEffect(() => {
     setUsername(parseToken(token));
@@ -73,8 +156,18 @@ function App() {
           headers: { Authorization: `Bearer ${token}` },
         });
         setUserProfile(res.data);
+        // Применяем тему из профиля
+        if (res.data.theme && (res.data.theme.pageBg || res.data.theme.chatBg)) {
+          const found = chatStyles.themes.find(
+            t => t.pageBg === res.data.theme.pageBg && t.chatBg === res.data.theme.chatBg
+          );
+          setTheme(found || { ...chatStyles.themes[0], ...res.data.theme });
+        } else {
+          setTheme(chatStyles.themes[0]);
+        }
       } catch {
         setUserProfile(null);
+        setTheme(chatStyles.themes[0]);
       }
     };
     fetchProfile();
@@ -105,7 +198,15 @@ function App() {
       typingTimeoutRef.current = setTimeout(() => setTyping(""), 2000);
     });
 
-    const handleNewChannel = () => window.location.reload();
+    // Новый обработчик: обновлять список каналов при появлении нового
+    const handleNewChannel = () => {
+      axios
+        .get(`${API_URL}/channels`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        .then((res) => setChannels(res.data))
+        .catch(() => setChannels([]));
+    };
     socketRef.current.on("new-channel", handleNewChannel);
 
     return () => {
@@ -157,7 +258,7 @@ function App() {
       setChannels(chs.data);
       setSelectedChannel(res.data._id);
       socketRef.current && socketRef.current.emit("join", res.data._id);
-      socketRef.current && socketRef.current.emit("new-channel");
+      // socketRef.current && socketRef.current.emit("new-channel"); // УДАЛЕНО, теперь сервер сам эмитит
     } catch {
       alert("Ошибка создания канала");
     }
@@ -179,7 +280,6 @@ function App() {
         ? uploadRes.data.url
         : `${window.location.protocol}//${window.location.hostname}:5000${uploadRes.data.url}`;
       msg.fileType = uploadRes.data.fileType;
-      // Используем оригинальное имя пользователя, а не имя файла на сервере
       msg.originalName = uploadRes.data.originalName;
     }
     socketRef.current && socketRef.current.emit("join", selectedChannel);
@@ -187,7 +287,7 @@ function App() {
     setInput("");
     setFileToSend(null);
     setFilePreviewUrl(null);
-    if (fileInputRef.current) fileInputRef.current.value = "";
+    if (fileInputRefChat.current) fileInputRefChat.current.value = "";
   };
 
   // Обработчик регистрации
@@ -312,6 +412,24 @@ function App() {
     }
   }, [fileToSend]);
 
+  // Сохранение выбранной темы в профиль
+  const handleThemeSelect = async (t) => {
+    setTheme(t);
+    setShowCustomizer(false);
+    try {
+      await axios.patch(`${API_URL}/profile`, { theme: { pageBg: t.pageBg, chatBg: t.chatBg } }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setUserProfile((u) => u ? { ...u, theme: { pageBg: t.pageBg, chatBg: t.chatBg } } : u);
+    } catch {
+      // ignore
+    }
+  };
+
+  // Применяем тему к стилям
+  const themedPageStyle = { ...chatStyles.page, background: theme.pageBg };
+  const themedChatBoxStyle = { ...chatStyles.chatBox, background: theme.chatBg };
+
   if (!token) {
     return (
       <div style={chatStyles.page}>
@@ -365,7 +483,7 @@ function App() {
   }
 
   return (
-    <div style={chatStyles.page}>
+    <div style={themedPageStyle}>
       <div style={chatStyles.sidebar}>
         <div style={chatStyles.sidebarTitle}>ГоВЧат 2.1 Beta</div>
         <div style={chatStyles.channelList}>
@@ -407,8 +525,19 @@ function App() {
             </div>
           )}
         </div>
-        <div style={{ flex: 1 }} />
-        <div style={chatStyles.profileBtnBox}>
+        {/* Кнопки профиля и кастомизации в одном боксе справа внизу */}
+        <div style={{
+          ...chatStyles.profileBtnBox,
+          left: "auto",
+          right: 178,
+          bottom: 70,
+          display: "flex",
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 10,
+          zIndex: 10
+        }}>
+          {/* Кнопка профиля */}
           <button
             style={chatStyles.profileBtn}
             onClick={() => {
@@ -423,6 +552,27 @@ function App() {
               <ellipse cx="13" cy="19" rx="7" ry="4" fill="#fff" />
             </svg>
           </button>
+          {/* Кнопка кастомизации */}
+          <button
+            style={{
+              ...chatStyles.profileBtn,
+              background: "none",
+              border: "none",
+              marginRight: 0,
+              marginLeft: 0,
+              boxShadow: "0 2px 8px #00c3ff33"
+            }}
+            onClick={() => setShowCustomizer(v => !v)}
+            title="Кастомизация"
+          >
+            <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
+              <circle cx="13" cy="13" r="13" fill="#ffb347" />
+              <path d="M7 19c0-2 2-4 4-4s4 2 4 4" stroke="#fff" strokeWidth="2" />
+              <rect x="10" y="6" width="6" height="8" rx="2" fill="#fff" stroke="#ffb347" strokeWidth="1.5"/>
+              <rect x="8" y="14" width="10" height="4" rx="2" fill="#ffb347" stroke="#fff" strokeWidth="1.5"/>
+            </svg>
+          </button>
+          {/* Модальное окно профиля */}
           {showProfile && (
             <div
               style={{
@@ -467,7 +617,7 @@ function App() {
                       alignItems: "center",
                       justifyContent: "center",
                     }}
-                    onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                    onClick={() => fileInputRefAvatar.current && fileInputRefAvatar.current.click()}
                     title="Изменить фото"
                   >
                     {/* Показываем пользовательский аватар только если он есть и не дефолтный */}
@@ -516,7 +666,7 @@ function App() {
                       />
                     )}
                     <input
-                      ref={fileInputRef}
+                      ref={fileInputRefAvatar}
                       type="file"
                       accept="image/*"
                       style={{ display: "none" }}
@@ -524,7 +674,6 @@ function App() {
                         if (!e.target.files?.[0]) return;
                         const formData = new FormData();
                         formData.append("file", e.target.files[0]);
-                        // Получаем абсолютный URL для аватара
                         const uploadRes = await axios.post(
                           `${API_URL}/upload?avatar=1`,
                           formData,
@@ -532,13 +681,11 @@ function App() {
                             headers: { Authorization: `Bearer ${token}` },
                           }
                         );
-                        // Принудительно обновляем avatarUrl в профиле (патчим профиль)
                         await axios.patch(
                           `${API_URL}/profile`,
                           { avatarUrl: uploadRes.data.url },
                           { headers: { Authorization: `Bearer ${token}` } }
                         );
-                        // Получаем свежий профиль
                         const profileRes = await axios.get(`${API_URL}/profile`, {
                           headers: { Authorization: `Bearer ${token}` },
                         });
@@ -687,6 +834,101 @@ function App() {
             </div>
           )}
         </div>
+        {/* Модальное окно кастомизации */}
+        {showCustomizer && (
+          <div
+            style={{
+              position: "fixed",
+              left: 0,
+              top: 0,
+              width: "100vw",
+              height: "100vh",
+              background: "rgba(0,0,0,0.12)",
+              zIndex: 120,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center"
+            }}
+            onClick={() => setShowCustomizer(false)}
+          >
+            <div
+              style={{
+                background: "#232526",
+                borderRadius: 16,
+                boxShadow: "0 2px 16px #00c3ff33",
+                padding: "32px 32px 24px 32px",
+                minWidth: 320,
+                maxWidth: 420,
+                zIndex: 121,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                position: "relative"
+              }}
+              onClick={e => e.stopPropagation()}
+            >
+              <button
+                style={{
+                  position: "absolute",
+                  top: 10,
+                  right: 16,
+                  background: "none",
+                  color: "#b2bec3",
+                  border: "none",
+                  borderRadius: "50%",
+                  width: 32,
+                  height: 32,
+                  fontSize: 22,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  transition: "background 0.2s, color 0.2s",
+                  zIndex: 122,
+                }}
+                onClick={() => setShowCustomizer(false)}
+                title="Закрыть"
+              >✕</button>
+              <div style={{ fontWeight: 700, fontSize: 20, color: "#ffb347", marginBottom: 18 }}>
+                Кастомизация оформления
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 18, width: "100%" }}>
+                {chatStyles.themes.map((t, idx) => (
+                  <button
+                    key={t.name}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 16,
+                      width: "100%",
+                      background: t.pageBg,
+                      border: theme.name === t.name ? "2px solid #00c3ff" : "2px solid transparent",
+                      borderRadius: 10,
+                      padding: "12px 18px",
+                      cursor: "pointer",
+                      color: "#222",
+                      fontWeight: 600,
+                      fontSize: 16,
+                      boxShadow: theme.name === t.name ? "0 2px 12px #00c3ff44" : "0 2px 8px #0002",
+                      transition: "border 0.2s, box-shadow 0.2s"
+                    }}
+                    onClick={() => handleThemeSelect(t)}
+                  >
+                    <span style={{
+                      width: 32, height: 32, borderRadius: 8, background: t.chatBg,
+                      border: "1.5px solid #fff", display: "inline-block", marginRight: 8
+                    }} />
+                    <span style={{ color: "#fff", textShadow: "0 1px 4px #0005" }}>{t.name}</span>
+                    {theme.name === t.name && (
+                      <span style={{ marginLeft: "auto", color: "#00c3ff", fontSize: 22 }}>✔</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
       <div style={chatStyles.chatContainer}>
         <div style={{
@@ -701,7 +943,7 @@ function App() {
         </div>
         <div
           className="chat-box"
-          style={chatStyles.chatBox}
+          style={themedChatBoxStyle}
         >
           {messages.map((msg) => {
             const isMine = msg.sender === username;
@@ -720,7 +962,9 @@ function App() {
                   {/* Превью файлов */}
                   {msg.fileUrl && msg.fileType && (
                     <span style={{ display: "block", marginTop: 8 }}>
-                      {msg.fileType.startsWith("image/") ? (
+                      {msg.fileType.startsWith("audio/") ? (
+                        <audio src={msg.fileUrl} controls style={{ maxWidth: 220, borderRadius: 8, background: "#232526" }} />
+                      ) : msg.fileType.startsWith("image/") ? (
                         <img
                           src={msg.fileUrl}
                           alt={msg.originalName || "image"}
@@ -856,7 +1100,7 @@ function App() {
               onClick={() => {
                 setFileToSend(null);
                 setFilePreviewUrl(null);
-                if (fileInputRef.current) fileInputRef.current.value = "";
+                if (fileInputRefChat.current) fileInputRefChat.current.value = "";
               }}
             >
               ✕
@@ -871,16 +1115,17 @@ function App() {
               ...(attachBtnHover ? { ...chatStyles.attachBtn, ...chatStyles.attachBtnHover } : chatStyles.attachBtn),
             }}
             type="button"
-            onClick={() => fileInputRef.current && fileInputRef.current.click()}
+            onClick={() => fileInputRefChat.current && fileInputRefChat.current.click()}
             title="Прикрепить файл"
             tabIndex={-1}
             onMouseEnter={() => setAttachBtnHover(true)}
             onMouseLeave={() => setAttachBtnHover(false)}
+            disabled={false}
           >
             <span style={{ color: "#222", fontSize: 22, display: "flex", alignItems: "center" }}>📎</span>
           </button>
           <input
-            ref={fileInputRef}
+            ref={fileInputRefChat}
             type="file"
             style={{ display: "none" }}
             onChange={e => {
@@ -911,6 +1156,78 @@ function App() {
           >
             Отправить
           </button>
+          {/* Кнопка записи голосового */}
+          <button
+            style={{
+              ...chatStyles.attachBtn,
+              background: recording ? "#ff7675" : "#fff",
+              color: recording ? "#fff" : "#222",
+              marginRight: 2,
+              marginLeft: 0,
+              border: recording ? "2px solid #ff7675" : "none"
+            }}
+            type="button"
+            onClick={() => {
+              if (!recording) startRecording();
+              else stopRecording();
+            }}
+            title={recording ? "Остановить запись" : "Записать голосовое"}
+            disabled={fileToSend || audioBlob}
+          >
+            {recording ? (
+              <span style={{ color: "#fff", fontSize: 22, display: "flex", alignItems: "center" }}>⏺</span>
+            ) : (
+              <span style={{ color: "#222", fontSize: 22, display: "flex", alignItems: "center" }}>🎤</span>
+            )}
+          </button>
+          {/* Отображение времени записи */}
+          {recording && (
+            <span style={{ color: "#ff7675", fontWeight: 600, minWidth: 40 }}>
+              {`${Math.floor(recordTime / 60)
+                .toString()
+                .padStart(2, "0")}:${(recordTime % 60).toString().padStart(2, "0")}`}
+            </span>
+          )}
+          {/* Отображение превью аудиосообщения */}
+          {audioBlob && audioUrl && (
+            <span style={{ display: "flex", alignItems: "center", gap: 6, marginRight: 8 }}>
+              <audio src={audioUrl} controls style={{ height: 32 }} />
+              <button
+                style={{
+                  background: "#ff7675",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 8,
+                  padding: "6px 12px",
+                  fontWeight: 600,
+                  fontSize: 14,
+                  cursor: "pointer",
+                  marginLeft: 4
+                }}
+                onClick={sendAudioMessage}
+                title="Отправить голосовое"
+              >
+                Отправить
+              </button>
+              <button
+                style={{
+                  background: "none",
+                  color: "#ff7675",
+                  border: "none",
+                  fontWeight: 700,
+                  fontSize: 16,
+                  cursor: "pointer"
+                }}
+                title="Удалить запись"
+                onClick={() => {
+                  setAudioBlob(null);
+                  setAudioUrl(null);
+                }}
+              >
+                ✕
+              </button>
+            </span>
+          )}
         </div>
         {/* Модальное окно для просмотра фото/видео */}
         {modalMedia && (
