@@ -967,52 +967,109 @@ function App() {
 
         {/* --- Блок предпрослушивания и отправки голосового сообщения --- */}
         {audioBlob && audioUrl && (
-          <div style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            margin: "8px 0 0 0",
-            background: "#35363a",
-            borderRadius: 8,
-            padding: isMobile ? "6px 10px" : "8px 16px",
-            maxWidth: 420
-          }}>
-            <audio src={audioUrl} controls style={{ height: isMobile ? 24 : 32, maxWidth: 220, borderRadius: 8 }} />
-            <button
-              style={{
-                background: "#ff7675",
-                color: "#fff",
-                border: "none",
-                borderRadius: 8,
-                padding: isMobile ? "4px 8px" : "6px 14px",
-                fontWeight: 600,
-                fontSize: isMobile ? 13 : 15,
-                cursor: "pointer",
-                marginLeft: 4
-              }}
-              onClick={sendAudioMessage}
-              title="Отправить голосовое"
-            >
-              {isMobile ? <span>➤</span> : "Отправить"}
-            </button>
-            <button
-              style={{
-                background: "none",
-                color: "#ff7675",
-                border: "none",
-                fontWeight: 700,
-                fontSize: isMobile ? 16 : 18,
-                cursor: "pointer"
-              }}
-              title="Удалить запись"
-              onClick={() => {
-                setAudioBlob(null);
-                setAudioUrl(null);
-              }}
-            >
-              ✕
-            </button>
-          </div>
+          isMobile ? (
+            <div style={{
+              position: "fixed",
+              left: 0,
+              right: 0,
+              bottom: 58, // чуть выше inputRow (учитываем высоту inputRow)
+              zIndex: 1001,
+              background: "#35363a",
+              borderRadius: "12px 12px 0 0",
+              padding: "10px 12px 10px 12px",
+              maxWidth: "100vw",
+              width: "100vw",
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              boxShadow: "0 -2px 12px #0005",
+              justifyContent: "center",
+              minHeight: 48
+            }}>
+              <audio src={audioUrl} controls style={{ height: 28, maxWidth: 180, borderRadius: 8, background: "#232526" }} />
+              <button
+                style={{
+                  background: "#ff7675",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 8,
+                  padding: "6px 12px",
+                  fontWeight: 600,
+                  fontSize: 15,
+                  cursor: "pointer",
+                  marginLeft: 4
+                }}
+                onClick={sendAudioMessage}
+                title="Отправить голосовое"
+              >
+                ➤
+              </button>
+              <button
+                style={{
+                  background: "none",
+                  color: "#ff7675",
+                  border: "none",
+                  fontWeight: 700,
+                  fontSize: 20,
+                  cursor: "pointer"
+                }}
+                title="Удалить запись"
+                onClick={() => {
+                  setAudioBlob(null);
+                  setAudioUrl(null);
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          ) : (
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              margin: "8px 0 0 0",
+              background: "#35363a",
+              borderRadius: 8,
+              padding: "8px 16px",
+              maxWidth: 420
+            }}>
+              <audio src={audioUrl} controls style={{ height: 32, maxWidth: 220, borderRadius: 8 }} />
+              <button
+                style={{
+                  background: "#ff7675",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 8,
+                  padding: "6px 14px",
+                  fontWeight: 600,
+                  fontSize: 15,
+                  cursor: "pointer",
+                  marginLeft: 4
+                }}
+                onClick={sendAudioMessage}
+                title="Отправить голосовое"
+              >
+                Отправить
+              </button>
+              <button
+                style={{
+                  background: "none",
+                  color: "#ff7675",
+                  border: "none",
+                  fontWeight: 700,
+                  fontSize: 18,
+                  cursor: "pointer"
+                }}
+                title="Удалить запись"
+                onClick={() => {
+                  setAudioBlob(null);
+                  setAudioUrl(null);
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          )
         )}
         <div
           style={{
