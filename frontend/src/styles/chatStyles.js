@@ -655,10 +655,14 @@ export const mobileMenuBtnSecondary = {
 // --- Адаптивные стили ---
 export const responsive = `
 @media (max-width: 700px) {
-  body, #root {
-    min-width: 100vw !important;
+  html, body, #root {
+    height: 100vh !important;
+    width: 100vw !important;
     min-height: 100vh !important;
-    overflow-x: hidden !important;
+    min-width: 100vw !important;
+    max-height: 100vh !important;
+    max-width: 100vw !important;
+    overflow: hidden !important;
   }
   .govchat-page {
     flex-direction: column !important;
@@ -679,6 +683,7 @@ export const responsive = `
     padding-top: 56px !important;
     height: calc(100vh - 56px) !important;
     max-height: calc(100vh - 56px) !important;
+    min-height: calc(100vh - 56px) !important;
     overflow: hidden !important;
   }
   .govchat-chat-box {
@@ -709,18 +714,18 @@ export const responsive = `
     position: fixed !important;
     left: 0 !important;
     right: 0 !important;
-    bottom: 12px !important;
+    bottom: 0 !important;
     width: 100vw !important;
     background: rgba(40,42,44,0.98) !important;
     z-index: 20 !important;
     margin-bottom: 0 !important;
     border-radius: 0 !important;
-    padding-bottom: 0 !important;
+    padding-bottom: env(safe-area-inset-bottom, 0) !important;
+    box-shadow: none !important;
   }
-  /* --- Поднять значки профиля и кастомизации выше в мобильном меню --- */
   .govchat-mobile-profile-actions {
-    margin-top: 32px !important; /* увеличено */
-    margin-bottom: 32px !important; /* увеличено */
+    margin-top: 32px !important;
+    margin-bottom: 32px !important;
     gap: 18px !important;
     display: flex !important;
     flex-direction: row !important;
