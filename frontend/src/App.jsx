@@ -966,6 +966,55 @@ function App() {
         )}
 
         {/* --- Мобильная и десктопная строка ввода --- */}
+        {/* На мобильном аудиосообщение показываем над inputRow, на десктопе — внутри inputRow */}
+        {isMobile && audioBlob && audioUrl && (
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            margin: "8px 0 0 0",
+            background: "#35363a",
+            borderRadius: 8,
+            padding: "6px 10px",
+            maxWidth: 320
+          }}>
+            <audio src={audioUrl} controls style={{ height: 24 }} />
+            <button
+              style={{
+                background: "#ff7675",
+                color: "#fff",
+                border: "none",
+                borderRadius: 8,
+                padding: "4px 8px",
+                fontWeight: 600,
+                fontSize: 12,
+                cursor: "pointer",
+                marginLeft: 4
+              }}
+              onClick={sendAudioMessage}
+              title="Отправить голосовое"
+            >
+              <span>➤</span>
+            </button>
+            <button
+              style={{
+                background: "none",
+                color: "#ff7675",
+                border: "none",
+                fontWeight: 700,
+                fontSize: 14,
+                cursor: "pointer"
+              }}
+              title="Удалить запись"
+              onClick={() => {
+                setAudioBlob(null);
+                setAudioUrl(null);
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        )}
         <div
           style={{
             ...chatStyles.inputRow,
@@ -1121,51 +1170,6 @@ function App() {
               ? <span style={{ fontSize: 18, color: "#fff" }}>➤</span>
               : "Отправить"}
           </button>
-          {/* Отображение превью аудиосообщения */}
-          {audioBlob && audioUrl && (
-            <span style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              marginRight: isMobile ? 2 : 8
-            }}>
-              <audio src={audioUrl} controls style={{ height: isMobile ? 24 : 32 }} />
-              <button
-                style={{
-                  background: "#ff7675",
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: 8,
-                  padding: isMobile ? "4px 8px" : "6px 12px",
-                  fontWeight: 600,
-                  fontSize: isMobile ? 12 : 14,
-                  cursor: "pointer",
-                  marginLeft: 4
-                }}
-                onClick={sendAudioMessage}
-                title="Отправить голосовое"
-              >
-                {isMobile ? <span>➤</span> : "Отправить"}
-              </button>
-              <button
-                style={{
-                  background: "none",
-                  color: "#ff7675",
-                  border: "none",
-                  fontWeight: 700,
-                  fontSize: isMobile ? 14 : 16,
-                  cursor: "pointer"
-                }}
-                title="Удалить запись"
-                onClick={() => {
-                  setAudioBlob(null);
-                  setAudioUrl(null);
-                }}
-              >
-                ✕
-              </button>
-            </span>
-          )}
         </div>
         {/* Модальное окно для просмотра фото/видео */}
         {modalMedia && (
