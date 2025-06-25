@@ -296,27 +296,24 @@ function App() {
     e.preventDefault();
     setError("");
     setRegistering(true);
-    // Убрана проверка reCAPTCHA для регистрации
+    if (!recaptchaToken) {
+      setError("Пожалуйста, подтвердите, что вы не робот");
+      setRegistering(false);
+      return;
+    }
     try {
       await axios.post(`${API_URL}/register`, {
         username,
         password,
-        // recaptcha: recaptchaToken, // убрано
+        recaptcha: recaptchaToken,
       });
-      // После успешной регистрации сразу логинимся (через капчу)
-      if (recaptchaInvisibleRef.current) {
-        const newToken = await recaptchaInvisibleRef.current.executeAsync();
-        recaptchaInvisibleRef.current.reset();
-        const res = await axios.post(`${API_URL}/login`, {
-          username,
-          password,
-          recaptcha: newToken,
-        });
-        localStorage.setItem("token", res.data.token);
-        setToken(res.data.token);
-      } else {
-        setError("Ошибка автоматического входа: не удалось получить reCAPTCHA");
-      }
+      // После успешной регистрации сразу логинимся (без капчи)
+      const res = await axios.post(`${API_URL}/login`, {
+        username,
+        password,
+      });
+      localStorage.setItem("token", res.data.token);
+      setToken(res.data.token);
     } catch (e) {
       let msg = "Ошибка регистрации или входа";
       if (e?.response?.data?.error) msg = e.response.data.error;
@@ -331,16 +328,11 @@ function App() {
     e.preventDefault();
     setError("");
     setRegistering(true);
-    if (!recaptchaToken) {
-      setError("Пожалуйста, подтвердите, что вы не робот");
-      setRegistering(false);
-      return;
-    }
+    // Капча не требуется для входа
     try {
       const res = await axios.post(`${API_URL}/login`, {
         username,
         password,
-        recaptcha: recaptchaToken,
       });
       localStorage.setItem("token", res.data.token);
       setToken(res.data.token);
@@ -494,9 +486,9 @@ function App() {
               required
               autoComplete="current-password"
             />
-            {/* Обычная reCAPTCHA только для входа */}
+            {/* Обычная reCAPTCHA только для регистрации */}
             <div style={{ margin: "12px 0", display: "flex", justifyContent: "center" }}>
-              {authMode === "login" && (
+              {authMode === "register" && (
                 <ReCAPTCHA
                   ref={recaptchaRef}
                   sitekey="6Lddfm0rAAAAAGiUK6xobnuL-5YsdM3eFWbykEB9"
@@ -506,18 +498,11 @@ function App() {
                   size="normal"
                 />
               )}
-              {/* Невидимая reCAPTCHA для автологина после регистрации */}
-              <ReCAPTCHA
-                ref={recaptchaInvisibleRef}
-                sitekey="6Lddfm0rAAAAAGiUK6xobnuL-5YsdM3eFWbykEB9"
-                size="invisible"
-                style={{ display: "none" }}
-              />
             </div>
             <button
               style={chatStyles.authBtn}
               type="submit"
-              disabled={registering || (authMode === "login" && !recaptchaToken)}
+              disabled={registering || (authMode === "register" && !recaptchaToken)}
             >
               {authMode === "register" ? "Зарегистрироваться" : "Войти"}
             </button>
@@ -594,7 +579,8 @@ function App() {
                 {ch.name}
               </div>
             ))
-          )}
+          )
+          }
           <button
             style={chatStyles.createBtn}
             onClick={() => setShowCreate((v) => !v)}
@@ -1361,23 +1347,24 @@ function App() {
               ...chatStyles.profilePopup,
               ...(isMobile
                 ? {
-                    // Центрируем и делаем окно меньше на мобильных
                     position: "fixed",
                     left: "50%",
                     top: "50%",
                     transform: "translate(-50%, -50%)",
-                    width: "90vw",
+                    width: "92vw",
                     maxWidth: 340,
                     minWidth: 0,
                     height: "auto",
-                    maxHeight: "70vh",
-                    minHeight: 320,
-                    borderRadius: 16,
-                    padding: "16px 8px 8px 8px",
+                    maxHeight: "72vh",
+                    minHeight: 240,
+                    borderRadius: 18,
+                    padding: "14px 8px 8px 8px",
                     boxShadow: "0 2px 16px #00c3ff33",
                     fontSize: 15,
                     display: "flex",
                     flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "flex-start",
                   }
                 : {
                     transform: showProfile ? "translateY(0)" : "translateY(120%)",
@@ -1385,7 +1372,6 @@ function App() {
                     pointerEvents: showProfile ? "auto" : "none",
                   }),
               transition: "transform 0.32s cubic-bezier(.4,1.4,.6,1), opacity 0.22s",
-              justifyContent: "flex-start",
             }}
             className="govchat-profile-popup"
             onClick={e => e.stopPropagation()}

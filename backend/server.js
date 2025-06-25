@@ -66,8 +66,25 @@ function auth(req, res, next) {
 
 // --- Регистрация и вход ---
 app.post('/api/register', async (req, res) => {
-  let { username, password } = req.body;
-  // Убрана проверка reCAPTCHA
+  let { username, password, recaptcha } = req.body;
+  // Проверка reCAPTCHA только при регистрации
+  if (!recaptcha) return res.status(400).json({ error: 'reCAPTCHA не пройдена' });
+  try {
+    const verifyRes = await axios.post(
+      `https://www.google.com/recaptcha/api/siteverify`,
+      new URLSearchParams({
+        secret: '6Lddfm0rAAAAAOcsDbF3F-f38QZQGeOUeI2EKGlE',
+        response: recaptcha,
+      })
+    );
+    if (!verifyRes.data.success) {
+      console.log("reCAPTCHA fail:", verifyRes.data);
+      return res.status(400).json({ error: 'Ошибка reCAPTCHA' });
+    }
+  } catch (e) {
+    console.log("reCAPTCHA error:", e?.response?.data || e.message);
+    return res.status(400).json({ error: 'Ошибка проверки reCAPTCHA' });
+  }
   let uname = username;
   let pass = password;
   if (!uname) {
@@ -118,26 +135,8 @@ app.post('/api/register', async (req, res) => {
   }
 });
 app.post('/api/login', async (req, res) => {
-  const { username, password, recaptcha } = req.body;
-  // Проверка reCAPTCHA
-  if (!recaptcha) return res.status(400).json({ error: 'reCAPTCHA не пройдена' });
-  try {
-    const verifyRes = await axios.post(
-      `https://www.google.com/recaptcha/api/siteverify`,
-      new URLSearchParams({
-        secret: '6Lddfm0rAAAAAOcsDbF3F-f38QZQGeOUeI2EKGlE',
-        response: recaptcha,
-      })
-    );
-    // Добавлено логирование для отладки
-    if (!verifyRes.data.success) {
-      console.log("reCAPTCHA fail:", verifyRes.data);
-      return res.status(400).json({ error: 'Ошибка reCAPTCHA' });
-    }
-  } catch (e) {
-    console.log("reCAPTCHA error:", e?.response?.data || e.message);
-    return res.status(400).json({ error: 'Ошибка проверки reCAPTCHA' });
-  }
+  const { username, password } = req.body;
+  // Капча не требуется для входа
   const user = await User.findOne({ username });
   if (!user || !(await bcrypt.compare(password, user.password)))
     return res.status(401).json({ error: 'Неверные данные' });
