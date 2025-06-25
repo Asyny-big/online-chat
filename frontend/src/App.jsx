@@ -72,7 +72,8 @@ function App() {
   const recordTimerRef = useRef(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [recaptchaToken, setRecaptchaToken] = useState("");
-  const recaptchaRef = useRef(null); // добавлено
+  const recaptchaRef = useRef(null); // обычная капча
+  const recaptchaInvisibleRef = useRef(null); // невидимая капча для автологина
 
   // Функция для старта записи аудио
   const startRecording = async () => {
@@ -306,10 +307,10 @@ function App() {
         password,
         recaptcha: recaptchaToken,
       });
-      // После успешной регистрации получаем новый токен и логинимся автоматически
-      if (recaptchaRef.current) {
-        const newToken = await recaptchaRef.current.executeAsync();
-        setRecaptchaToken(newToken);
+      // После успешной регистрации запускаем невидимую капчу для автологина
+      if (recaptchaInvisibleRef.current) {
+        const newToken = await recaptchaInvisibleRef.current.executeAsync();
+        recaptchaInvisibleRef.current.reset();
         const res = await axios.post(`${API_URL}/login`, {
           username,
           password,
@@ -497,7 +498,7 @@ function App() {
               required
               autoComplete="current-password"
             />
-            {/* reCAPTCHA */}
+            {/* Обычная reCAPTCHA для ручного входа/регистрации */}
             <div style={{ margin: "12px 0", display: "flex", justifyContent: "center" }}>
               <ReCAPTCHA
                 ref={recaptchaRef}
@@ -505,7 +506,14 @@ function App() {
                 onChange={token => setRecaptchaToken(token)}
                 onExpired={() => setRecaptchaToken("")}
                 key={authMode}
-                size="normal" // обязательно не "invisible", иначе не будет видно пользователю
+                size="normal"
+              />
+              {/* Невидимая reCAPTCHA для автологина после регистрации */}
+              <ReCAPTCHA
+                ref={recaptchaInvisibleRef}
+                sitekey="6Lddfm0rAAAAAGiUK6xobnuL-5YsdM3eFWbykEB9"
+                size="invisible"
+                style={{ display: "none" }}
               />
             </div>
             <button
