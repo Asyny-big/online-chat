@@ -72,6 +72,7 @@ function App() {
   const recordTimerRef = useRef(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [recaptchaToken, setRecaptchaToken] = useState("");
+  const recaptchaRef = useRef(null); // добавлено
 
   // Функция для старта записи аудио
   const startRecording = async () => {
@@ -305,16 +306,24 @@ function App() {
         password,
         recaptcha: recaptchaToken,
       });
-      // После успешной регистрации НЕ логиним автоматически!
-      setError("Регистрация успешна! Теперь войдите под своими данными.");
-      setAuthMode("login");
-      setRecaptchaToken("");
-      setUsername("");
-      setPassword("");
+      // После успешной регистрации получаем новый токен и логинимся автоматически
+      if (recaptchaRef.current) {
+        const newToken = await recaptchaRef.current.executeAsync();
+        setRecaptchaToken(newToken);
+        const res = await axios.post(`${API_URL}/login`, {
+          username,
+          password,
+          recaptcha: newToken,
+        });
+        localStorage.setItem("token", res.data.token);
+        setToken(res.data.token);
+      } else {
+        setError("Ошибка автоматического входа: не удалось получить reCAPTCHA");
+      }
     } catch (e) {
       setError(
         e?.response?.data?.error ||
-          "Ошибка регистрации"
+          "Ошибка регистрации или входа"
       );
     }
     setRegistering(false);
@@ -491,11 +500,12 @@ function App() {
             {/* reCAPTCHA */}
             <div style={{ margin: "12px 0", display: "flex", justifyContent: "center" }}>
               <ReCAPTCHA
+                ref={recaptchaRef}
                 sitekey="6Lddfm0rAAAAAGiUK6xobnuL-5YsdM3eFWbykEB9"
                 onChange={token => setRecaptchaToken(token)}
                 onExpired={() => setRecaptchaToken("")}
-                // Добавлено: сбрасывать токен при смене режима
                 key={authMode}
+                size="normal" // обязательно не "invisible", иначе не будет видно пользователю
               />
             </div>
             <button
