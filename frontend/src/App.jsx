@@ -1872,6 +1872,11 @@ function App() {
               : "Отправить"}
           </button>
         </div>
+        
+        {/* Модальные окна видеозвонка */}
+        {videoCallModal}
+        {videoCallIncoming}
+        
         {/* Модальное окно для просмотра фото/видео */}
         {modalMedia && (
           <div
