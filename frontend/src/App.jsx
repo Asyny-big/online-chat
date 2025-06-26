@@ -84,6 +84,7 @@ function App() {
   // --- WebRTC helpers ---
   const localVideoRef = useRef(null);
   const remoteVideosRef = useRef({}); // {socketId: ref}
+  const videoPeersRef = useRef({}); // Добавляем ref для синхронного доступа к peers
 
   // --- Видеозвонок: инициация ---
   const startVideoCall = async () => {
@@ -162,9 +163,10 @@ function App() {
 
   // --- Видеозвонок: создать PeerConnection ---
   const createPeer = async (peerId, isInitiator, localStream = null) => {
-    if (videoPeers[peerId]) {
+    // Проверяем в ref, а не в state
+    if (videoPeersRef.current[peerId]) {
       console.log("Peer already exists for:", peerId);
-      return videoPeers[peerId];
+      return videoPeersRef.current[peerId];
     }
     
     // Используем переданный поток или текущий локальный
@@ -182,6 +184,9 @@ function App() {
         { urls: "stun:stun1.l.google.com:19302" }
       ]
     });
+    
+    // Сразу сохраняем в ref для синхронного доступа
+    videoPeersRef.current[peerId] = pc;
     
     // Добавить локальные треки
     streamToUse.getTracks().forEach(track => {
@@ -220,7 +225,7 @@ function App() {
       }
     };
     
-    // Сохранить peer connection
+    // Обновить state
     setVideoPeers(peers => ({ ...peers, [peerId]: pc }));
     
     // Создать offer если мы инициаторы
@@ -250,10 +255,13 @@ function App() {
   const removePeer = (peerId) => {
     console.log("Removing peer:", peerId);
     
+    // Удаляем из ref
+    if (videoPeersRef.current[peerId]) {
+      videoPeersRef.current[peerId].close();
+      delete videoPeersRef.current[peerId];
+    }
+    
     setVideoPeers(peers => {
-      if (peers[peerId]) {
-        peers[peerId].close();
-      }
       const { [peerId]: removed, ...rest } = peers;
       return rest;
     });
@@ -268,10 +276,11 @@ function App() {
   const endVideoCall = () => {
     console.log("Ending video call");
     
-    // Закрыть все peer connections
-    Object.values(videoPeers).forEach(pc => {
+    // Закрыть все peer connections через ref
+    Object.values(videoPeersRef.current).forEach(pc => {
       if (pc) pc.close();
     });
+    videoPeersRef.current = {};
     setVideoPeers({});
     
     // Остановить локальный поток
@@ -737,7 +746,7 @@ function App() {
       
       // Создать PeerConnection для каждого участника
       for (const peerId of participants) {
-        if (peerId !== socketRef.current.id) {
+        if (peerId !== socketRef.current.id && !videoPeersRef.current[peerId]) {
           console.log("Creating peer for existing participant:", peerId);
           await createPeer(peerId, true, localStream);
         }
@@ -746,20 +755,14 @@ function App() {
 
     const onJoined = async ({ user, socketId }) => {
       console.log("User joined call:", user, socketId);
-      if (socketId !== socketRef.current.id) {
+      if (socketId !== socketRef.current.id && !videoPeersRef.current[socketId]) {
         console.log("Creating peer for new participant:", socketId);
-        // Ждем локальный поток если его еще нет
+        // Используем текущий локальный поток
         const localStream = videoStreams.local;
         if (localStream) {
           await createPeer(socketId, false, localStream);
         } else {
-          // Retry after a short delay
-          setTimeout(async () => {
-            const currentStream = videoStreams.local;
-            if (currentStream) {
-              await createPeer(socketId, false, currentStream);
-            }
-          }, 500);
+          console.warn("No local stream available for new participant");
         }
       }
     };
@@ -772,12 +775,14 @@ function App() {
     const onSignal = async ({ from, data, username: remoteName }) => {
       console.log("Received signal from:", from, "type:", data.type || 'candidate');
       
-      if (!videoPeers[from]) {
+      // Используем ref для проверки существования peer
+      let pc = videoPeersRef.current[from];
+      
+      if (!pc && (data.type === "offer" || data.type === "answer")) {
         console.log("Creating peer for signal from:", from);
-        await createPeer(from, false);
+        pc = await createPeer(from, false);
       }
       
-      const pc = videoPeers[from];
       if (!pc) {
         console.error("No peer connection for:", from);
         return;
