@@ -241,11 +241,10 @@ app.post('/api/upload', auth, upload.single('file'), async (req, res) => {
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // --- Раздача production фронтенда ---
-// Исправлено: отдаём index.html если build существует, иначе показываем заглушку
+// отдаём index.html если build существует, иначе показываем заглушку
 const pathToFrontendBuild = path.join(__dirname, '..', 'frontend', 'build');
 if (fs.existsSync(path.join(pathToFrontendBuild, 'index.html'))) {
   app.use(express.static(pathToFrontendBuild));
-  // SPA fallback: отдаём index.html для всех не-API маршрутов
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) return next();
     res.sendFile(path.join(pathToFrontendBuild, 'index.html'));
@@ -274,7 +273,6 @@ if (fs.existsSync(path.join(pathToFrontendBuild, 'index.html'))) {
   });
 }
 
-// SPA fallback: отдаём index.html для всех не-API маршрутов
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) return next();
   res.sendFile(path.join(pathToFrontendBuild, 'index.html'));

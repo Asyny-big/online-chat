@@ -199,7 +199,6 @@ function App() {
 
   // --- Видеозвонок: создать PeerConnection ---
   const createPeer = async (peerId, isInitiator, localStream = null) => {
-    // Проверяем в ref, а не в state
     if (videoPeersRef.current[peerId]) {
       console.log("Peer already exists for:", peerId);
       return videoPeersRef.current[peerId];
@@ -561,7 +560,7 @@ function App() {
       });
     });
 
-    // Новый обработчик: обновлять список каналов при появлении нового
+    // обновлять список каналов при появлении нового
     const handleNewChannel = () => {
       axios
         .get(`${API_URL}/channels`, {
@@ -578,7 +577,6 @@ function App() {
       socketRef.current && socketRef.current.off("video-call-status");
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     };
-    // eslint-disable-next-line
   }, [token]);
 
   useEffect(() => {
@@ -589,9 +587,7 @@ function App() {
         })
         .then((res) => setMessages(res.data));
       socketRef.current && socketRef.current.emit("join", selectedChannel);
-      
       // НОВОЕ: Сбрасываем уведомление о звонке при смене канала
-      // Оно будет восстановлено сервером если звонок активен
       setActiveCallInChannel(null);
     }
   }, [token, selectedChannel]);
@@ -626,7 +622,6 @@ function App() {
       setChannels(chs.data);
       setSelectedChannel(res.data._id);
       socketRef.current && socketRef.current.emit("join", res.data._id);
-      // socketRef.current && socketRef.current.emit("new-channel"); // УДАЛЕНО, теперь сервер сам эмитит
     } catch {
       alert("Ошибка создания канала");
     }
@@ -693,7 +688,6 @@ function App() {
     e.preventDefault();
     setError("");
     setRegistering(true);
-    // Капча не требуется для входа
     try {
       const res = await axios.post(`${API_URL}/login`, {
         username,
@@ -761,7 +755,6 @@ function App() {
       link.id = faviconId;
       document.head.appendChild(link);
     }
-    // SVG-эмодзи-иконка (например, 🦆)
     link.type = "image/svg+xml";
     link.href =
       'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><text y="52" font-size="52">🦆</text></svg>';
@@ -839,9 +832,6 @@ function App() {
 
     const onIncoming = ({ from, channel, initiatorSocketId }) => {
       console.log("Incoming call from:", from, "in channel:", channel, "my channel:", selectedChannel);
-      // ОБНОВЛЕНО: Показываем уведомление если мы находимся в том же канале и не участвуем в звонке
-      // Убираем проверку на from !== username, так как может быть ситуация когда один пользователь
-      // инициировал звонок, а другой присоединился к каналу позже
       if (channel === selectedChannel && !videoCall.active) {
         console.log("Showing incoming call notification");
         setActiveCallInChannel({ from, channel, initiatorSocketId });
@@ -944,7 +934,6 @@ function App() {
             await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
           } catch (error) {
             console.warn("Error adding ICE candidate:", error);
-            // Не прерываем выполнение, так как некоторые кандидаты могут быть неприменимы
           }
         }
       } catch (error) {
@@ -1185,7 +1174,7 @@ function App() {
     </div>
   );
 
-  // --- Уведомление о входящем звонке (теперь постоянное) ---
+  //  Уведомление о входящем звонке
   const videoCallBanner = activeCallInChannel && selectedChannel === activeCallInChannel.channel && !videoCall.active && (
     <div style={chatStyles.videoCallBanner}>
       <div style={chatStyles.videoCallBannerText}>
