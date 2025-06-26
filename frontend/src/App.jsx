@@ -759,6 +759,10 @@ function App() {
       style.innerHTML = chatStyles.responsive;
       document.head.appendChild(style);
     }
+    
+    // Убираем лишние overflow стили с body и html
+    document.documentElement.style.overflow = '';
+    document.body.style.overflow = '';
   }, []);
 
   // Для определения мобильного режима
