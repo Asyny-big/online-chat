@@ -82,11 +82,38 @@ function App() {
   const [mySocketId, setMySocketId] = useState(null);
   const [activeCallInChannel, setActiveCallInChannel] = useState(null); // новое состояние для отслеживания активного звонка в канале
   const [activeCallsInChannels, setActiveCallsInChannels] = useState({}); // новое состояние для отслеживания звонков в каналах
+  // НОВОЕ: состояния для управления микрофоном и камерой
+  const [micEnabled, setMicEnabled] = useState(true);
+  const [cameraEnabled, setCameraEnabled] = useState(true);
 
   // --- WebRTC helpers ---
   const localVideoRef = useRef(null);
   const remoteVideosRef = useRef({}); // {socketId: ref}
   const videoPeersRef = useRef({}); // Добавляем ref для синхронного доступа к peers
+
+  // НОВОЕ: функция переключения микрофона
+  const toggleMicrophone = () => {
+    if (videoStreams.local) {
+      const audioTrack = videoStreams.local.getAudioTracks()[0];
+      if (audioTrack) {
+        audioTrack.enabled = !audioTrack.enabled;
+        setMicEnabled(audioTrack.enabled);
+        console.log("Microphone", audioTrack.enabled ? "enabled" : "disabled");
+      }
+    }
+  };
+
+  // НОВОЕ: функция переключения камеры
+  const toggleCamera = () => {
+    if (videoStreams.local) {
+      const videoTrack = videoStreams.local.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.enabled = !videoTrack.enabled;
+        setCameraEnabled(videoTrack.enabled);
+        console.log("Camera", videoTrack.enabled ? "enabled" : "disabled");
+      }
+    }
+  };
 
   // --- Видеозвонок: инициация ---
   const startVideoCall = async () => {
@@ -109,6 +136,9 @@ function App() {
       setVideoStreams(s => ({ ...s, local: stream }));
       setVideoCall({ active: true, incoming: false, from: null, channel: selectedChannel });
       setActiveCallInChannel(null); // убираем уведомление о входящем звонке
+      // НОВОЕ: сбрасываем состояния микрофона и камеры
+      setMicEnabled(true);
+      setCameraEnabled(true);
       
       // Сначала присоединяемся к звонку
       socketRef.current.emit("video-call-join", { channel: selectedChannel });
@@ -149,6 +179,9 @@ function App() {
         channel: activeCallInChannel?.channel 
       });
       setActiveCallInChannel(null); // убираем уведомление
+      // НОВОЕ: сбрасываем состояния микрофона и камеры
+      setMicEnabled(true);
+      setCameraEnabled(true);
       
       // Присоединяемся к звонку
       socketRef.current.emit("video-call-join", { channel: activeCallInChannel?.channel });
@@ -358,6 +391,9 @@ function App() {
     setVideoCall({ active: false, incoming: false, from: null });
     setVideoConnecting(false);
     setVideoError("");
+    // НОВОЕ: сбрасываем состояния микрофона и камеры
+    setMicEnabled(true);
+    setCameraEnabled(true);
   };
 
   // --- Видеозвонок: покинуть звонок ---
@@ -1051,28 +1087,81 @@ function App() {
           
           {/* Мое видео - маленькое в углу */}
           {videoStreams.local && (
-            <video
-              ref={localVideoRef}
-              autoPlay
-              muted
-              playsInline
-              style={{
-                position: "absolute",
-                bottom: 12,
-                right: 12,
-                width: isMobile ? 80 : 120,
-                height: isMobile ? 60 : 90,
-                objectFit: "cover",
-                borderRadius: 8,
-                border: "2px solid #00c3ff",
-                background: "#000",
-                zIndex: 10,
-              }}
-            />
+            <div style={{
+              position: "absolute",
+              bottom: 12,
+              right: 12,
+              width: isMobile ? 80 : 120,
+              height: isMobile ? 60 : 90,
+              borderRadius: 8,
+              border: "2px solid #00c3ff",
+              background: "#000",
+              zIndex: 10,
+              overflow: "hidden",
+            }}>
+              {cameraEnabled ? (
+                <video
+                  ref={localVideoRef}
+                  autoPlay
+                  muted
+                  playsInline
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "cover",
+                  }}
+                />
+              ) : (
+                <div style={{
+                  width: "100%",
+                  height: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: "#333",
+                  color: "#fff",
+                  fontSize: isMobile ? 20 : 24,
+                }}>
+                  📷
+                </div>
+              )}
+            </div>
           )}
         </div>
         
-        <div style={chatStyles.videoCallControls}>
+        <div style={{
+          ...chatStyles.videoCallControls,
+          gap: 12,
+          flexWrap: "wrap",
+          justifyContent: "center",
+        }}>
+          {/* Кнопка микрофона */}
+          <button
+            style={{
+              ...chatStyles.videoCallControlBtn,
+              background: micEnabled ? "#35363a" : "#ff7675",
+              color: "#fff",
+            }}
+            onClick={toggleMicrophone}
+            title={micEnabled ? "Выключить микрофон" : "Включить микрофон"}
+          >
+            {micEnabled ? "🎤" : "🔇"}
+          </button>
+          
+          {/* Кнопка камеры */}
+          <button
+            style={{
+              ...chatStyles.videoCallControlBtn,
+              background: cameraEnabled ? "#35363a" : "#ff7675",
+              color: "#fff",
+            }}
+            onClick={toggleCamera}
+            title={cameraEnabled ? "Выключить камеру" : "Включить камеру"}
+          >
+            {cameraEnabled ? "📹" : "📷"}
+          </button>
+          
+          {/* Кнопка завершения */}
           <button
             style={chatStyles.videoCallEndBtn}
             onClick={leaveVideoCall}
@@ -1901,7 +1990,7 @@ function App() {
                 ? {
                     width: 34,
                     height: 34,
-                    minWidth: 34,
+                    minWidth:  34,
                     minHeight: 34,
                     fontSize: 18,
                     marginRight: 2,
