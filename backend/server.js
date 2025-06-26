@@ -381,7 +381,7 @@ io.on('connection', (socket) => {
   socket.on('video-call-join', ({ channel }) => {
     if (!activeCalls[channel]) activeCalls[channel] = new Set();
     activeCalls[channel].add(socket.id);
-    // Сообщить новому участнику о других участниках звонка
+    // Сообщить новому участнику о других участниках звонка (их socket.id)
     const others = Array.from(activeCalls[channel]).filter(id => id !== socket.id);
     socket.emit('video-call-participants', { participants: others });
     // Оповестить других, что пользователь присоединился к звонку
@@ -391,7 +391,6 @@ io.on('connection', (socket) => {
   socket.on('video-call-leave', ({ channel }) => {
     if (activeCalls[channel]) activeCalls[channel].delete(socket.id);
     socket.to(channel).emit('video-call-left', { user: socket.user.username, socketId: socket.id });
-    // Если никого не осталось — удалить комнату
     if (activeCalls[channel] && activeCalls[channel].size === 0) delete activeCalls[channel];
   });
 
@@ -408,7 +407,7 @@ io.on('connection', (socket) => {
 
   // WebRTC signaling: offer/answer/candidate
   socket.on('video-signal', ({ channel, to, data }) => {
-    // Переслать сигнал конкретному участнику
+    // Переслать сигнал конкретному участнику по socket.id
     if (to) {
       io.to(to).emit('video-signal', { from: socket.id, data, username: socket.user.username });
     }

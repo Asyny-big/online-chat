@@ -475,8 +475,11 @@ function App() {
     socketRef.current.on("connect", () => setMySocketId(socketRef.current.id));
 
     // Входящий звонок
-    const onIncoming = ({ from }) => {
-      setVideoCall({ active: false, incoming: true, from });
+    const onIncoming = ({ from, channel }) => {
+      // Если звонок инициировал не я, показываем уведомление
+      if (from !== username) {
+        setVideoCall({ active: false, incoming: true, from });
+      }
     };
 
     // Список участников звонка (при входе)
@@ -489,7 +492,7 @@ function App() {
 
     // Новый участник присоединился
     const onJoined = async ({ user, socketId }) => {
-      if (socketId !== mySocketId) {
+      if (socketId !== socketRef.current.id) {
         await createPeer(socketId, true);
       }
     };
@@ -542,7 +545,7 @@ function App() {
       socketRef.current.off("video-call-ended", onEnded);
     };
     // eslint-disable-next-line
-  }, [socketRef.current, selectedChannel, videoPeers, videoStreams.local, mySocketId]);
+  }, [socketRef.current, selectedChannel, videoPeers, videoStreams.local, mySocketId, username]);
 
   // --- Видеозвонок: инициация ---
   const startVideoCall = async () => {
