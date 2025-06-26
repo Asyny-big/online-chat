@@ -1960,7 +1960,6 @@ function App() {
         
         {/* Модальные окна видеозвонка */}
         {videoCallModal}
-        {videoCallIncoming}
         
         {/* Модальное окно для просмотра фото/видео */}
         {modalMedia && (
