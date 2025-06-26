@@ -181,8 +181,28 @@ function App() {
     const pc = new RTCPeerConnection({
       iceServers: [
         { urls: "stun:stun.l.google.com:19302" },
-        { urls: "stun:stun1.l.google.com:19302" }
-      ]
+        { urls: "stun:stun1.l.google.com:19302" },
+        { urls: "stun:stun2.l.google.com:19302" },
+        { urls: "stun:stun3.l.google.com:19302" },
+        { urls: "stun:stun4.l.google.com:19302" },
+        // Добавляем публичные TURN серверы для лучшей связности
+        {
+          urls: "turn:openrelay.metered.ca:80",
+          username: "openrelayproject",
+          credential: "openrelayproject"
+        },
+        {
+          urls: "turn:openrelay.metered.ca:443",
+          username: "openrelayproject", 
+          credential: "openrelayproject"
+        },
+        {
+          urls: "turn:openrelay.metered.ca:443?transport=tcp",
+          username: "openrelayproject",
+          credential: "openrelayproject"
+        }
+      ],
+      iceCandidatePoolSize: 10
     });
     
     // Сразу сохраняем в ref для синхронного доступа
@@ -197,31 +217,68 @@ function App() {
     // Обработка ICE кандидатов
     pc.onicecandidate = (event) => {
       if (event.candidate) {
-        console.log("Sending ICE candidate to:", peerId);
+        console.log("Sending ICE candidate to:", peerId, event.candidate.type);
         socketRef.current.emit("video-signal", {
           channel: selectedChannel,
           to: peerId,
           data: { candidate: event.candidate }
         });
+      } else {
+        console.log("ICE gathering completed for:", peerId);
       }
     };
     
     // Обработка удаленного потока
     pc.ontrack = (event) => {
-      console.log("Received remote stream from:", peerId);
+      console.log("Received remote stream from:", peerId, "tracks:", event.streams[0].getTracks().length);
       const remoteStream = event.streams[0];
-      setVideoStreams(s => ({
-        ...s,
-        remotes: { ...s.remotes, [peerId]: remoteStream }
-      }));
+      
+      // Проверяем что поток содержит треки
+      if (remoteStream.getTracks().length > 0) {
+        setVideoStreams(s => ({
+          ...s,
+          remotes: { ...s.remotes, [peerId]: remoteStream }
+        }));
+      } else {
+        console.warn("Received empty stream from:", peerId);
+      }
     };
     
-    // Мониторинг состояния соединения
+    // Расширенный мониторинг состояния соединения
     pc.onconnectionstatechange = () => {
       console.log(`Connection state with ${peerId}:`, pc.connectionState);
-      if (["disconnected", "failed", "closed"].includes(pc.connectionState)) {
-        console.log("Removing failed peer:", peerId);
-        removePeer(peerId);
+      
+      if (pc.connectionState === "connected") {
+        console.log("✅ WebRTC connection established with:", peerId);
+        setVideoError(""); // Очищаем ошибки при успешном соединении
+      } else if (pc.connectionState === "connecting") {
+        console.log("🔄 Connecting to:", peerId);
+      } else if (["disconnected", "failed", "closed"].includes(pc.connectionState)) {
+        console.log("❌ Connection failed/closed with:", peerId, "- removing peer");
+        
+        // Показываем ошибку только если это было активное соединение
+        if (pc.connectionState === "failed") {
+          setVideoError("Не удалось установить соединение. Проверьте подключение к интернету.");
+        }
+        
+        // Небольшая задержка перед удалением для возможного восстановления
+        setTimeout(() => {
+          if (videoPeersRef.current[peerId] && 
+              ["disconnected", "failed", "closed"].includes(videoPeersRef.current[peerId].connectionState)) {
+            removePeer(peerId);
+          }
+        }, 3000);
+      }
+    };
+    
+    // Мониторинг ICE состояния
+    pc.oniceconnectionstatechange = () => {
+      console.log(`ICE connection state with ${peerId}:`, pc.iceConnectionState);
+      
+      if (pc.iceConnectionState === "failed") {
+        console.log("ICE connection failed with:", peerId, "- attempting restart");
+        // Попытка перезапуска ICE
+        pc.restartIce();
       }
     };
     
@@ -234,10 +291,12 @@ function App() {
         console.log("Creating offer for:", peerId);
         const offer = await pc.createOffer({
           offerToReceiveAudio: true,
-          offerToReceiveVideo: true
+          offerToReceiveVideo: true,
+          voiceActivityDetection: false // отключаем VAD для стабильности
         });
         await pc.setLocalDescription(offer);
         
+        console.log("Sending offer to:", peerId);
         socketRef.current.emit("video-signal", {
           channel: selectedChannel,
           to: peerId,
@@ -245,6 +304,7 @@ function App() {
         });
       } catch (error) {
         console.error("Error creating offer for", peerId, ":", error);
+        setVideoError("Ошибка создания предложения соединения");
       }
     }
     
@@ -744,10 +804,12 @@ function App() {
       
       const localStream = await waitForLocalStream();
       
-      // Создать PeerConnection для каждого участника
+      // Создать PeerConnection для каждого участника с небольшой задержкой
       for (const peerId of participants) {
         if (peerId !== socketRef.current.id && !videoPeersRef.current[peerId]) {
           console.log("Creating peer for existing participant:", peerId);
+          // Добавляем задержку между созданием peer connections
+          await new Promise(resolve => setTimeout(resolve, 500));
           await createPeer(peerId, true, localStream);
         }
       }
@@ -760,6 +822,8 @@ function App() {
         // Используем текущий локальный поток
         const localStream = videoStreams.local;
         if (localStream) {
+          // Добавляем небольшую задержку для стабильности
+          await new Promise(resolve => setTimeout(resolve, 1000));
           await createPeer(socketId, false, localStream);
         } else {
           console.warn("No local stream available for new participant");
@@ -792,8 +856,14 @@ function App() {
         if (data.type === "offer") {
           console.log("Processing offer from:", from);
           await pc.setRemoteDescription(new RTCSessionDescription(data));
-          const answer = await pc.createAnswer();
+          const answer = await pc.createAnswer({
+            offerToReceiveAudio: true,
+            offerToReceiveVideo: true,
+            voiceActivityDetection: false
+          });
           await pc.setLocalDescription(answer);
+          
+          console.log("Sending answer to:", from);
           socketRef.current.emit("video-signal", { 
             channel: selectedChannel, 
             to: from, 
@@ -803,11 +873,17 @@ function App() {
           console.log("Processing answer from:", from);
           await pc.setRemoteDescription(new RTCSessionDescription(data));
         } else if (data.candidate) {
-          console.log("Adding ICE candidate from:", from);
-          await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+          console.log("Adding ICE candidate from:", from, "type:", data.candidate.type);
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+          } catch (error) {
+            console.warn("Error adding ICE candidate:", error);
+            // Не прерываем выполнение, так как некоторые кандидаты могут быть неприменимы
+          }
         }
       } catch (error) {
         console.error("Error handling signal from", from, ":", error);
+        setVideoError("Ошибка обработки сигнала соединения");
       }
     };
 
@@ -833,7 +909,7 @@ function App() {
       socketRef.current?.off("video-signal", onSignal);
       socketRef.current?.off("video-call-ended", onEnded);
     };
-  }, [selectedChannel, username, videoStreams.local]); // Добавили videoStreams.local в зависимости
+  }, [selectedChannel, username, videoStreams.local]);
 
   // --- Видеозвонок: отображение видео ---
   useEffect(() => {
