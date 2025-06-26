@@ -91,26 +91,111 @@ function App() {
   const remoteVideosRef = useRef({}); // {socketId: ref}
   const videoPeersRef = useRef({}); // Добавляем ref для синхронного доступа к peers
 
-  // НОВОЕ: функция переключения микрофона
-  const toggleMicrophone = () => {
-    if (videoStreams.local) {
-      const audioTrack = videoStreams.local.getAudioTracks()[0];
-      if (audioTrack) {
-        audioTrack.enabled = !audioTrack.enabled;
-        setMicEnabled(audioTrack.enabled);
-        console.log("Microphone", audioTrack.enabled ? "enabled" : "disabled");
+  // НОВОЕ: улучшенная функция переключения камеры
+  const toggleCamera = async () => {
+    if (!videoStreams.local) return;
+    
+    if (cameraEnabled) {
+      // Отключаем камеру
+      const videoTrack = videoStreams.local.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.stop();
+        // Удаляем трек из потока
+        videoStreams.local.removeTrack(videoTrack);
+        setCameraEnabled(false);
+        
+        // Уведомляем peer connections об удалении трека
+        Object.values(videoPeersRef.current).forEach(pc => {
+          const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+          if (sender) {
+            pc.removeTrack(sender);
+          }
+        });
+      }
+    } else {
+      // Включаем камеру
+      try {
+        const newStream = await navigator.mediaDevices.getUserMedia({ 
+          video: true, 
+          audio: false 
+        });
+        
+        const newVideoTrack = newStream.getVideoTracks()[0];
+        if (newVideoTrack) {
+          // Добавляем новый трек в существующий поток
+          videoStreams.local.addTrack(newVideoTrack);
+          setCameraEnabled(true);
+          
+          // Добавляем трек в существующие peer connections
+          Object.values(videoPeersRef.current).forEach(async pc => {
+            try {
+              await pc.addTrack(newVideoTrack, videoStreams.local);
+            } catch (error) {
+              console.warn("Error adding video track to peer:", error);
+            }
+          });
+          
+          // Обновляем локальное видео
+          if (localVideoRef.current) {
+            localVideoRef.current.srcObject = videoStreams.local;
+          }
+          
+          console.log("Camera enabled successfully");
+        }
+      } catch (error) {
+        console.error("Error enabling camera:", error);
+        setVideoError("Не удалось включить камеру: " + error.message);
       }
     }
   };
 
-  // НОВОЕ: функция переключения камеры
-  const toggleCamera = () => {
-    if (videoStreams.local) {
-      const videoTrack = videoStreams.local.getVideoTracks()[0];
-      if (videoTrack) {
-        videoTrack.enabled = !videoTrack.enabled;
-        setCameraEnabled(videoTrack.enabled);
-        console.log("Camera", videoTrack.enabled ? "enabled" : "disabled");
+  // НОВОЕ: улучшенная функция переключения микрофона
+  const toggleMicrophone = async () => {
+    if (!videoStreams.local) return;
+    
+    if (micEnabled) {
+      // Отключаем микрофон
+      const audioTrack = videoStreams.local.getAudioTracks()[0];
+      if (audioTrack) {
+        audioTrack.stop();
+        videoStreams.local.removeTrack(audioTrack);
+        setMicEnabled(false);
+        
+        // Уведомляем peer connections об удалении трека
+        Object.values(videoPeersRef.current).forEach(pc => {
+          const sender = pc.getSenders().find(s => s.track && s.track.kind === 'audio');
+          if (sender) {
+            pc.removeTrack(sender);
+          }
+        });
+      }
+    } else {
+      // Включаем микрофон
+      try {
+        const newStream = await navigator.mediaDevices.getUserMedia({ 
+          video: false, 
+          audio: true 
+        });
+        
+        const newAudioTrack = newStream.getAudioTracks()[0];
+        if (newAudioTrack) {
+          videoStreams.local.addTrack(newAudioTrack);
+          setMicEnabled(true);
+          
+          // Добавляем трек в существующие peer connections
+          Object.values(videoPeersRef.current).forEach(async pc => {
+            try {
+              await pc.addTrack(newAudioTrack, videoStreams.local);
+            } catch (error) {
+              console.warn("Error adding audio track to peer:", error);
+            }
+          });
+          
+          console.log("Microphone enabled successfully");
+        }
+      } catch (error) {
+        console.error("Error enabling microphone:", error);
+        setVideoError("Не удалось включить микрофон: " + error.message);
       }
     }
   };
@@ -250,6 +335,28 @@ function App() {
       console.log("Adding track to peer:", peerId, track.kind);
       pc.addTrack(track, streamToUse);
     });
+    
+    // НОВОЕ: обработка изменений треков в локальном потоке
+    const handleTrackUpdate = () => {
+      // Обновляем треки при изменении локального потока
+      const currentTracks = streamToUse.getTracks();
+      const senders = pc.getSenders();
+      
+      // Удаляем старые треки
+      senders.forEach(sender => {
+        if (sender.track && !currentTracks.includes(sender.track)) {
+          pc.removeTrack(sender);
+        }
+      });
+      
+      // Добавляем новые треки
+      currentTracks.forEach(track => {
+        const existingSender = senders.find(s => s.track === track);
+        if (!existingSender) {
+          pc.addTrack(track, streamToUse);
+        }
+      });
+    };
     
     // Обработка ICE кандидатов
     pc.onicecandidate = (event) => {
