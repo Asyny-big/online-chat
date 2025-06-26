@@ -768,6 +768,7 @@ export const videoCallIncomingBox = {
   flexDirection: "column",
   alignItems: "center",
   zIndex: 2100,
+  position: "relative", // добавлено для корректного позиционирования
 };
 
 export const videoCallIncomingBtn = {

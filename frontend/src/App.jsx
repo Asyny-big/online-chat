@@ -479,9 +479,10 @@ function App() {
 
     // Входящий звонок
     const onIncoming = ({ from, channel }) => {
-      console.log("Incoming call from:", from, "in channel:", channel);
-      // Если звонок инициировал не я, показываем уведомление
-      if (from !== username) {
+      console.log("Incoming call from:", from, "in channel:", channel, "selected channel:", selectedChannel);
+      // Показываем уведомление только если мы находимся в том же канале и звонок не от нас
+      if (from !== username && channel === selectedChannel) {
+        console.log("Showing incoming call notification");
         setVideoCall({ active: false, incoming: true, from });
       }
     };
@@ -557,7 +558,7 @@ function App() {
       socketRef.current?.off("video-signal", onSignal);
       socketRef.current?.off("video-call-ended", onEnded);
     };
-  }, [selectedChannel, username]); // Убрал videoPeers и videoStreams.local из зависимостей
+  }, [selectedChannel, username, videoPeers, videoStreams.local]); // Добавил зависимости
 
   // --- Видеозвонок: инициация ---
   const startVideoCall = async () => {
@@ -573,8 +574,13 @@ function App() {
       
       // Сначала присоединяемся к звонку
       socketRef.current.emit("video-call-join", { channel: selectedChannel });
-      // Потом инициируем звонок для других
-      socketRef.current.emit("video-call-initiate", { channel: selectedChannel });
+      
+      // Небольшая задержка, чтобы сервер успел обработать присоединение
+      setTimeout(() => {
+        // Потом инициируем звонок для других (отправляем уведомления)
+        console.log("Initiating call for others in channel:", selectedChannel);
+        socketRef.current.emit("video-call-initiate", { channel: selectedChannel });
+      }, 100);
       
       // Если никого нет в звонке, убираем состояние подключения через небольшую задержку
       setTimeout(() => {

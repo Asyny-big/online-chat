@@ -374,13 +374,20 @@ io.on('connection', (socket) => {
   // --- Видеозвонки ---
   socket.on('video-call-initiate', ({ channel }) => {
     console.log(`User ${socket.user.username} initiating call in channel ${channel}`);
-    if (!activeCalls[channel]) activeCalls[channel] = new Set();
+    console.log(`Sending incoming call notification to channel ${channel} (except initiator)`);
     // Оповестить всех в канале (кроме инициатора) о входящем звонке
-    socket.to(channel).emit('video-call-incoming', { from: socket.user.username, channel });
+    socket.to(channel).emit('video-call-incoming', { 
+      from: socket.user.username, 
+      channel 
+    });
   });
 
   socket.on('video-call-join', ({ channel }) => {
     console.log(`User ${socket.user.username} joining call in channel ${channel}`);
+    
+    // Присоединиться к комнате канала (если еще не присоединился)
+    socket.join(channel);
+    
     if (!activeCalls[channel]) activeCalls[channel] = new Set();
     
     // Получить список других участников до добавления текущего
@@ -394,7 +401,12 @@ io.on('connection', (socket) => {
     socket.emit('video-call-participants', { participants: others });
     
     // Оповестить других, что пользователь присоединился к звонку
-    socket.to(channel).emit('video-call-joined', { user: socket.user.username, socketId: socket.id });
+    socket.to(channel).emit('video-call-joined', { 
+      user: socket.user.username, 
+      socketId: socket.id 
+    });
+    
+    console.log(`Active calls in ${channel}:`, Array.from(activeCalls[channel]));
   });
 
   socket.on('video-call-leave', ({ channel }) => {
