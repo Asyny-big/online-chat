@@ -661,6 +661,128 @@ export const mobileMenuBtnSecondary = {
   width: "100%",
 };
 
+export const videoCallBtn = {
+  background: "none",
+  border: "none",
+  color: "#00c3ff",
+  fontSize: 26,
+  cursor: "pointer",
+  marginLeft: 8,
+  marginRight: 0,
+  padding: 0,
+  borderRadius: "50%",
+  width: 38,
+  height: 38,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  transition: "background 0.18s, color 0.18s",
+  boxShadow: "0 2px 8px #00c3ff22",
+};
+
+export const videoCallBtnActive = {
+  background: "#00c3ff",
+  color: "#fff",
+};
+
+export const videoCallModal = {
+  position: "fixed",
+  left: 0,
+  top: 0,
+  width: "100vw",
+  height: "100vh",
+  background: "rgba(0,0,0,0.75)",
+  zIndex: 2000,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  flexDirection: "column",
+};
+
+export const videoCallBox = {
+  background: "#232526",
+  borderRadius: 16,
+  boxShadow: "0 2px 16px #00c3ff33",
+  padding: "18px 18px 12px 18px",
+  minWidth: 280,
+  maxWidth: 480,
+  minHeight: 220,
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  position: "relative",
+};
+
+export const videoRow = {
+  display: "flex",
+  flexDirection: "row",
+  gap: 10,
+  alignItems: "center",
+  justifyContent: "center",
+  width: "100%",
+  marginBottom: 10,
+};
+
+export const video = {
+  width: 180,
+  height: 130,
+  background: "#000",
+  borderRadius: 10,
+  objectFit: "cover",
+};
+
+export const videoCallControls = {
+  display: "flex",
+  flexDirection: "row",
+  gap: 16,
+  marginTop: 10,
+  alignItems: "center",
+  justifyContent: "center",
+};
+
+export const videoCallEndBtn = {
+  background: "#ff7675",
+  color: "#fff",
+  border: "none",
+  borderRadius: 8,
+  padding: "8px 18px",
+  fontWeight: 600,
+  fontSize: 15,
+  cursor: "pointer",
+  width: "auto",
+  transition: "background 0.2s, color 0.2s",
+  boxShadow: "0 2px 8px #0002",
+  marginLeft: 0,
+};
+
+export const videoCallIncomingBox = {
+  background: "#232526",
+  color: "#fff",
+  borderRadius: 12,
+  boxShadow: "0 2px 16px #00c3ff33",
+  padding: "24px 18px",
+  minWidth: 220,
+  maxWidth: 340,
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  zIndex: 2100,
+};
+
+export const videoCallIncomingBtn = {
+  background: "linear-gradient(90deg,#00c3ff,#3a7bd5)",
+  color: "#fff",
+  border: "none",
+  borderRadius: 8,
+  padding: "8px 18px",
+  fontWeight: 600,
+  fontSize: 15,
+  cursor: "pointer",
+  margin: "10px 0 0 0",
+  boxShadow: "0 2px 8px #00c3ff33",
+  transition: "background 0.2s, box-shadow 0.2s",
+};
+
 // --- Адаптивные стили ---
 export const responsive = `
 @keyframes slideIn {

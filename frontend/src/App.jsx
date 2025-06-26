@@ -74,6 +74,15 @@ function App() {
   const [recaptchaToken, setRecaptchaToken] = useState("");
   const recaptchaRef = useRef(null); // обычная капча
   const recaptchaInvisibleRef = useRef(null); // невидимая капча для автологина
+  const [videoCall, setVideoCall] = useState({ active: false, incoming: false, from: null });
+  const [videoStreams, setVideoStreams] = useState({ local: null, remote: null });
+  const [videoPeer, setVideoPeer] = useState(null);
+  const [videoError, setVideoError] = useState("");
+  const [videoConnecting, setVideoConnecting] = useState(false);
+
+  // --- WebRTC helpers ---
+  const localVideoRef = useRef(null);
+  const remoteVideoRef = useRef(null);
 
   // Функция для старта записи аудио
   const startRecording = async () => {
@@ -457,6 +466,314 @@ function App() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
+  // --- Видеозвонок: обработка сигналов и событий ---
+  useEffect(() => {
+    if (!socketRef.current) return;
+    // Входящий звонок
+    const onIncoming = ({ from }) => {
+      setVideoCall({ active: false, incoming: true, from });
+    };
+    // Сигналы WebRTC
+    const onSignal = async ({ from, data }) => {
+      if (!videoPeer) return;
+      if (data.type === "offer") {
+        await videoPeer.setRemoteDescription(new RTCSessionDescription(data));
+        const answer = await videoPeer.createAnswer();
+        await videoPeer.setLocalDescription(answer);
+        socketRef.current.emit("video-signal", { channel: selectedChannel, data: answer });
+      } else if (data.type === "answer") {
+        await videoPeer.setRemoteDescription(new RTCSessionDescription(data));
+      } else if (data.candidate) {
+        try {
+          await videoPeer.addIceCandidate(new RTCIceCandidate(data.candidate));
+        } catch {}
+      }
+    };
+    // Кто-то присоединился к звонку
+    const onJoined = ({ user }) => {
+      // Только инициатору: отправить offer
+      if (user !== username && videoPeer && videoStreams.local) {
+        createAndSendOffer();
+      }
+    };
+    // Кто-то вышел
+    const onLeft = ({ user }) => {
+      endVideoCall();
+    };
+    // Звонок завершён
+    const onEnded = () => {
+      endVideoCall();
+    };
+
+    socketRef.current.on("video-call-incoming", onIncoming);
+    socketRef.current.on("video-signal", onSignal);
+    socketRef.current.on("video-call-joined", onJoined);
+    socketRef.current.on("video-call-left", onLeft);
+    socketRef.current.on("video-call-ended", onEnded);
+
+    return () => {
+      socketRef.current.off("video-call-incoming", onIncoming);
+      socketRef.current.off("video-signal", onSignal);
+      socketRef.current.off("video-call-joined", onJoined);
+      socketRef.current.off("video-call-left", onLeft);
+      socketRef.current.off("video-call-ended", onEnded);
+    };
+    // eslint-disable-next-line
+  }, [socketRef.current, selectedChannel, videoPeer, videoStreams.local, username]);
+
+  // --- Видеозвонок: инициация ---
+  const startVideoCall = async () => {
+    setVideoError("");
+    setVideoConnecting(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      setVideoStreams(s => ({ ...s, local: stream, remote: null }));
+      const peer = createPeerConnection(stream);
+      setVideoPeer(peer);
+      setVideoCall({ active: true, incoming: false, from: null });
+      socketRef.current.emit("video-call-initiate", { channel: selectedChannel });
+      socketRef.current.emit("video-call-join", { channel: selectedChannel });
+    } catch (e) {
+      setVideoError("Ошибка доступа к камере/микрофону");
+      setVideoConnecting(false);
+    }
+  };
+
+  // --- Видеозвонок: принять входящий ---
+  const acceptVideoCall = async () => {
+    setVideoError("");
+    setVideoConnecting(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      setVideoStreams(s => ({ ...s, local: stream, remote: null }));
+      const peer = createPeerConnection(stream);
+      setVideoPeer(peer);
+      setVideoCall({ active: true, incoming: false, from: null });
+      socketRef.current.emit("video-call-join", { channel: selectedChannel });
+    } catch (e) {
+      setVideoError("Ошибка доступа к камере/микрофону");
+      setVideoConnecting(false);
+    }
+  };
+
+  // --- Видеозвонок: создать PeerConnection ---
+  function createPeerConnection(localStream) {
+    const pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" }
+      ]
+    });
+    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+    pc.onicecandidate = (e) => {
+      if (e.candidate) {
+        socketRef.current.emit("video-signal", { channel: selectedChannel, data: { candidate: e.candidate } });
+      }
+    };
+    pc.ontrack = (e) => {
+      setVideoStreams(s => ({ ...s, remote: e.streams[0] }));
+    };
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === "disconnected" || pc.connectionState === "failed" || pc.connectionState === "closed") {
+        endVideoCall();
+      }
+    };
+    return pc;
+  }
+
+  // --- Видеозвонок: отправить offer ---
+  async function createAndSendOffer() {
+    if (!videoPeer) return;
+    const offer = await videoPeer.createOffer();
+    await videoPeer.setLocalDescription(offer);
+    socketRef.current.emit("video-signal", { channel: selectedChannel, data: offer });
+  }
+
+  // --- Видеозвонок: завершить ---
+  function endVideoCall() {
+    setVideoCall({ active: false, incoming: false, from: null });
+    setVideoConnecting(false);
+    if (videoPeer) {
+      videoPeer.close();
+      setVideoPeer(null);
+    }
+    if (videoStreams.local) {
+      videoStreams.local.getTracks().forEach(t => t.stop());
+    }
+    setVideoStreams({ local: null, remote: null });
+    setVideoError("");
+  }
+
+  // --- Видеозвонок: покинуть звонок ---
+  const leaveVideoCall = () => {
+    socketRef.current.emit("video-call-leave", { channel: selectedChannel });
+    socketRef.current.emit("video-call-end", { channel: selectedChannel });
+    endVideoCall();
+  };
+
+  // --- Видеозвонок: отображение видео ---
+  useEffect(() => {
+    if (localVideoRef.current && videoStreams.local) {
+      localVideoRef.current.srcObject = videoStreams.local;
+    }
+    if (remoteVideoRef.current && videoStreams.remote) {
+      remoteVideoRef.current.srcObject = videoStreams.remote;
+    }
+  }, [videoStreams.local, videoStreams.remote, videoCall.active]);
+
+  // --- Кнопка видеозвонка ---
+  const videoCallButton = (
+    <button
+      style={{
+        ...chatStyles.videoCallBtn,
+        ...(videoCall.active ? chatStyles.videoCallBtnActive : {}),
+        ...(isMobile ? { fontSize: 22, width: 32, height: 32 } : {}),
+      }}
+      title={videoCall.active ? "Завершить видеозвонок" : "Начать видеозвонок"}
+      onClick={() => {
+        if (videoCall.active) {
+          leaveVideoCall();
+        } else {
+          startVideoCall();
+        }
+      }}
+      disabled={!selectedChannel || videoCall.incoming || videoConnecting}
+    >
+      <span role="img" aria-label="video">
+        📹
+      </span>
+    </button>
+  );
+
+  // --- Модальное окно видеозвонка ---
+  const videoCallModal = videoCall.active && (
+    <div style={chatStyles.videoCallModal} onClick={leaveVideoCall}>
+      <div
+        style={{
+          ...chatStyles.videoCallBox,
+          width: isMobile ? "96vw" : 420,
+          minHeight: isMobile ? 220 : 260,
+          padding: isMobile ? "10px 4px 8px 4px" : "18px 18px 12px 18px",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div
+          style={{
+            fontWeight: 700,
+            fontSize: 18,
+            color: "#00c3ff",
+            marginBottom: 10,
+            textAlign: "center",
+          }}
+        >
+          Видеозвонок:{" "}
+          {channels.find((ch) => ch._id === selectedChannel)?.name || ""}
+        </div>
+        <div
+          style={{
+            ...chatStyles.videoRow,
+            flexDirection: isMobile ? "column" : "row",
+            gap: isMobile ? 8 : 10,
+          }}
+        >
+          <video
+            ref={localVideoRef}
+            autoPlay
+            muted
+            playsInline
+            style={{
+              ...chatStyles.video,
+              width: isMobile ? 120 : 180,
+              height: isMobile ? 90 : 130,
+              border: "2px solid #00c3ff",
+            }}
+          />
+          <video
+            ref={remoteVideoRef}
+            autoPlay
+            playsInline
+            style={{
+              ...chatStyles.video,
+              width: isMobile ? 120 : 180,
+              height: isMobile ? 90 : 130,
+              border: "2px solid #ffb347",
+            }}
+          />
+        </div>
+        <div style={chatStyles.videoCallControls}>
+          <button
+            style={chatStyles.videoCallEndBtn}
+            onClick={leaveVideoCall}
+          >
+            Завершить
+          </button>
+        </div>
+        {videoError && (
+          <div
+            style={{
+              color: "#ff7675",
+              marginTop: 8,
+              fontWeight: 500,
+            }}
+          >
+            {videoError}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  // --- Уведомление о входящем звонке ---
+  const videoCallIncoming = videoCall.incoming && (
+    <div style={chatStyles.videoCallModal}>
+      <div style={chatStyles.videoCallIncomingBox}>
+        <div
+          style={{
+            fontWeight: 700,
+            fontSize: 17,
+            color: "#00c3ff",
+            marginBottom: 8,
+          }}
+        >
+          Входящий видеозвонок
+        </div>
+        <div style={{ color: "#fff", marginBottom: 10 }}>
+          {videoCall.from
+            ? `Пользователь ${videoCall.from} приглашает вас присоединиться к видеозвонку.`
+            : "Видеозвонок"}
+        </div>
+        <button
+          style={chatStyles.videoCallIncomingBtn}
+          onClick={acceptVideoCall}
+          disabled={videoConnecting}
+        >
+          Присоединиться
+        </button>
+        <button
+          style={{
+            ...chatStyles.videoCallEndBtn,
+            marginTop: 8,
+            background: "#35363a",
+            color: "#b2bec3",
+          }}
+          onClick={() => setVideoCall({ active: false, incoming: false, from: null })}
+        >
+          Отклонить
+        </button>
+        {videoError && (
+          <div
+            style={{
+              color: "#ff7675",
+              marginTop: 8,
+              fontWeight: 500,
+            }}
+          >
+            {videoError}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
   if (!token) {
     return (
       <div style={chatStyles.page}>
@@ -797,6 +1114,10 @@ function App() {
           marginTop: isMobile ? 18 : 0 // добавлено для мобильных
         }}>
           <div style={chatStyles.chatTitle}>Чат</div>
+          {/* Кнопка видеозвонка справа от "Чат" */}
+          <div style={{ marginLeft: "auto", marginRight: 8 }}>
+            {selectedChannel && videoCallButton}
+          </div>
         </div>
         <div
           className="govchat-chat-box"
@@ -1332,7 +1653,7 @@ function App() {
               zIndex: 9999,
               display: "flex",
               alignItems: "center",
-              justifyContent: "center"
+              justifyContent: "center",
             }}
             onClick={() => setModalMedia(null)}
           >
@@ -1347,7 +1668,7 @@ function App() {
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
-                position: "relative"
+                position: "relative",
               }}
               onClick={e => e.stopPropagation()}
             >
@@ -1362,7 +1683,7 @@ function App() {
                   fontSize: 28,
                   fontWeight: 700,
                   cursor: "pointer",
-                  zIndex: 2
+                  zIndex: 2,
                 }}
                 onClick={() => setModalMedia(null)}
                 title="Закрыть"
@@ -1382,7 +1703,7 @@ function App() {
                       marginBottom: 16,
                       wordBreak: "break-all",
                       textAlign: "center",
-                      maxWidth: "60vw"
+                      maxWidth: "60vw",
                     }}>
                       {modalMedia.name}
                     </div>
@@ -1405,7 +1726,7 @@ function App() {
                     border: "none",
                     borderRadius: 10,
                     background: "#fff",
-                    marginBottom: 16
+                    marginBottom: 16,
                   }}
                 />
               ) : modalMedia.type === "doc" ? (
@@ -1416,7 +1737,7 @@ function App() {
                   justifyContent: "center",
                   minHeight: 200,
                   minWidth: 200,
-                  marginBottom: 16
+                  marginBottom: 16,
                 }}>
                   <span style={{ fontSize: 64, marginBottom: 16 }}>
                     {(() => {
@@ -1448,9 +1769,9 @@ function App() {
                   fontSize: 15,
                   cursor: "pointer",
                   boxShadow: "0 2px 8px #00c3ff33",
-                  textDecoration: "none"
+                  textDecoration: "none",
                 }}
-                onClick={async e => {
+                onClick={async (e) => {
                   e.stopPropagation();
                   try {
                     const response = await fetch(modalMedia.url, { credentials: "same-origin" });
@@ -1490,7 +1811,7 @@ function App() {
             transition: "background 0.2s",
             display: "flex",
             alignItems: "center",
-            justifyContent: "center"
+            justifyContent: "center",
           }}
           onClick={handleProfilePopupBgClick}
         >
@@ -1542,9 +1863,11 @@ function App() {
                 justifyContent: "center",
                 padding: "0 4px 0 0",
                 minHeight: 36,
-                marginBottom: 8
+                marginBottom: 8,
               }}>
-                <div style={{ fontWeight: 700, fontSize: 17, color: "#00c3ff", flex: 1, textAlign: "center" }}>Профиль</div>
+                <div style={{ fontWeight: 700, fontSize: 17, color: "#00c3ff", flex: 1, textAlign: "center" }}>
+                  Профиль
+                </div>
                 {/* Крестик справа сверху */}
                 <button
                   style={{
@@ -1704,7 +2027,7 @@ function App() {
                     gap: 8,
                     marginTop: 18,
                     justifyContent: "flex-end",
-                    flexWrap: isMobile ? "wrap" : "nowrap"
+                    flexWrap: isMobile ? "wrap" : "nowrap",
                   }}>
                     <button
                       style={{
@@ -1809,7 +2132,7 @@ function App() {
                     gap: 8,
                     marginTop: 10,
                     justifyContent: "flex-end",
-                    flexWrap: isMobile ? "wrap" : "nowrap"
+                    flexWrap: isMobile ? "wrap" : "nowrap",
                   }}>
                     <button
                       style={{
@@ -1863,7 +2186,7 @@ function App() {
             zIndex: 120,
             display: "flex",
             alignItems: "center",
-            justifyContent: "center"
+            justifyContent: "center",
           }}
           onClick={() => setShowCustomizer(false)}
         >
@@ -1879,7 +2202,7 @@ function App() {
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
-              position: "relative"
+              position: "relative",
             }}
             onClick={e => e.stopPropagation()}
           >
@@ -1927,7 +2250,7 @@ function App() {
                     fontWeight: 600,
                     fontSize: 16,
                     boxShadow: theme.name === t.name ? "0 2px 12px #00c3ff44" : "0 2px 8px #0002",
-                    transition: "border 0.2s, box-shadow 0.2s"
+                    transition: "border 0.2s, box-shadow 0.2s",
                   }}
                   onClick={() => handleThemeSelect(t)}
                 >

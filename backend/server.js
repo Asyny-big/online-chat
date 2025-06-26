@@ -368,6 +368,33 @@ io.on('connection', (socket) => {
   socket.on('disconnect', async () => {
     await User.updateOne({ username: socket.user.username }, { online: false });
   });
+
+  // --- Видеозвонки ---
+  socket.on('video-call-initiate', ({ channel }) => {
+    // Оповестить всех в канале (кроме инициатора) о входящем звонке
+    socket.to(channel).emit('video-call-incoming', { from: socket.user.username, channel });
+  });
+
+  socket.on('video-call-join', ({ channel }) => {
+    // Оповестить других, что пользователь присоединился к звонку
+    socket.to(channel).emit('video-call-joined', { user: socket.user.username });
+  });
+
+  socket.on('video-call-leave', ({ channel }) => {
+    // Оповестить других, что пользователь покинул звонок
+    socket.to(channel).emit('video-call-left', { user: socket.user.username });
+  });
+
+  // WebRTC signaling: offer/answer/candidate
+  socket.on('video-signal', ({ channel, data }) => {
+    // Пересылаем сигнал всем в комнате, кроме отправителя
+    socket.to(channel).emit('video-signal', { from: socket.user.username, data });
+  });
+
+  socket.on('video-call-end', ({ channel }) => {
+    // Оповестить всех о завершении звонка
+    io.to(channel).emit('video-call-ended', { by: socket.user.username });
+  });
 });
 
 // --- Запуск ---
