@@ -387,6 +387,10 @@ io.on('connection', (socket) => {
     if (!userChannels[socket.id]) userChannels[socket.id] = new Set();
     userChannels[socket.id].add(channel);
     
+    // Добавляем инициатора к активному звонку
+    if (!activeCalls[channel]) activeCalls[channel] = new Set();
+    activeCalls[channel].add(socket.id);
+    
     // Оповестить всех в канале (кроме инициатора) о входящем звонке
     socket.to(channel).emit('video-call-incoming', { 
       from: socket.user.username, 
@@ -422,6 +426,15 @@ io.on('connection', (socket) => {
       user: socket.user.username, 
       socketId: socket.id 
     });
+    
+    // Если это первый участник, оповестить всех о начале звонка
+    if (activeCalls[channel].size === 1) {
+      socket.to(channel).emit('video-call-incoming', { 
+        from: socket.user.username, 
+        channel,
+        initiatorSocketId: socket.id
+      });
+    }
     
     console.log(`User ${socket.user.username} joined call. Total participants in ${channel}:`, activeCalls[channel].size);
   });

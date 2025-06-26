@@ -785,6 +785,62 @@ export const videoCallIncomingBtn = {
   transition: "background 0.2s, box-shadow 0.2s",
 };
 
+export const videoCallBanner = {
+  background: "linear-gradient(90deg, #00c3ff22, #3a7bd522)",
+  border: "1px solid #00c3ff",
+  borderRadius: 8,
+  padding: "12px 16px",
+  marginBottom: 12,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  color: "#fff",
+  fontSize: 15,
+  fontWeight: 500,
+  boxShadow: "0 2px 8px #00c3ff33",
+  animation: "pulse 2s infinite",
+};
+
+export const videoCallBannerIcon = {
+  fontSize: 20,
+  marginRight: 8,
+  animation: "bounce 1s infinite",
+};
+
+export const videoCallBannerText = {
+  flex: 1,
+  display: "flex",
+  alignItems: "center",
+};
+
+export const videoCallBannerBtn = {
+  background: "linear-gradient(90deg,#00c3ff,#3a7bd5)",
+  color: "#fff",
+  border: "none",
+  borderRadius: 6,
+  padding: "6px 12px",
+  fontWeight: 600,
+  fontSize: 14,
+  cursor: "pointer",
+  marginLeft: 8,
+  boxShadow: "0 2px 6px #00c3ff33",
+  transition: "background 0.2s, box-shadow 0.2s",
+};
+
+export const videoCallBannerDeclineBtn = {
+  background: "#ff7675",
+  color: "#fff",
+  border: "none",
+  borderRadius: 6,
+  padding: "6px 12px",
+  fontWeight: 600,
+  fontSize: 14,
+  cursor: "pointer",
+  marginLeft: 8,
+  boxShadow: "0 2px 6px #ff767533",
+  transition: "background 0.2s, box-shadow 0.2s",
+};
+
 // --- Адаптивные стили ---
 export const responsive = `
 @keyframes slideIn {
@@ -806,6 +862,27 @@ export const responsive = `
   to {
     transform: translateX(0);
     opacity: 1;
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    box-shadow: 0 2px 8px #00c3ff33;
+  }
+  50% {
+    box-shadow: 0 2px 16px #00c3ff66;
+  }
+}
+
+@keyframes bounce {
+  0%, 20%, 50%, 80%, 100% {
+    transform: translateY(0);
+  }
+  40% {
+    transform: translateY(-3px);
+  }
+  60% {
+    transform: translateY(-2px);
   }
 }
 

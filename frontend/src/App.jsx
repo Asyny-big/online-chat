@@ -80,6 +80,7 @@ function App() {
   const [videoError, setVideoError] = useState("");
   const [videoConnecting, setVideoConnecting] = useState(false);
   const [mySocketId, setMySocketId] = useState(null);
+  const [activeCallInChannel, setActiveCallInChannel] = useState(null); // новое состояние для отслеживания активного звонка в канале
 
   // --- WebRTC helpers ---
   const localVideoRef = useRef(null);
@@ -106,6 +107,7 @@ function App() {
       console.log("Got local stream");
       setVideoStreams(s => ({ ...s, local: stream }));
       setVideoCall({ active: true, incoming: false, from: null, channel: selectedChannel });
+      setActiveCallInChannel(null); // убираем уведомление о входящем звонке
       
       // Сначала присоединяемся к звонку
       socketRef.current.emit("video-call-join", { channel: selectedChannel });
@@ -127,7 +129,7 @@ function App() {
 
   // --- Видеозвонок: принять входящий ---
   const acceptVideoCall = async () => {
-    console.log("Accepting video call from:", videoCall.from, "in channel:", videoCall.channel);
+    console.log("Accepting video call from:", activeCallInChannel?.from, "in channel:", activeCallInChannel?.channel);
     setVideoError("");
     setVideoConnecting(true);
     
@@ -143,11 +145,12 @@ function App() {
         active: true, 
         incoming: false, 
         from: null, 
-        channel: videoCall.channel 
+        channel: activeCallInChannel?.channel 
       });
+      setActiveCallInChannel(null); // убираем уведомление
       
       // Присоединяемся к звонку
-      socketRef.current.emit("video-call-join", { channel: videoCall.channel });
+      socketRef.current.emit("video-call-join", { channel: activeCallInChannel?.channel });
       
       setTimeout(() => {
         setVideoConnecting(false);
@@ -366,7 +369,7 @@ function App() {
 
   // --- Отклонить входящий звонок ---
   const declineVideoCall = () => {
-    setVideoCall({ active: false, incoming: false, from: null });
+    setActiveCallInChannel(null);
   };
 
   // Определяем кнопку видеозвонка
@@ -777,10 +780,10 @@ function App() {
 
     const onIncoming = ({ from, channel, initiatorSocketId }) => {
       console.log("Incoming call from:", from, "in channel:", channel, "my channel:", selectedChannel);
-      // Показываем уведомление только если мы находимся в том же канале
-      if (channel === selectedChannel && from !== username) {
+      // Показываем уведомление только если мы находимся в том же канале и не участвуем в звонке
+      if (channel === selectedChannel && from !== username && !videoCall.active) {
         console.log("Showing incoming call notification");
-        setVideoCall({ active: false, incoming: true, from, channel, initiatorSocketId });
+        setActiveCallInChannel({ from, channel, initiatorSocketId });
       }
     };
 
@@ -890,6 +893,7 @@ function App() {
     const onEnded = () => {
       console.log("Call ended by server");
       endVideoCall();
+      setActiveCallInChannel(null); // убираем уведомление при завершении звонка
     };
 
     socketRef.current.on("connect", onConnect);
@@ -909,7 +913,7 @@ function App() {
       socketRef.current?.off("video-signal", onSignal);
       socketRef.current?.off("video-call-ended", onEnded);
     };
-  }, [selectedChannel, username, videoStreams.local]);
+  }, [selectedChannel, username, videoStreams.local, videoCall.active]);
 
   // --- Видеозвонок: отображение видео ---
   useEffect(() => {
@@ -1054,65 +1058,27 @@ function App() {
     </div>
   );
 
-  // --- Уведомление о входящем звонке ---
-  const videoCallIncoming = videoCall.incoming && (
-    <div style={chatStyles.videoCallModal}>
-      <div style={chatStyles.videoCallIncomingBox}>
-        <div
-          style={{
-            fontWeight: 700,
-            fontSize: 18,
-            color: "#00c3ff",
-            marginBottom: 12,
-            textAlign: "center",
-          }}
+  // --- Уведомление о входящем звонке (теперь постоянное) ---
+  const videoCallBanner = activeCallInChannel && selectedChannel === activeCallInChannel.channel && !videoCall.active && (
+    <div style={chatStyles.videoCallBanner}>
+      <div style={chatStyles.videoCallBannerText}>
+        <span style={chatStyles.videoCallBannerIcon}>📹</span>
+        <strong>{activeCallInChannel.from}</strong> начал видеозвонок в этом канале
+      </div>
+      <div>
+        <button
+          style={chatStyles.videoCallBannerBtn}
+          onClick={acceptVideoCall}
+          disabled={videoConnecting}
         >
-          📹 Входящий видеозвонок
-        </div>
-        <div style={{ 
-          color: "#fff", 
-          marginBottom: 20, 
-          textAlign: "center",
-          fontSize: 16
-        }}>
-          <strong>{videoCall.from}</strong> приглашает вас присоединиться к видеозвонку
-        </div>
-        <div style={{
-          display: "flex",
-          gap: 12,
-          justifyContent: "center",
-          flexWrap: "wrap"
-        }}>
-          <button
-            style={chatStyles.videoCallIncomingBtn}
-            onClick={acceptVideoCall}
-            disabled={videoConnecting}
-          >
-            {videoConnecting ? "Подключение..." : "Присоединиться"}
-          </button>
-          <button
-            style={{
-              ...chatStyles.videoCallEndBtn,
-              background: "#35363a",
-              color: "#b2bec3",
-            }}
-            onClick={declineVideoCall}
-          >
-            Отклонить
-          </button>
-        </div>
-        {videoError && (
-          <div
-            style={{
-              color: "#ff7675",
-              marginTop: 12,
-              fontWeight: 500,
-              textAlign: "center",
-            }}
-          >
-            {videoError}
-          </div>
-        )}
+          {videoConnecting ? "Подключение..." : "Присоединиться"}
+        </button>
+        <button
+          style={chatStyles.videoCallBannerDeclineBtn}
+          onClick={declineVideoCall}
+        >
+          Скрыть
+        </button>
       </div>
     </div>
   );
@@ -1462,6 +1428,10 @@ function App() {
             {videoCallButton}
           </div>
         </div>
+        
+        {/* Уведомление о видеозвонке */}
+        {videoCallBanner}
+        
         <div
           className="govchat-chat-box"
           style={themedChatBoxStyle}
