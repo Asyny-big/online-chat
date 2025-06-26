@@ -796,6 +796,232 @@ function App() {
       {isMobile && mobileHeader}
       {/* Мобильное меню */}
       {isMobile && mobileMenuOpen && mobileMenu}
+      
+      {/* Уведомление о видеозвонке */}
+      {videoCallNotification && (
+        <div style={{
+          position: "fixed",
+          top: 20,
+          right: 20,
+          background: "white",
+          border: "1px solid #ddd",
+          borderRadius: 10,
+          boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
+          padding: 15,
+          maxWidth: 350,
+          zIndex: 1001,
+          animation: "slideIn 0.3s ease-out"
+        }}>
+          <div style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 10
+          }}>
+            <div style={{
+              color: "#007bff",
+              fontSize: 24,
+              alignSelf: "center"
+            }}>📹</div>
+            <div style={{
+              textAlign: "center",
+              color: "#333"
+            }}>
+              <strong>{videoCallNotification.caller}</strong> начал видеосеанс в канале <strong>#{videoCallNotification.channel}</strong>
+            </div>
+            <div style={{
+              display: "flex",
+              gap: 10
+            }}>
+              <button
+                style={{
+                  flex: 1,
+                  background: "#28a745",
+                  color: "white",
+                  border: "none",
+                  padding: 10,
+                  borderRadius: 5,
+                  cursor: "pointer",
+                  fontWeight: "bold"
+                }}
+                onClick={joinVideoCall}
+                onMouseEnter={(e) => e.target.style.background = "#218838"}
+                onMouseLeave={(e) => e.target.style.background = "#28a745"}
+              >
+                Присоединиться
+              </button>
+              <button
+                style={{
+                  flex: 1,
+                  background: "#6c757d",
+                  color: "white",
+                  border: "none",
+                  padding: 10,
+                  borderRadius: 5,
+                  cursor: "pointer"
+                }}
+                onClick={dismissVideoNotification}
+                onMouseEnter={(e) => e.target.style.background = "#5a6268"}
+                onMouseLeave={(e) => e.target.style.background = "#6c757d"}
+              >
+                Отклонить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Модальное окно видеозвонка */}
+      {isVideoCallOpen && (
+        <div style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: "rgba(0, 0, 0, 0.9)",
+          zIndex: 1000,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center"
+        }}>
+          <div style={{
+            width: "95vw",
+            height: "90vh",
+            background: "#1a1a1a",
+            borderRadius: 10,
+            overflow: "hidden",
+            display: "flex",
+            flexDirection: "column"
+          }}>
+            <div style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              padding: "1rem",
+              background: "#2a2a2a",
+              color: "white"
+            }}>
+              <h3>Видеозвонок #{selectedChannel}</h3>
+              <button
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: "white",
+                  fontSize: 24,
+                  cursor: "pointer"
+                }}
+                onClick={endVideoCall}
+              >×</button>
+            </div>
+            
+            <div style={{
+              flex: 1,
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+              gap: 10,
+              padding: 20,
+              overflowY: "auto"
+            }}>
+              <div style={{
+                position: "relative",
+                background: "#333",
+                borderRadius: 10,
+                overflow: "hidden",
+                minHeight: 200
+              }}>
+                <video
+                  ref={localVideoRef}
+                  autoPlay
+                  muted
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "cover"
+                  }}
+                />
+                <span style={{
+                  position: "absolute",
+                  bottom: 10,
+                  left: 10,
+                  background: "rgba(0, 0, 0, 0.7)",
+                  color: "white",
+                  padding: "5px 10px",
+                  borderRadius: 5,
+                  fontSize: 14
+                }}>
+                  {username} (Вы)
+                </span>
+              </div>
+            </div>
+
+            <div style={{
+              display: "flex",
+              justifyContent: "center",
+              gap: 20,
+              padding: 20,
+              background: "#2a2a2a"
+            }}>
+              <button
+                style={{
+                  width: 50,
+                  height: 50,
+                  borderRadius: "50%",
+                  border: "none",
+                  color: "white",
+                  fontSize: 20,
+                  cursor: "pointer",
+                  background: isMuted ? "#dc3545" : "#4a4a4a",
+                  transition: "background-color 0.3s"
+                }}
+                onClick={toggleMute}
+                onMouseEnter={(e) => e.target.style.background = isMuted ? "#c82333" : "#5a5a5a"}
+                onMouseLeave={(e) => e.target.style.background = isMuted ? "#dc3545" : "#4a4a4a"}
+              >
+                {isMuted ? "🔇" : "🎤"}
+              </button>
+              
+              <button
+                style={{
+                  width: 50,
+                  height: 50,
+                  borderRadius: "50%",
+                  border: "none",
+                  color: "white",
+                  fontSize: 20,
+                  cursor: "pointer",
+                  background: isVideoOff ? "#dc3545" : "#4a4a4a",
+                  transition: "background-color 0.3s"
+                }}
+                onClick={toggleVideo}
+                onMouseEnter={(e) => e.target.style.background = isVideoOff ? "#c82333" : "#5a5a5a"}
+                onMouseLeave={(e) => e.target.style.background = isVideoOff ? "#dc3545" : "#4a4a4a"}
+              >
+                {isVideoOff ? "📹" : "📷"}
+              </button>
+              
+              <button
+                style={{
+                  width: 50,
+                  height: 50,
+                  borderRadius: "50%",
+                  border: "none",
+                  color: "white",
+                  fontSize: 20,
+                  cursor: "pointer",
+                  background: "#dc3545",
+                  transition: "background-color 0.3s"
+                }}
+                onClick={endVideoCall}
+                onMouseEnter={(e) => e.target.style.background = "#c82333"}
+                onMouseLeave={(e) => e.target.style.background = "#dc3545"}
+              >
+                📞
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Сайдбар только на десктопе */}
       {!isMobile && (
         <div style={chatStyles.sidebar} className="govchat-sidebar">
