@@ -687,8 +687,9 @@ function App() {
           width: isMobile ? "96vw" : 420,
           minHeight: isMobile ? 220 : 260,
           padding: isMobile ? "10px 4px 8px 4px" : "18px 18px 12px 18px",
+          position: "relative"
         }}
-        onClick={(e) => e.stopPropagation()}
+        onClick={e => e.stopPropagation()}
       >
         <div
           style={{
@@ -708,23 +709,15 @@ function App() {
             flexDirection: isMobile ? "column" : "row",
             gap: isMobile ? 8 : 10,
             flexWrap: "wrap",
-            justifyContent: "center"
+            justifyContent: "center",
+            alignItems: "center",
+            position: "relative",
+            minHeight: isMobile ? 120 : 160,
           }}
         >
-          <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: 8 }}>
-            <video
-              ref={localVideoRef}
-              autoPlay
-              muted
-              playsInline
-              style={{
-                ...chatStyles.video,
-                width: isMobile ? 120 : 140,
-                height: isMobile ? 90 : 100,
-                border: "2px solid #00c3ff",
-              }}
-            />
-            {Object.entries(videoStreams.remotes || {}).map(([peerId], idx) => (
+          {/* Видео других участников (большие) */}
+          {Object.entries(videoStreams.remotes || {}).length > 0 ? (
+            Object.entries(videoStreams.remotes || {}).map(([peerId], idx) => (
               <video
                 key={peerId}
                 ref={el => (remoteVideosRef.current[peerId] = el)}
@@ -732,13 +725,47 @@ function App() {
                 playsInline
                 style={{
                   ...chatStyles.video,
-                  width: isMobile ? 120 : 140,
-                  height: isMobile ? 90 : 100,
+                  width: isMobile ? 180 : 260,
+                  height: isMobile ? 120 : 180,
                   border: "2px solid #ffb347",
+                  margin: 4,
+                  background: "#000",
+                  zIndex: 1,
                 }}
               />
-            ))}
-          </div>
+            ))
+          ) : (
+            <div style={{
+              color: "#b2bec3",
+              fontSize: 15,
+              minWidth: 120,
+              minHeight: 80,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center"
+            }}>
+              Ожидание других участников...
+            </div>
+          )}
+          {/* Моё видео — маленькое, поверх в углу */}
+          <video
+            ref={localVideoRef}
+            autoPlay
+            muted
+            playsInline
+            style={{
+              ...chatStyles.video,
+              width: isMobile ? 70 : 100,
+              height: isMobile ? 50 : 70,
+              border: "2px solid #00c3ff",
+              position: "absolute",
+              right: isMobile ? 8 : 18,
+              bottom: isMobile ? 8 : 18,
+              zIndex: 2,
+              background: "#000",
+              boxShadow: "0 2px 8px #0007"
+            }}
+          />
         </div>
         <div style={chatStyles.videoCallControls}>
           <button

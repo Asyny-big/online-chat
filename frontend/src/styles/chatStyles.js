@@ -721,6 +721,7 @@ export const videoRow = {
   justifyContent: "center",
   width: "100%",
   marginBottom: 10,
+  position: "relative", // добавлено для абсолютного позиционирования локального видео
 };
 
 export const video = {
