@@ -584,10 +584,43 @@ function App() {
   // Для определения мобильного режима
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 700);
   useEffect(() => {
-    const onResize = () => setIsMobile(window.innerWidth <= 700);
+    const onResize = () => {
+      const mobile = window.innerWidth <= 700;
+      setIsMobile(mobile);
+      // Закрываем мобильное меню при переходе на десктоп
+      if (!mobile) {
+        setMobileMenuOpen(false);
+      }
+    };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
+
+  // Закрытие мобильного меню при клике вне его области
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (mobileMenuOpen && isMobile) {
+        // Проверяем, что клик не по кнопке открытия меню и не внутри самого меню
+        const menuButton = document.querySelector('.govchat-mobile-menu-btn');
+        const menu = document.querySelector('.govchat-mobile-menu');
+        
+        if (menuButton && !menuButton.contains(e.target) && 
+            menu && !menu.contains(e.target)) {
+          setMobileMenuOpen(false);
+        }
+      }
+    };
+
+    if (isMobile) {
+      document.addEventListener('touchstart', handleClickOutside);
+      document.addEventListener('click', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('touchstart', handleClickOutside);
+      document.removeEventListener('click', handleClickOutside);
+    };
+  }, [mobileMenuOpen, isMobile]);
 
   if (!token) {
     return (
@@ -662,7 +695,11 @@ function App() {
     <div style={chatStyles.mobileHeader} className="govchat-mobile-header">
       <button
         style={chatStyles.mobileMenuBtn}
-        onClick={() => setMobileMenuOpen(true)}
+        className="govchat-mobile-menu-btn"
+        onClick={(e) => {
+          e.stopPropagation();
+          setMobileMenuOpen(true);
+        }}
         aria-label="Меню"
       >
         <span style={{ fontSize: 28 }}>☰</span>
@@ -682,14 +719,25 @@ function App() {
 
   // --- Мобильное меню ---
   const mobileMenu = (
-    <div style={chatStyles.mobileMenuOverlay} onClick={() => setMobileMenuOpen(false)}>
+    <div 
+      style={chatStyles.mobileMenuOverlay} 
+      className="govchat-mobile-menu-overlay"
+      onClick={(e) => {
+        e.stopPropagation();
+        setMobileMenuOpen(false);
+      }}
+    >
       <div
         style={chatStyles.mobileMenu}
+        className="govchat-mobile-menu"
         onClick={e => e.stopPropagation()}
       >
         <button
           style={chatStyles.mobileMenuCloseBtn}
-          onClick={() => setMobileMenuOpen(false)}
+          onClick={(e) => {
+            e.stopPropagation();
+            setMobileMenuOpen(false);
+          }}
           aria-label="Закрыть"
         >✕</button>
         <div style={chatStyles.mobileMenuTitle}>Каналы</div>
@@ -703,7 +751,8 @@ function App() {
               <div
                 key={ch._id}
                 style={chatStyles.channelItem(selectedChannel === ch._id)}
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation();
                   setSelectedChannel(ch._id);
                   setMobileMenuOpen(false);
                 }}
@@ -715,7 +764,10 @@ function App() {
           }
           <button
             style={chatStyles.createBtn}
-            onClick={() => setShowCreate((v) => !v)}
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowCreate((v) => !v);
+            }}
           >
             {showCreate ? "Скрыть создание" : "Создать канал"}
           </button>
@@ -726,8 +778,15 @@ function App() {
                 placeholder="Название канала"
                 value={newChannel}
                 onChange={e => setNewChannel(e.target.value)}
+                onClick={e => e.stopPropagation()}
               />
-              <button style={chatStyles.createBtn} onClick={handleCreateChannel}>
+              <button 
+                style={chatStyles.createBtn} 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleCreateChannel();
+                }}
+              >
                 Создать
               </button>
             </div>
@@ -756,7 +815,8 @@ function App() {
               alignItems: "center",
               justifyContent: "center"
             }}
-            onClick={() => {
+            onClick={(e) => {
+              e.stopPropagation();
               setShowProfile(true);
               setMobileMenuOpen(false);
               setEditMode(false);
@@ -785,7 +845,8 @@ function App() {
               marginLeft: 0,
               boxShadow: "0 2px 8px #00c3ff33"
             }}
-            onClick={() => {
+            onClick={(e) => {
+              e.stopPropagation();
               setShowCustomizer(true);
               setMobileMenuOpen(false);
             }}
@@ -2036,6 +2097,7 @@ function App() {
                   onClick={() => setShowProfile(false)}
                   title="Закрыть"
                 >✕</button>
+
               </div>
             )}
             {/* Новый аватар/значок профиля */}

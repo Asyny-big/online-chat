@@ -568,6 +568,7 @@ export const mobileMenuOverlay = {
   display: "flex",
   alignItems: "flex-start",
   justifyContent: "flex-start",
+  touchAction: "none", // предотвращаем прокрутку фона
 };
 
 export const mobileMenu = {
@@ -583,6 +584,7 @@ export const mobileMenu = {
   flexDirection: "column",
   zIndex: 201,
   animation: "slideInLeft 0.22s",
+  touchAction: "auto", // разрешаем прокрутку внутри меню
 };
 
 export const mobileMenuCloseBtn = {
@@ -595,6 +597,13 @@ export const mobileMenuCloseBtn = {
   fontSize: 26,
   cursor: "pointer",
   zIndex: 202,
+  width: 32,
+  height: 32,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  borderRadius: "50%",
+  transition: "background 0.2s, color 0.2s",
 };
 
 export const mobileMenuChannels = {
@@ -665,6 +674,17 @@ export const responsive = `
   }
 }
 
+@keyframes slideInLeft {
+  from {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
 @media (max-width: 700px) {
   html, body, #root {
     height: 100vh !important;
@@ -674,6 +694,7 @@ export const responsive = `
     max-height: 100vh !important;
     max-width: 100vw !important;
     overflow: hidden !important;
+    touch-action: pan-x pan-y;
   }
   .govchat-page {
     flex-direction: column !important;
@@ -701,6 +722,13 @@ export const responsive = `
     max-height: calc(100vh - 180px) !important;
     min-height: 0 !important;
     overflow-y: auto !important;
+  }
+  /* Предотвращаем случайное открытие меню */
+  .govchat-mobile-menu-overlay {
+    pointer-events: auto !important;
+  }
+  .govchat-mobile-menu {
+    pointer-events: auto !important;
   }
   /* --- Меньше окно профиля по центру на мобильном --- */
   .govchat-profile-popup {
