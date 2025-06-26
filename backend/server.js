@@ -450,6 +450,8 @@ io.on('connection', (socket) => {
       
       if (activeCalls[channel].size === 0) {
         delete activeCalls[channel];
+        // Уведомляем всех в канале о завершении звонка
+        io.to(channel).emit('video-call-ended', { by: socket.user.username });
         console.log(`Channel ${channel} call ended - no participants left`);
       } else {
         console.log(`Participants remaining in ${channel}:`, activeCalls[channel].size);
@@ -460,7 +462,7 @@ io.on('connection', (socket) => {
   socket.on('video-call-end', ({ channel }) => {
     console.log(`User ${socket.user.username} ending call in channel ${channel}`);
     // Оповестить всех о завершении звонка
-    socket.to(channel).emit('video-call-ended', { by: socket.user.username });
+    io.to(channel).emit('video-call-ended', { by: socket.user.username });
     if (activeCalls[channel]) {
       delete activeCalls[channel];
     }
@@ -496,6 +498,8 @@ io.on('connection', (socket) => {
         
         if (activeCalls[channel].size === 0) {
           delete activeCalls[channel];
+          // Уведомляем всех о завершении звонка при отключении последнего участника
+          io.to(channel).emit('video-call-ended', { by: socket.user?.username });
           console.log(`Channel ${channel} call ended due to disconnect`);
         }
       }

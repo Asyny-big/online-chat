@@ -981,5 +981,32 @@ export const responsive = `
     align-items: center !important;
     justify-content: center !important;
   }
+  
+  .govchat-video-call-banner {
+    padding: 8px 12px !important;
+    font-size: 14px !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+    align-items: stretch !important;
+  }
+  
+  .govchat-video-call-banner-text {
+    text-align: center !important;
+    margin-bottom: 0 !important;
+  }
+  
+  .govchat-video-call-banner-buttons {
+    display: flex !important;
+    gap: 8px !important;
+    justify-content: center !important;
+  }
+  
+  .govchat-video-call-banner-btn,
+  .govchat-video-call-banner-decline-btn {
+    flex: 1 !important;
+    min-width: 0 !important;
+    font-size: 13px !important;
+    padding: 6px 8px !important;
+  }
 }
 `;

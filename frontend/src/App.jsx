@@ -894,8 +894,8 @@ function App() {
       }
     };
 
-    const onEnded = () => {
-      console.log("Call ended by server");
+    const onEnded = ({ by }) => {
+      console.log("Call ended by server, ended by:", by);
       endVideoCall();
       setActiveCallInChannel(null); // убираем уведомление при завершении звонка
     };
@@ -1067,7 +1067,11 @@ function App() {
     <div style={chatStyles.videoCallBanner}>
       <div style={chatStyles.videoCallBannerText}>
         <span style={chatStyles.videoCallBannerIcon}>📹</span>
-        <strong>{activeCallInChannel.from}</strong> начал видеозвонок в этом канале
+        {isMobile ? (
+          <span><strong>{activeCallInChannel.from}</strong> начал видеозвонок</span>
+        ) : (
+          <span><strong>{activeCallInChannel.from}</strong> начал видеозвонок в этом канале</span>
+        )}
       </div>
       <div>
         <button
@@ -2013,6 +2017,7 @@ function App() {
                 <>
                   <img
                     src={modalMedia.url}
+                   
                     alt={modalMedia.name}
                     style={{ maxWidth: "70vw", maxHeight: "70vh", borderRadius: 10, marginBottom: 16 }}
                   />
