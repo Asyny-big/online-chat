@@ -369,6 +369,27 @@ io.on('connection', (socket) => {
     socket.join(channel);
     userChannels[socket.id].add(channel);
     console.log(`User ${socket.user.username} joined channel: ${channel}`);
+    
+    // НОВОЕ: Проверяем есть ли активный звонок в канале и уведомляем пользователя
+    if (activeCalls[channel] && activeCalls[channel].size > 0) {
+      // Находим инициатора звонка (первого участника)
+      const participants = Array.from(activeCalls[channel]);
+      const initiatorSocketId = participants[0]; // берем первого как инициатора
+      
+      // Получаем имя инициатора через socket
+      const initiatorSocket = io.sockets.sockets.get(initiatorSocketId);
+      const initiatorName = initiatorSocket ? initiatorSocket.user.username : 'Неизвестный';
+      
+      // Отправляем уведомление только если пользователь не участвует в звонке
+      if (!activeCalls[channel].has(socket.id)) {
+        socket.emit('video-call-incoming', { 
+          from: initiatorName, 
+          channel,
+          initiatorSocketId: initiatorSocketId
+        });
+        console.log(`Sent existing call notification to ${socket.user.username} for channel ${channel}`);
+      }
+    }
   });
   socket.on('message', async (msg) => {
     // Добавляем время, если не пришло с клиента

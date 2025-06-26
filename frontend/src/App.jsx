@@ -554,6 +554,10 @@ function App() {
         })
         .then((res) => setMessages(res.data));
       socketRef.current && socketRef.current.emit("join", selectedChannel);
+      
+      // НОВОЕ: Сбрасываем уведомление о звонке при смене канала
+      // Оно будет восстановлено сервером если звонок активен
+      setActiveCallInChannel(null);
     }
   }, [token, selectedChannel]);
 
@@ -800,8 +804,10 @@ function App() {
 
     const onIncoming = ({ from, channel, initiatorSocketId }) => {
       console.log("Incoming call from:", from, "in channel:", channel, "my channel:", selectedChannel);
-      // Показываем уведомление только если мы находимся в том же канале и не участвуем в звонке
-      if (channel === selectedChannel && from !== username && !videoCall.active) {
+      // ОБНОВЛЕНО: Показываем уведомление если мы находимся в том же канале и не участвуем в звонке
+      // Убираем проверку на from !== username, так как может быть ситуация когда один пользователь
+      // инициировал звонок, а другой присоединился к каналу позже
+      if (channel === selectedChannel && !videoCall.active) {
         console.log("Showing incoming call notification");
         setActiveCallInChannel({ from, channel, initiatorSocketId });
       }

@@ -868,9 +868,11 @@ export const responsive = `
 @keyframes pulse {
   0%, 100% {
     box-shadow: 0 2px 8px #00c3ff33;
+    transform: scale(1);
   }
   50% {
     box-shadow: 0 2px 16px #00c3ff66;
+    transform: scale(1.05);
   }
 }
 
@@ -883,6 +885,20 @@ export const responsive = `
   }
   60% {
     transform: translateY(-2px);
+  }
+}
+
+/* НОВОЕ: Анимация для индикатора звонка */
+@keyframes callPulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+    box-shadow: 0 0 6px #ff4757;
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.3);
+    box-shadow: 0 0 12px #ff4757;
   }
 }
 
@@ -1007,6 +1023,11 @@ export const responsive = `
     min-width: 0 !important;
     font-size: 13px !important;
     padding: 6px 8px !important;
+  }
+  
+  /* НОВОЕ: Улучшенная анимация для индикатора звонка */
+  .govchat-call-indicator {
+    animation: callPulse 2s infinite !important;
   }
 }
 `;
