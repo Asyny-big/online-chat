@@ -75,14 +75,15 @@ function App() {
   const recaptchaRef = useRef(null); // обычная капча
   const recaptchaInvisibleRef = useRef(null); // невидимая капча для автологина
   const [videoCall, setVideoCall] = useState({ active: false, incoming: false, from: null });
-  const [videoStreams, setVideoStreams] = useState({ local: null, remote: null });
-  const [videoPeer, setVideoPeer] = useState(null);
+  const [videoStreams, setVideoStreams] = useState({ local: null, remotes: {} }); // remotes: {socketId: MediaStream}
+  const [videoPeers, setVideoPeers] = useState({}); // {socketId: RTCPeerConnection}
   const [videoError, setVideoError] = useState("");
   const [videoConnecting, setVideoConnecting] = useState(false);
+  const [mySocketId, setMySocketId] = useState(null);
 
   // --- WebRTC helpers ---
   const localVideoRef = useRef(null);
-  const remoteVideoRef = useRef(null);
+  const remoteVideosRef = useRef({}); // {socketId: ref}
 
   // Функция для старта записи аудио
   const startRecording = async () => {
@@ -469,57 +470,79 @@ function App() {
   // --- Видеозвонок: обработка сигналов и событий ---
   useEffect(() => {
     if (!socketRef.current) return;
+
+    // Получить свой socketId
+    socketRef.current.on("connect", () => setMySocketId(socketRef.current.id));
+
     // Входящий звонок
     const onIncoming = ({ from }) => {
       setVideoCall({ active: false, incoming: true, from });
     };
+
+    // Список участников звонка (при входе)
+    const onParticipants = async ({ participants }) => {
+      // Для каждого участника создать PeerConnection и отправить offer
+      for (const peerId of participants) {
+        await createPeer(peerId, true);
+      }
+    };
+
+    // Новый участник присоединился
+    const onJoined = async ({ user, socketId }) => {
+      if (socketId !== mySocketId) {
+        await createPeer(socketId, true);
+      }
+    };
+
+    // Участник покинул звонок
+    const onLeft = ({ user, socketId }) => {
+      removePeer(socketId);
+    };
+
     // Сигналы WebRTC
-    const onSignal = async ({ from, data }) => {
-      if (!videoPeer) return;
+    const onSignal = async ({ from, data, username: remoteName }) => {
+      if (!videoPeers[from]) {
+        await createPeer(from, false);
+      }
+      const pc = videoPeers[from];
+      if (!pc) return;
       if (data.type === "offer") {
-        await videoPeer.setRemoteDescription(new RTCSessionDescription(data));
-        const answer = await videoPeer.createAnswer();
-        await videoPeer.setLocalDescription(answer);
-        socketRef.current.emit("video-signal", { channel: selectedChannel, data: answer });
+        await pc.setRemoteDescription(new RTCSessionDescription(data));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        socketRef.current.emit("video-signal", { channel: selectedChannel, to: from, data: answer });
       } else if (data.type === "answer") {
-        await videoPeer.setRemoteDescription(new RTCSessionDescription(data));
+        await pc.setRemoteDescription(new RTCSessionDescription(data));
       } else if (data.candidate) {
         try {
-          await videoPeer.addIceCandidate(new RTCIceCandidate(data.candidate));
+          await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
         } catch {}
       }
     };
-    // Кто-то присоединился к звонку
-    const onJoined = ({ user }) => {
-      // Только инициатору: отправить offer
-      if (user !== username && videoPeer && videoStreams.local) {
-        createAndSendOffer();
-      }
-    };
-    // Кто-то вышел
-    const onLeft = ({ user }) => {
-      endVideoCall();
-    };
+
     // Звонок завершён
     const onEnded = () => {
       endVideoCall();
     };
 
     socketRef.current.on("video-call-incoming", onIncoming);
-    socketRef.current.on("video-signal", onSignal);
+    socketRef.current.on("video-call-participants", onParticipants);
     socketRef.current.on("video-call-joined", onJoined);
     socketRef.current.on("video-call-left", onLeft);
+    socketRef.current.on("video-signal", onSignal);
     socketRef.current.on("video-call-ended", onEnded);
 
     return () => {
+      socketRef.current.off("connect");
       socketRef.current.off("video-call-incoming", onIncoming);
-      socketRef.current.off("video-signal", onSignal);
+      socketRef.current.off("video-call-participants", onParticipants);
       socketRef.current.off("video-call-joined", onJoined);
       socketRef.current.off("video-call-left", onLeft);
+      socketRef.current.off("video-signal", onSignal);
       socketRef.current.off("video-call-ended", onEnded);
     };
     // eslint-disable-next-line
-  }, [socketRef.current, selectedChannel, videoPeer, videoStreams.local, username]);
+  }, [socketRef.current, selectedChannel, videoPeers, videoStreams.local, mySocketId]);
 
   // --- Видеозвонок: инициация ---
   const startVideoCall = async () => {
@@ -527,9 +550,8 @@ function App() {
     setVideoConnecting(true);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      setVideoStreams(s => ({ ...s, local: stream, remote: null }));
-      const peer = createPeerConnection(stream);
-      setVideoPeer(peer);
+      setVideoStreams(s => ({ ...s, local: stream, remotes: {} }));
+      setVideoPeers({});
       setVideoCall({ active: true, incoming: false, from: null });
       socketRef.current.emit("video-call-initiate", { channel: selectedChannel });
       socketRef.current.emit("video-call-join", { channel: selectedChannel });
@@ -545,9 +567,8 @@ function App() {
     setVideoConnecting(true);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      setVideoStreams(s => ({ ...s, local: stream, remote: null }));
-      const peer = createPeerConnection(stream);
-      setVideoPeer(peer);
+      setVideoStreams(s => ({ ...s, local: stream, remotes: {} }));
+      setVideoPeers({});
       setVideoCall({ active: true, incoming: false, from: null });
       socketRef.current.emit("video-call-join", { channel: selectedChannel });
     } catch (e) {
@@ -556,50 +577,61 @@ function App() {
     }
   };
 
-  // --- Видеозвонок: создать PeerConnection ---
-  function createPeerConnection(localStream) {
+  // --- Видеозвонок: создать PeerConnection с участником ---
+  async function createPeer(peerId, isInitiator) {
+    if (videoPeers[peerId]) return;
+    if (!videoStreams.local) return;
     const pc = new RTCPeerConnection({
-      iceServers: [
-        { urls: "stun:stun.l.google.com:19302" }
-      ]
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
     });
-    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+    videoStreams.local.getTracks().forEach(track => pc.addTrack(track, videoStreams.local));
     pc.onicecandidate = (e) => {
       if (e.candidate) {
-        socketRef.current.emit("video-signal", { channel: selectedChannel, data: { candidate: e.candidate } });
+        socketRef.current.emit("video-signal", { channel: selectedChannel, to: peerId, data: { candidate: e.candidate } });
       }
     };
     pc.ontrack = (e) => {
-      setVideoStreams(s => ({ ...s, remote: e.streams[0] }));
+      setVideoStreams(s => ({
+        ...s,
+        remotes: { ...s.remotes, [peerId]: e.streams[0] }
+      }));
     };
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === "disconnected" || pc.connectionState === "failed" || pc.connectionState === "closed") {
-        endVideoCall();
+      if (["disconnected", "failed", "closed"].includes(pc.connectionState)) {
+        removePeer(peerId);
       }
     };
-    return pc;
+    setVideoPeers(peers => ({ ...peers, [peerId]: pc }));
+    if (isInitiator) {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      socketRef.current.emit("video-signal", { channel: selectedChannel, to: peerId, data: offer });
+    }
   }
 
-  // --- Видеозвонок: отправить offer ---
-  async function createAndSendOffer() {
-    if (!videoPeer) return;
-    const offer = await videoPeer.createOffer();
-    await videoPeer.setLocalDescription(offer);
-    socketRef.current.emit("video-signal", { channel: selectedChannel, data: offer });
+  // --- Видеозвонок: удалить PeerConnection ---
+  function removePeer(peerId) {
+    setVideoPeers(peers => {
+      if (peers[peerId]) peers[peerId].close();
+      const { [peerId]: _, ...rest } = peers;
+      return rest;
+    });
+    setVideoStreams(s => {
+      const { [peerId]: _, ...rest } = s.remotes || {};
+      return { ...s, remotes: rest };
+    });
   }
 
   // --- Видеозвонок: завершить ---
   function endVideoCall() {
     setVideoCall({ active: false, incoming: false, from: null });
     setVideoConnecting(false);
-    if (videoPeer) {
-      videoPeer.close();
-      setVideoPeer(null);
-    }
+    Object.values(videoPeers).forEach(pc => pc && pc.close());
+    setVideoPeers({});
     if (videoStreams.local) {
       videoStreams.local.getTracks().forEach(t => t.stop());
     }
-    setVideoStreams({ local: null, remote: null });
+    setVideoStreams({ local: null, remotes: {} });
     setVideoError("");
   }
 
@@ -615,10 +647,12 @@ function App() {
     if (localVideoRef.current && videoStreams.local) {
       localVideoRef.current.srcObject = videoStreams.local;
     }
-    if (remoteVideoRef.current && videoStreams.remote) {
-      remoteVideoRef.current.srcObject = videoStreams.remote;
-    }
-  }, [videoStreams.local, videoStreams.remote, videoCall.active]);
+    // Для удалённых потоков
+    Object.entries(videoStreams.remotes || {}).forEach(([peerId, stream]) => {
+      if (!remoteVideosRef.current[peerId]) return;
+      remoteVideosRef.current[peerId].srcObject = stream;
+    });
+  }, [videoStreams.local, videoStreams.remotes, videoCall.active]);
 
   // --- Кнопка видеозвонка ---
   const videoCallButton = (
@@ -673,31 +707,38 @@ function App() {
             ...chatStyles.videoRow,
             flexDirection: isMobile ? "column" : "row",
             gap: isMobile ? 8 : 10,
+            flexWrap: "wrap",
+            justifyContent: "center"
           }}
         >
-          <video
-            ref={localVideoRef}
-            autoPlay
-            muted
-            playsInline
-            style={{
-              ...chatStyles.video,
-              width: isMobile ? 120 : 180,
-              height: isMobile ? 90 : 130,
-              border: "2px solid #00c3ff",
-            }}
-          />
-          <video
-            ref={remoteVideoRef}
-            autoPlay
-            playsInline
-            style={{
-              ...chatStyles.video,
-              width: isMobile ? 120 : 180,
-              height: isMobile ? 90 : 130,
-              border: "2px solid #ffb347",
-            }}
-          />
+          <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: 8 }}>
+            <video
+              ref={localVideoRef}
+              autoPlay
+              muted
+              playsInline
+              style={{
+                ...chatStyles.video,
+                width: isMobile ? 120 : 140,
+                height: isMobile ? 90 : 100,
+                border: "2px solid #00c3ff",
+              }}
+            />
+            {Object.entries(videoStreams.remotes || {}).map(([peerId], idx) => (
+              <video
+                key={peerId}
+                ref={el => (remoteVideosRef.current[peerId] = el)}
+                autoPlay
+                playsInline
+                style={{
+                  ...chatStyles.video,
+                  width: isMobile ? 120 : 140,
+                  height: isMobile ? 90 : 100,
+                  border: "2px solid #ffb347",
+                }}
+              />
+            ))}
+          </div>
         </div>
         <div style={chatStyles.videoCallControls}>
           <button

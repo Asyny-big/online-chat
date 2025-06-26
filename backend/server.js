@@ -333,6 +333,8 @@ app.patch('/api/profile', auth, async (req, res) => {
 });
 
 // --- Socket.IO ---
+const activeCalls = {}; // channelId: Set(socket.id)
+
 io.use(async (socket, next) => {
   const token = socket.handshake.auth.token;
   if (!token) return next(new Error('Нет токена'));
@@ -371,29 +373,51 @@ io.on('connection', (socket) => {
 
   // --- Видеозвонки ---
   socket.on('video-call-initiate', ({ channel }) => {
+    if (!activeCalls[channel]) activeCalls[channel] = new Set();
     // Оповестить всех в канале (кроме инициатора) о входящем звонке
     socket.to(channel).emit('video-call-incoming', { from: socket.user.username, channel });
   });
 
   socket.on('video-call-join', ({ channel }) => {
+    if (!activeCalls[channel]) activeCalls[channel] = new Set();
+    activeCalls[channel].add(socket.id);
+    // Сообщить новому участнику о других участниках звонка
+    const others = Array.from(activeCalls[channel]).filter(id => id !== socket.id);
+    socket.emit('video-call-participants', { participants: others });
     // Оповестить других, что пользователь присоединился к звонку
-    socket.to(channel).emit('video-call-joined', { user: socket.user.username });
+    socket.to(channel).emit('video-call-joined', { user: socket.user.username, socketId: socket.id });
   });
 
   socket.on('video-call-leave', ({ channel }) => {
-    // Оповестить других, что пользователь покинул звонок
-    socket.to(channel).emit('video-call-left', { user: socket.user.username });
+    if (activeCalls[channel]) activeCalls[channel].delete(socket.id);
+    socket.to(channel).emit('video-call-left', { user: socket.user.username, socketId: socket.id });
+    // Если никого не осталось — удалить комнату
+    if (activeCalls[channel] && activeCalls[channel].size === 0) delete activeCalls[channel];
+  });
+
+  socket.on('disconnect', () => {
+    // Удалить из всех звонков
+    for (const channel in activeCalls) {
+      if (activeCalls[channel].has(socket.id)) {
+        activeCalls[channel].delete(socket.id);
+        socket.to(channel).emit('video-call-left', { user: socket.user?.username, socketId: socket.id });
+        if (activeCalls[channel].size === 0) delete activeCalls[channel];
+      }
+    }
   });
 
   // WebRTC signaling: offer/answer/candidate
-  socket.on('video-signal', ({ channel, data }) => {
-    // Пересылаем сигнал всем в комнате, кроме отправителя
-    socket.to(channel).emit('video-signal', { from: socket.user.username, data });
+  socket.on('video-signal', ({ channel, to, data }) => {
+    // Переслать сигнал конкретному участнику
+    if (to) {
+      io.to(to).emit('video-signal', { from: socket.id, data, username: socket.user.username });
+    }
   });
 
   socket.on('video-call-end', ({ channel }) => {
     // Оповестить всех о завершении звонка
     io.to(channel).emit('video-call-ended', { by: socket.user.username });
+    if (activeCalls[channel]) delete activeCalls[channel];
   });
 });
 
