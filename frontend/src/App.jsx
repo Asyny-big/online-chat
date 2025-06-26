@@ -75,20 +75,6 @@ function App() {
   const recaptchaRef = useRef(null); // обычная капча
   const recaptchaInvisibleRef = useRef(null); // невидимая капча для автологина
 
-  // Добавляем состояния для видеозвонков
-  const [isVideoCallOpen, setIsVideoCallOpen] = useState(false);
-  const [videoCallNotification, setVideoCallNotification] = useState(null);
-  const [videoCallParticipants, setVideoCallParticipants] = useState([]);
-  const [localStream, setLocalStream] = useState(null);
-  const [remoteStreams, setRemoteStreams] = useState({});
-  const [isMuted, setIsMuted] = useState(false);
-  const [isVideoOff, setIsVideoOff] = useState(false);
-  const localVideoRef = useRef(null);
-  const remoteVideoRefs = useRef({});
-
-  // --- WebRTC state ---
-  const peerConnections = useRef({});
-
   // Функция для старта записи аудио
   const startRecording = async () => {
     if (!navigator.mediaDevices || !window.MediaRecorder) {
@@ -161,213 +147,6 @@ function App() {
     setAudioUrl(null);
   };
 
-  // Функции для работы с видеозвонками
-  const startLocalStream = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true
-      });
-      setLocalStream(stream);
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
-      }
-    } catch (error) {
-      console.error('Ошибка доступа к камере/микрофону:', error);
-      alert('Ошибка доступа к камере/микрофону');
-    }
-  };
-
-  const stopLocalStream = () => {
-    if (localStream) {
-      localStream.getTracks().forEach(track => track.stop());
-      setLocalStream(null);
-    }
-    setVideoCallParticipants([]);
-    setRemoteStreams({});
-  };
-
-  const startVideoCall = () => {
-    if (!selectedChannel) {
-      alert('Выберите канал для видеозвонка');
-      return;
-    }
-    socketRef.current.emit('start-video-call', { 
-      channel: selectedChannel,
-      caller: username 
-    });
-    setIsVideoCallOpen(true);
-    startLocalStream();
-  };
-
-  const joinVideoCall = () => {
-    setIsVideoCallOpen(true);
-    setVideoCallNotification(null);
-    startLocalStream();
-    if (selectedChannel) {
-      socketRef.current.emit('join-video-call', { 
-        channel: selectedChannel,
-        username: username 
-      });
-    }
-  };
-
-  const endVideoCall = () => {
-    stopLocalStream();
-    if (selectedChannel) {
-      socketRef.current.emit('leave-video-call', { channel: selectedChannel });
-    }
-    setIsVideoCallOpen(false);
-  };
-
-  const dismissVideoNotification = () => {
-    setVideoCallNotification(null);
-  };
-
-  const toggleMute = () => {
-    if (localStream) {
-      localStream.getAudioTracks().forEach(track => {
-        track.enabled = isMuted;
-      });
-      setIsMuted(!isMuted);
-    }
-  };
-
-  const toggleVideo = () => {
-    if (localStream) {
-      localStream.getVideoTracks().forEach(track => {
-        track.enabled = isVideoOff;
-      });
-      setIsVideoOff(!isVideoOff);
-    }
-  };
-
-  // Функция для отправки сигналов WebRTC через Socket.IO
-  const sendSignal = (type, payload) => {
-    if (selectedChannel) {
-      socketRef.current.emit('video-signal', {
-        channel: selectedChannel,
-        type,
-        ...payload,
-      });
-    }
-  };
-
-  // --- WebRTC обработчики ---
-  useEffect(() => {
-    if (!isVideoCallOpen || !localStream || !selectedChannel) return;
-
-    // При получении сигнала WebRTC
-    const handleSignal = async (data) => {
-      const { from, type, sdp, candidate } = data;
-      if (from === socketRef.current.id) return; // не обрабатывать свои сигналы
-
-      // Создаём PeerConnection если нет
-      if (!peerConnections.current[from]) {
-        const pc = new RTCPeerConnection({
-          iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-        });
-        peerConnections.current[from] = pc;
-
-        // Добавляем свои треки
-        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-
-        // ICE candidates
-        pc.onicecandidate = (event) => {
-          if (event.candidate) {
-            sendSignal('ice-candidate', { to: from, candidate: event.candidate });
-          }
-        };
-
-        // Получение remote stream
-        pc.ontrack = (event) => {
-          setRemoteStreams(prev => ({
-            ...prev,
-            [from]: event.streams[0]
-          }));
-        };
-      }
-      const pc = peerConnections.current[from];
-
-      if (type === 'offer') {
-        await pc.setRemoteDescription(new RTCSessionDescription(sdp));
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        sendSignal('answer', { to: from, sdp: answer });
-      } else if (type === 'answer') {
-        await pc.setRemoteDescription(new RTCSessionDescription(sdp));
-      } else if (type === 'ice-candidate' && candidate) {
-        try {
-          await pc.addIceCandidate(new RTCIceCandidate(candidate));
-        } catch {}
-      }
-    };
-
-    socketRef.current.on('video-signal', handleSignal);
-
-    // При появлении нового участника инициируем offer
-    const handleUserJoined = (data) => {
-      const { userId } = data;
-      if (userId === socketRef.current.id) return;
-      if (!peerConnections.current[userId]) {
-        const pc = new RTCPeerConnection({
-          iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-        });
-        peerConnections.current[userId] = pc;
-        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-        pc.onicecandidate = (event) => {
-          if (event.candidate) {
-            sendSignal('ice-candidate', { to: userId, candidate: event.candidate });
-          }
-        };
-        pc.ontrack = (event) => {
-          setRemoteStreams(prev => ({
-            ...prev,
-            [userId]: event.streams[0]
-          }));
-        };
-        // Создаём offer
-        pc.createOffer().then(offer => {
-          pc.setLocalDescription(offer);
-          sendSignal('offer', { to: userId, sdp: offer });
-        });
-      }
-    };
-
-    socketRef.current.on('user-joined-video-call', handleUserJoined);
-
-    // Удаляем remote stream и peerConnection при выходе пользователя
-    const handleUserLeft = (data) => {
-      const { userId } = data;
-      if (peerConnections.current[userId]) {
-        peerConnections.current[userId].close();
-        delete peerConnections.current[userId];
-      }
-      setRemoteStreams(prev => {
-        const newStreams = { ...prev };
-        delete newStreams[userId];
-        return newStreams;
-      });
-    };
-
-    socketRef.current.on('user-left-video-call', handleUserLeft);
-
-    return () => {
-      socketRef.current.off('video-signal', handleSignal);
-      socketRef.current.off('user-joined-video-call', handleUserJoined);
-      socketRef.current.off('user-left-video-call', handleUserLeft);
-    };
-  }, [isVideoCallOpen, localStream, selectedChannel]);
-
-  // Очищаем peerConnections при завершении звонка
-  useEffect(() => {
-    if (!isVideoCallOpen) {
-      Object.values(peerConnections.current).forEach(pc => pc.close());
-      peerConnections.current = {};
-      setRemoteStreams({});
-    }
-  }, [isVideoCallOpen]);
-
   useEffect(() => {
     setUsername(parseToken(token));
   }, [token]);
@@ -422,41 +201,6 @@ function App() {
       typingTimeoutRef.current = setTimeout(() => setTyping(""), 2000);
     });
 
-    // Добавляем обработчики видеозвонков
-    socketRef.current.on('video-call-started', (data) => {
-      if (data.caller !== username) {
-        setVideoCallNotification({
-          caller: data.caller,
-          channel: data.channel
-        });
-      }
-    });
-
-    socketRef.current.on('video-call-ended', () => {
-      setIsVideoCallOpen(false);
-      setVideoCallNotification(null);
-      stopLocalStream();
-    });
-
-    socketRef.current.on('user-joined-video-call', (data) => {
-      setVideoCallParticipants(prev => {
-        if (!prev.find(p => p.id === data.userId)) {
-          return [...prev, { id: data.userId, username: data.username || 'Участник' }];
-        }
-        return prev;
-      });
-    });
-
-    socketRef.current.on('user-left-video-call', (data) => {
-      console.log('User left video call:', data.userId);
-      setVideoCallParticipants(prev => prev.filter(p => p.id !== data.userId));
-      setRemoteStreams(prev => {
-        const newStreams = { ...prev };
-        delete newStreams[data.userId];
-        return newStreams;
-      });
-    });
-
     // Новый обработчик: обновлять список каналов при появлении нового
     const handleNewChannel = () => {
       axios
@@ -471,14 +215,10 @@ function App() {
     return () => {
       socketRef.current && socketRef.current.disconnect();
       socketRef.current && socketRef.current.off("new-channel", handleNewChannel);
-      socketRef.current && socketRef.current.off('video-call-started');
-      socketRef.current && socketRef.current.off('video-call-ended');
-      socketRef.current && socketRef.current.off('user-joined-video-call');
-      socketRef.current && socketRef.current.off('user-left-video-call');
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     };
     // eslint-disable-next-line
-  }, [token, username]);
+  }, [token]);
 
   useEffect(() => {
     if (token && selectedChannel) {
@@ -712,58 +452,85 @@ function App() {
   // Для определения мобильного режима
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 700);
   useEffect(() => {
-    const onResize = () => {
-      const mobile = window.innerWidth <= 700;
-      setIsMobile(mobile);
-      // Закрываем мобильное меню при переходе на десктоп
-      if (!mobile) {
-        setMobileMenuOpen(false);
-      }
-    };
+    const onResize = () => setIsMobile(window.innerWidth <= 700);
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  // Закрытие мобильного меню при клике вне его области
-  useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (mobileMenuOpen && isMobile) {
-        // Проверяем, что клик не по кнопке открытия меню и не внутри самого меню
-        const menuButton = document.querySelector('.govchat-mobile-menu-btn');
-        const menu = document.querySelector('.govchat-mobile-menu');
-        
-        if (menuButton && !menuButton.contains(e.target) && 
-            menu && !menu.contains(e.target)) {
-          setMobileMenuOpen(false);
-        }
-      }
-    };
-
-    if (isMobile && mobileMenuOpen) {
-      // Небольшая задержка перед добавлением обработчиков, чтобы не конфликтовать с кликом кнопки
-      const timer = setTimeout(() => {
-        document.addEventListener('touchstart', handleClickOutside);
-        document.addEventListener('click', handleClickOutside);
-      }, 100);
-      
-      return () => {
-        clearTimeout(timer);
-        document.removeEventListener('touchstart', handleClickOutside);
-        document.removeEventListener('click', handleClickOutside);
-      };
-    }
-  }, [mobileMenuOpen, isMobile]);
+  if (!token) {
+    return (
+      <div style={chatStyles.page}>
+        <div style={chatStyles.authContainer}>
+          <div style={chatStyles.authTitle}>
+            {authMode === "register" ? "Регистрация" : "Вход"}
+          </div>
+          {error && <div style={chatStyles.error}>{error}</div>}
+          <form
+            onSubmit={authMode === "register" ? handleRegister : handleLogin}
+            style={{ width: "100%" }}
+          >
+            <input
+              style={chatStyles.authInput}
+              placeholder="Имя"
+              value={username}
+              onChange={e => setUsername(e.target.value)}
+              required
+              autoComplete="username"
+            />
+            <input
+              style={chatStyles.authInput}
+              placeholder="Пароль"
+              type="password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              required
+              autoComplete="current-password"
+            />
+            {/* Обычная reCAPTCHA только для регистрации */}
+            <div style={{ margin: "12px 0", display: "flex", justifyContent: "center" }}>
+              {authMode === "register" && (
+                <ReCAPTCHA
+                  ref={recaptchaRef}
+                  sitekey="6Lddfm0rAAAAAGiUK6xobnuL-5YsdM3eFWbykEB9"
+                  onChange={token => setRecaptchaToken(token)}
+                  onExpired={() => setRecaptchaToken("")}
+                  key={authMode}
+                  size="normal"
+                />
+              )}
+            </div>
+            <button
+              style={chatStyles.authBtn}
+              type="submit"
+              disabled={registering || (authMode === "register" && !recaptchaToken)}
+            >
+              {authMode === "register" ? "Зарегистрироваться" : "Войти"}
+            </button>
+          </form>
+          <button
+            style={chatStyles.switchBtn}
+            type="button"
+            onClick={() => {
+              setAuthMode(authMode === "register" ? "login" : "register");
+              setError("");
+              setRecaptchaToken("");
+              setUsername("");
+              setPassword("");
+            }}
+          >
+            {authMode === "register" ? "Войти" : "Регистрация"}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // --- Мобильный header ---
   const mobileHeader = (
     <div style={chatStyles.mobileHeader} className="govchat-mobile-header">
       <button
         style={chatStyles.mobileMenuBtn}
-        className="govchat-mobile-menu-btn"
-        onClick={(e) => {
-          e.stopPropagation();
-          setMobileMenuOpen(true);
-        }}
+        onClick={() => setMobileMenuOpen(true)}
         aria-label="Меню"
       >
         <span style={{ fontSize: 28 }}>☰</span>
@@ -783,465 +550,136 @@ function App() {
 
   // --- Мобильное меню ---
   const mobileMenu = (
-    mobileMenuOpen && (
-      <div 
-        style={chatStyles.mobileMenuOverlay}
-        className="govchat-mobile-menu-overlay"
-        onClick={() => setMobileMenuOpen(false)}
+    <div style={chatStyles.mobileMenuOverlay} onClick={() => setMobileMenuOpen(false)}>
+      <div
+        style={chatStyles.mobileMenu}
+        onClick={e => e.stopPropagation()}
       >
-        <div
-          style={chatStyles.mobileMenu}
-          className="govchat-mobile-menu"
-          onClick={e => e.stopPropagation()}
-        >
+        <button
+          style={chatStyles.mobileMenuCloseBtn}
+          onClick={() => setMobileMenuOpen(false)}
+          aria-label="Закрыть"
+        >✕</button>
+        <div style={chatStyles.mobileMenuTitle}>Каналы</div>
+        <div style={chatStyles.mobileMenuChannels}>
+          {channels.length === 0 ? (
+            <div style={{ color: "#b2bec3", marginBottom: 8 }}>
+              Нет доступных каналов
+            </div>
+          ) : (
+            channels.map((ch) => (
+              <div
+                key={ch._id}
+                style={chatStyles.channelItem(selectedChannel === ch._id)}
+                onClick={() => {
+                  setSelectedChannel(ch._id);
+                  setMobileMenuOpen(false);
+                }}
+              >
+                {ch.name}
+              </div>
+            ))
+          )
+          }
           <button
-            style={chatStyles.mobileMenuCloseBtn}
-            onClick={() => setMobileMenuOpen(false)}
-            aria-label="Закрыть"
-          >✕</button>
-          <div style={chatStyles.mobileMenuTitle}>Каналы</div>
-          <div style={chatStyles.mobileMenuChannels}>
-            {channels.length === 0 ? (
-              <div style={{ color: "#b2bec3", marginBottom: 8 }}>
-                Нет доступных каналов
-              </div>
-            ) : (
-              channels.map((ch) => (
-                <div
-                  key={ch._id}
-                  style={chatStyles.channelItem(selectedChannel === ch._id)}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedChannel(ch._id);
-                    setMobileMenuOpen(false);
-                  }}
-                >
-                  {ch.name}
-                </div>
-              ))
-            )
-            }
-            <button
-              style={chatStyles.createBtn}
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowCreate((v) => !v);
-              }}
-            >
-              {showCreate ? "Скрыть создание" : "Создать канал"}
-            </button>
-            {showCreate && (
-              <div style={{ marginTop: 10 }}>
-                <input
-                  style={chatStyles.input}
-                  placeholder="Название канала"
-                  value={newChannel}
-                  onChange={e => setNewChannel(e.target.value)}
-                  onClick={e => e.stopPropagation()}
-                />
-                <button 
-                  style={chatStyles.createBtn} 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleCreateChannel();
-                    setMobileMenuOpen(false);
-                  }}
-                >
-                  Создать
-                </button>
-              </div>
-            )}
-          </div>
-          {/* Кнопки профиля и кастомизации теперь после списка каналов */}
-          <div
-            className="govchat-mobile-profile-actions"
+            style={chatStyles.createBtn}
+            onClick={() => setShowCreate((v) => !v)}
+          >
+            {showCreate ? "Скрыть создание" : "Создать канал"}
+          </button>
+          {showCreate && (
+            <div style={{ marginTop: 10 }}>
+              <input
+                style={chatStyles.input}
+                placeholder="Название канала"
+                value={newChannel}
+                onChange={e => setNewChannel(e.target.value)}
+              />
+              <button style={chatStyles.createBtn} onClick={handleCreateChannel}>
+                Создать
+              </button>
+            </div>
+          )}
+        </div>
+        {/* Кнопки профиля и кастомизации теперь после списка каналов */}
+        <div
+          className="govchat-mobile-profile-actions"
+          style={{
+            display: "flex",
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 18,
+            margin: "18px 0 16px 0",
+          }}
+        >
+          {/* Профиль */}
+          <button
             style={{
-              display: "flex",
-              flexDirection: "row",
+              ...chatStyles.profileBtn,
+              width: 48,
+              height: 48,
+              fontSize: 24,
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center"
+            }}
+            onClick={() => {
+              setShowProfile(true);
+              setMobileMenuOpen(false);
+              setEditMode(false);
+            }}
+            title="Профиль"
+          >
+            <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
+              <circle cx="13" cy="13" r="13" fill="#00c3ff" />
+              <circle cx="13" cy="10" r="4" fill="#fff" />
+              <ellipse cx="13" cy="19" rx="7" ry="4" fill="#fff" />
+            </svg>
+          </button>
+          {/* Кастомизация */}
+          <button
+            style={{
+              ...chatStyles.profileBtn,
+              width: 48,
+              height: 48,
+              fontSize: 24,
+              flexDirection: "column",
               alignItems: "center",
               justifyContent: "center",
-              gap: 18,
-              margin: "18px 0 16px 0",
+              background: "none",
+              border: "none",
+              marginRight: 0,
+              marginLeft: 0,
+              boxShadow: "0 2px 8px #00c3ff33"
             }}
+            onClick={() => {
+              setShowCustomizer(true);
+              setMobileMenuOpen(false);
+            }}
+            title="Кастомизация"
           >
-            {/* Профиль */}
-            <button
-              style={{
-                ...chatStyles.profileBtn,
-                width: 48,
-                height: 48,
-                fontSize: 24,
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center"
-              }}
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowProfile(true);
-                setMobileMenuOpen(false);
-                setEditMode(false);
-              }}
-              title="Профиль"
-            >
-              <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
-                <circle cx="13" cy="13" r="13" fill="#00c3ff" />
-                <circle cx="13" cy="10" r="4" fill="#fff" />
-                <ellipse cx="13" cy="19" rx="7" ry="4" fill="#fff" />
-              </svg>
-            </button>
-            {/* Кастомизация */}
-            <button
-              style={{
-                ...chatStyles.profileBtn,
-                width: 48,
-                height: 48,
-                fontSize: 24,
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                background: "none",
-                border: "none",
-                marginRight: 0,
-                marginLeft: 0,
-                boxShadow: "0 2px 8px #00c3ff33"
-              }}
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowCustomizer(true);
-                setMobileMenuOpen(false);
-              }}
-              title="Кастомизация"
-            >
-              <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
-                <circle cx="13" cy="13" r="13" fill="#ffb347" />
-                <path d="M7 19c0-2 2-4 4-4s4 2 4 4" stroke="#fff" strokeWidth="2" />
-                <rect x="10" y="6" width="6" height="8" rx="2" fill="#fff" stroke="#ffb347" strokeWidth="1.5"/>
-                <rect x="8" y="14" width="10" height="4" rx="2" fill="#ffb347" stroke="#fff" strokeWidth="1.5"/>
-              </svg>
-            </button>
-          </div>
-          <div style={chatStyles.mobileMenuFooter}>
-            {/* Кнопка "Выйти" убрана из мобильного меню */}
-          </div>
+            <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
+              <circle cx="13" cy="13" r="13" fill="#ffb347" />
+              <path d="M7 19c0-2 2-4 4-4s4 2 4 4" stroke="#fff" strokeWidth="2" />
+              <rect x="10" y="6" width="6" height="8" rx="2" fill="#fff" stroke="#ffb347" strokeWidth="1.5"/>
+              <rect x="8" y="14" width="10" height="4" rx="2" fill="#ffb347" stroke="#fff" strokeWidth="1.5"/>
+            </svg>
+          </button>
+        </div>
+        <div style={chatStyles.mobileMenuFooter}>
+          {/* Кнопка "Выйти" убрана из мобильного меню */}
         </div>
       </div>
-    )
+    </div>
   );
 
   return (
     <div style={themedPageStyle} className="govchat-page">
       {/* Мобильный header */}
       {isMobile && mobileHeader}
-      {/* Мобильное меню - теперь только если открыто */}
-      {isMobile && mobileMenu}
-      
-      {/* Уведомление о видеозвонке */}
-      {videoCallNotification && (
-        <div style={{
-          position: "fixed",
-          top: 20,
-          right: 20,
-          background: "white",
-          border: "1px solid #ddd",
-          borderRadius: 10,
-          boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
-          padding: 15,
-          maxWidth: 350,
-          zIndex: 1001,
-          animation: "slideIn 0.3s ease-out"
-        }}>
-          <div style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 10
-          }}>
-            <div style={{
-              color: "#007bff",
-              fontSize: 24,
-              alignSelf: "center"
-            }}>📹</div>
-            <div style={{
-              textAlign: "center",
-              color: "#333"
-            }}>
-              <strong>{videoCallNotification.caller}</strong> начал видеосеанс в канале <strong>#{videoCallNotification.channel}</strong>
-            </div>
-            <div style={{
-              display: "flex",
-              gap: 10
-            }}>
-              <button
-                style={{
-                  flex: 1,
-                  background: "#28a745",
-                  color: "white",
-                  border: "none",
-                  padding: 10,
-                  borderRadius: 5,
-                  cursor: "pointer",
-                  fontWeight: "bold"
-                }}
-                onClick={joinVideoCall}
-                onMouseEnter={(e) => e.target.style.background = "#218838"}
-                onMouseLeave={(e) => e.target.style.background = "#28a745"}
-              >
-                Присоединиться
-              </button>
-              <button
-                style={{
-                  flex: 1,
-                  background: "#6c757d",
-                  color: "white",
-                  border: "none",
-                  padding: 10,
-                  borderRadius: 5,
-                  cursor: "pointer"
-                }}
-                onClick={dismissVideoNotification}
-                onMouseEnter={(e) => e.target.style.background = "#5a6268"}
-                onMouseLeave={(e) => e.target.style.background = "#6c757d"}
-              >
-                Отклонить
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Модальное окно видеозвонка */}
-      {isVideoCallOpen && (
-        <div style={{
-          position: "fixed",
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: "rgba(0, 0, 0, 0.9)",
-          zIndex: 1000,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center"
-        }}>
-          <div style={{
-            width: "95vw",
-            height: "90vh",
-            background: "#1a1a1a",
-            borderRadius: 10,
-            overflow: "hidden",
-            display: "flex",
-            flexDirection: "column"
-          }}>
-            <div style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              padding: "1rem",
-              background: "#2a2a2a",
-              color: "white"
-            }}>
-              <h3>Видеозвонок #{selectedChannel}</h3>
-              <button
-                style={{
-                  background: "none",
-                  border: "none",
-                  color: "white",
-                  fontSize: 24,
-                  cursor: "pointer"
-                }}
-                onClick={endVideoCall}
-              >×</button>
-            </div>
-            
-            <div style={{
-              flex: 1,
-              position: "relative",
-              background: "#333",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center"
-            }}>
-              {/* Основная область для видео других участников */}
-              {videoCallParticipants.length > 0 ? (
-                <div style={{
-                  display: "grid",
-                  gridTemplateColumns: videoCallParticipants.length === 1 ? "1fr" : "repeat(auto-fit, minmax(300px, 1fr))",
-                  gap: 10,
-                  width: "100%",
-                  height: "100%",
-                  padding: 20
-                }}>
-                  {videoCallParticipants.map((participant) => (
-                    <div key={participant.id} style={{
-                      position: "relative",
-                      background: "#444",
-                      borderRadius: 10,
-                      overflow: "hidden",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      minHeight: 200
-                    }}>
-                      {remoteStreams[participant.id] ? (
-                        <video
-                          ref={el => {
-                            if (el && remoteStreams[participant.id]) {
-                              el.srcObject = remoteStreams[participant.id];
-                            }
-                          }}
-                          autoPlay
-                          style={{
-                            width: "100%",
-                            height: "100%",
-                            objectFit: "cover"
-                          }}
-                        />
-                      ) : (
-                        <div style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          color: "#888"
-                        }}>
-                          <div style={{ fontSize: 48, marginBottom: 10 }}>👤</div>
-                          <div>Подключается...</div>
-                        </div>
-                      )}
-                      <span style={{
-                        position: "absolute",
-                        bottom: 10,
-                        left: 10,
-                        background: "rgba(0, 0, 0, 0.7)",
-                        color: "white",
-                        padding: "5px 10px",
-                        borderRadius: 5,
-                        fontSize: 14
-                      }}>
-                        {participant.username}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div style={{
-                  color: "#888",
-                  fontSize: 18,
-                  textAlign: "center"
-                }}>
-                  <div style={{ fontSize: 48, marginBottom: 20 }}>📹</div>
-                  <div>Ожидание участников...</div>
-                  <div style={{ fontSize: 14, marginTop: 10 }}>
-                    Пригласите других пользователей присоединиться к видеозвонку
-                  </div>
-                </div>
-              )}
-
-              {/* Мое видео в углу (маленькое) */}
-              <div style={{
-                position: "absolute",
-                top: 20,
-                right: 20,
-                width: 200,
-                height: 150,
-                background: "#222",
-                borderRadius: 10,
-                overflow: "hidden",
-                border: "2px solid #00c3ff",
-                zIndex: 10
-              }}>
-                <video
-                  ref={localVideoRef}
-                  autoPlay
-                  muted
-                  style={{
-                    width: "100%",
-                    height: "100%",
-                    objectFit: "cover"
-                  }}
-                />
-                <span style={{
-                  position: "absolute",
-                  bottom: 5,
-                  left: 5,
-                  background: "rgba(0, 0, 0, 0.7)",
-                  color: "white",
-                  padding: "2px 6px",
-                  borderRadius: 3,
-                  fontSize: 12
-                }}>
-                  Вы
-                </span>
-              </div>
-            </div>
-
-            <div style={{
-              display: "flex",
-              justifyContent: "center",
-              gap: 20,
-              padding: 20,
-              background: "#2a2a2a"
-            }}>
-              <button
-                style={{
-                  width: 50,
-                  height: 50,
-                  borderRadius: "50%",
-                  border: "none",
-                  color: "white",
-                  fontSize: 20,
-                  cursor: "pointer",
-                  background: isMuted ? "#dc3545" : "#4a4a4a",
-                  transition: "background-color 0.3s"
-                }}
-                onClick={toggleMute}
-                onMouseEnter={(e) => e.target.style.background = isMuted ? "#c82333" : "#5a5a5a"}
-                onMouseLeave={(e) => e.target.style.background = isMuted ? "#dc3545" : "#4a4a4a"}
-              >
-                {isMuted ? "🔇" : "🎤"}
-              </button>
-              
-              <button
-                style={{
-                  width: 50,
-                  height: 50,
-                  borderRadius: "50%",
-                  border: "none",
-                  color: "white",
-                  fontSize: 20,
-                  cursor: "pointer",
-                  background: isVideoOff ? "#dc3545" : "#4a4a4a",
-                  transition: "background-color 0.3s"
-                }}
-                onClick={toggleVideo}
-                onMouseEnter={(e) => e.target.style.background = isVideoOff ? "#c82333" : "#5a5a5a"}
-                onMouseLeave={(e) => e.target.style.background = isVideoOff ? "#dc3545" : "#4a4a4a"}
-              >
-                {isVideoOff ? "📹" : "📷"}
-              </button>
-              
-              <button
-                style={{
-                  width: 50,
-                  height: 50,
-                  borderRadius: "50%",
-                  border: "none",
-                  color: "white",
-                  fontSize: 20,
-                  cursor: "pointer",
-                  background: "#dc3545",
-                  transition: "background-color 0.3s"
-                }}
-                onClick={endVideoCall}
-                onMouseEnter={(e) => e.target.style.background = "#c82333"}
-                onMouseLeave={(e) => e.target.style.background = "#dc3545"}
-              >
-                📞
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
+      {/* Мобильное меню */}
+      {isMobile && mobileMenuOpen && mobileMenu}
       {/* Сайдбар только на десктопе */}
       {!isMobile && (
         <div style={chatStyles.sidebar} className="govchat-sidebar">
@@ -1341,15 +779,14 @@ function App() {
           ...chatStyles.chatContainer,
           ...(isMobile
             ? {
-                paddingTop: 40,
-                height: "calc(100vh - 40px)",
+                paddingTop: 40, // уменьшено с 64 до 40
+                height: "calc(100vh - 40px)", // уменьшить высоту чата на мобильном
                 maxHeight: "calc(100vh - 40px)",
               }
             : {}),
         }}
         className="govchat-chat-container"
       >
-        {/* Заголовок чата с кнопкой видеозвонка */}
         <div style={{
           display: "flex",
           alignItems: "center",
@@ -1357,40 +794,10 @@ function App() {
           width: "100%",
           marginBottom: 10,
           minHeight: 32,
-          marginTop: isMobile ? 18 : 0,
-          position: "relative"
+          marginTop: isMobile ? 18 : 0 // добавлено для мобильных
         }}>
           <div style={chatStyles.chatTitle}>Чат</div>
-          {selectedChannel && (
-            <button
-              style={{
-                position: "absolute",
-                right: isMobile ? 16 : 0,
-                background: "#007bff",
-                color: "white",
-                border: "none",
-                borderRadius: "50%",
-                width: 40,
-                height: 40,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                cursor: "pointer",
-                transition: "background-color 0.3s",
-                fontSize: 16,
-                boxShadow: "0 2px 8px rgba(0, 123, 255, 0.3)"
-              }}
-              onClick={startVideoCall}
-              title="Начать видеозвонок"
-              onMouseEnter={(e) => e.target.style.background = "#0056b3"}
-              onMouseLeave={(e) => e.target.style.background = "#007bff"}
-            >
-              {/* Заменяем <FaVideo /> на эмодзи */}
-              📹
-            </button>
-          )}
         </div>
-
         <div
           className="govchat-chat-box"
           style={themedChatBoxStyle}
@@ -2158,7 +1565,6 @@ function App() {
                   onClick={() => setShowProfile(false)}
                   title="Закрыть"
                 >✕</button>
-
               </div>
             )}
             {/* Новый аватар/значок профиля */}
@@ -2502,7 +1908,6 @@ function App() {
             >✕</button>
             <div style={{ fontWeight: 700, fontSize: 20, color: "#ffb347", marginBottom: 18 }}>
               Кастомизация оформления
-           
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 18, width: "100%" }}>
               {chatStyles.themes.map((t, idx) => (

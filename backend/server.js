@@ -9,7 +9,6 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const axios = require('axios'); // добавить импорт axios для проверки reCAPTCHA
-const handleVideoCall = require('./videoCallHandler');
 
 const app = express();
 const server = http.createServer(app);
@@ -343,15 +342,10 @@ io.use(async (socket, next) => {
     next();
   });
 });
-
 io.on('connection', (socket) => {
-  console.log(`Пользователь подключился: ${socket.id}, username: ${socket.user.username}`);
-  
   socket.on('join', (channel) => {
-    console.log(`${socket.user.username} присоединился к каналу ${channel}`);
     socket.join(channel);
   });
-  
   socket.on('message', async (msg) => {
     // Добавляем время, если не пришло с клиента
     if (!msg.createdAt) msg.createdAt = new Date();
@@ -368,18 +362,12 @@ io.on('connection', (socket) => {
     await message.save();
     io.to(msg.channel).emit('message', message);
   });
-  
   socket.on('typing', (data) => {
     socket.to(data.channel).emit('typing', { user: socket.user.username });
   });
-  
   socket.on('disconnect', async () => {
-    console.log(`Пользователь отключился: ${socket.id}, username: ${socket.user.username}`);
     await User.updateOne({ username: socket.user.username }, { online: false });
   });
-
-  // Обработка видеозвонков
-  handleVideoCall(io, socket);
 });
 
 // --- Запуск ---
