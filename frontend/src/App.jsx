@@ -46,8 +46,8 @@ function App() {
     age: "",
   });
   const [showProfile, setShowProfile] = useState(false);
-  const [showProfileModal, setShowProfileModal] = useState(false);
-  const [profileModalData, setProfileModalData] = useState({
+  const [] = useState(false);
+  const [] = useState({
     city: "",
     status: "",
     age: "",
@@ -73,13 +73,12 @@ function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [recaptchaToken, setRecaptchaToken] = useState("");
   const recaptchaRef = useRef(null); // обычная капча
-  const recaptchaInvisibleRef = useRef(null); // невидимая капча для автологина
   const [videoCall, setVideoCall] = useState({ active: false, incoming: false, from: null });
   const [videoStreams, setVideoStreams] = useState({ local: null, remotes: {} }); // remotes: {socketId: MediaStream}
-  const [videoPeers, setVideoPeers] = useState({}); // {socketId: RTCPeerConnection}
+  const [, setVideoPeers] = useState({}); // {socketId: RTCPeerConnection}
   const [videoError, setVideoError] = useState("");
   const [videoConnecting, setVideoConnecting] = useState(false);
-  const [mySocketId, setMySocketId] = useState(null);
+  const [, setMySocketId] = useState(null);
   const [activeCallInChannel, setActiveCallInChannel] = useState(null); // новое состояние для отслеживания активного звонка в канале
   const [activeCallsInChannels, setActiveCallsInChannels] = useState({}); // новое состояние для отслеживания звонков в каналах
   // НОВОЕ: состояния для управления микрофоном и камерой
@@ -738,7 +737,7 @@ function App() {
     }
   };
 
-  const handleProfilePopupBgClick = (e) => {
+  const handleProfilePopupBgClick = () => {
     // Если клик по фону (а не по самому popup), закрываем
     setShowProfile(false);
   };
@@ -903,7 +902,7 @@ function App() {
       removePeer(socketId);
     };
 
-    const onSignal = async ({ from, data, username: remoteName }) => {
+    const onSignal = async ({ from, data }) => {
       console.log("Received signal from:", from, "type:", data.type || 'candidate');
       
       // Используем ref для проверки существования peer
@@ -2728,7 +2727,7 @@ function App() {
               Кастомизация оформления
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 18, width: "100%" }}>
-              {chatStyles.themes.map((t, idx) => (
+              {chatStyles.themes.map((t) => (
                 <button
                   key={t.name}
                   style={{

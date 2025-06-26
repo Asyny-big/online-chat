@@ -16,7 +16,7 @@ const io = socketIo(server, { cors: { origin: '*' } });
 
 app.use(cors());
 app.use(express.json());
-app.use((req, res, next) => {
+app.use((_req, res, next) => {
   res.setHeader('Content-Language', 'ru');
   next();
 });
@@ -155,7 +155,7 @@ app.post('/api/channels', auth, async (req, res) => {
   // Новое: уведомить всех клиентов о новом канале
   io.emit('new-channel');
 });
-app.get('/api/channels', auth, async (req, res) => {
+app.get('/api/channels', auth, async (_req, res) => {
   // Возвращаем абсолютно все каналы для любого пользователя
   const channels = await Channel.find();
   res.json(channels);
@@ -252,7 +252,7 @@ if (fs.existsSync(path.join(pathToFrontendBuild, 'index.html'))) {
   });
 } else {
   // Если build отсутствует, показываем простую заглушку
-  app.get('*', (req, res) => {
+  app.get('*', (_req, res) => {
     res.send(`
       <html>
         <head>
@@ -514,7 +514,7 @@ io.on('connection', (socket) => {
   });
 
   // WebRTC signaling
-  socket.on('video-signal', ({ channel, to, data }) => {
+  socket.on('video-signal', ({ to, data }) => {
     console.log(`Relaying ${data.type || 'candidate'} from ${socket.id} to ${to}`);
     if (to) {
       io.to(to).emit('video-signal', { 
