@@ -161,13 +161,15 @@ function App() {
   };
 
   // --- Видеозвонок: создать PeerConnection ---
-  const createPeer = async (peerId, isInitiator) => {
+  const createPeer = async (peerId, isInitiator, localStream = null) => {
     if (videoPeers[peerId]) {
       console.log("Peer already exists for:", peerId);
       return videoPeers[peerId];
     }
     
-    if (!videoStreams.local) {
+    // Используем переданный поток или текущий локальный
+    const streamToUse = localStream || videoStreams.local;
+    if (!streamToUse) {
       console.log("No local stream available for peer:", peerId);
       return null;
     }
@@ -182,9 +184,9 @@ function App() {
     });
     
     // Добавить локальные треки
-    videoStreams.local.getTracks().forEach(track => {
+    streamToUse.getTracks().forEach(track => {
       console.log("Adding track to peer:", peerId, track.kind);
-      pc.addTrack(track, videoStreams.local);
+      pc.addTrack(track, streamToUse);
     });
     
     // Обработка ICE кандидатов
@@ -717,11 +719,27 @@ function App() {
       console.log("Participants in call:", participants);
       setVideoConnecting(false);
       
+      // Ждем пока локальный поток будет доступен
+      const waitForLocalStream = () => {
+        return new Promise((resolve) => {
+          const checkStream = () => {
+            if (videoStreams.local) {
+              resolve(videoStreams.local);
+            } else {
+              setTimeout(checkStream, 100);
+            }
+          };
+          checkStream();
+        });
+      };
+      
+      const localStream = await waitForLocalStream();
+      
       // Создать PeerConnection для каждого участника
       for (const peerId of participants) {
         if (peerId !== socketRef.current.id) {
           console.log("Creating peer for existing participant:", peerId);
-          await createPeer(peerId, true);
+          await createPeer(peerId, true, localStream);
         }
       }
     };
@@ -730,7 +748,19 @@ function App() {
       console.log("User joined call:", user, socketId);
       if (socketId !== socketRef.current.id) {
         console.log("Creating peer for new participant:", socketId);
-        await createPeer(socketId, false);
+        // Ждем локальный поток если его еще нет
+        const localStream = videoStreams.local;
+        if (localStream) {
+          await createPeer(socketId, false, localStream);
+        } else {
+          // Retry after a short delay
+          setTimeout(async () => {
+            const currentStream = videoStreams.local;
+            if (currentStream) {
+              await createPeer(socketId, false, currentStream);
+            }
+          }, 500);
+        }
       }
     };
 
@@ -798,7 +828,7 @@ function App() {
       socketRef.current?.off("video-signal", onSignal);
       socketRef.current?.off("video-call-ended", onEnded);
     };
-  }, [selectedChannel, username]);
+  }, [selectedChannel, username, videoStreams.local]); // Добавили videoStreams.local в зависимости
 
   // --- Видеозвонок: отображение видео ---
   useEffect(() => {
