@@ -85,6 +85,7 @@ function App() {
   const [isVideoOff, setIsVideoOff] = useState(false);
   const localVideoRef = useRef(null);
   const remoteVideoRefs = useRef({});
+  const peerConnections = useRef({});
 
   // Функция для старта записи аудио
   const startRecording = async () => {
@@ -169,9 +170,11 @@ function App() {
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
       }
+      return stream;
     } catch (error) {
       console.error('Ошибка доступа к камере/микрофону:', error);
       alert('Ошибка доступа к камере/микрофону');
+      return null;
     }
   };
 
@@ -180,27 +183,96 @@ function App() {
       localStream.getTracks().forEach(track => track.stop());
       setLocalStream(null);
     }
+    
+    // Закрываем все peer connections
+    Object.values(peerConnections.current).forEach(pc => {
+      pc.close();
+    });
+    peerConnections.current = {};
+    
     setVideoCallParticipants([]);
     setRemoteStreams({});
   };
 
-  const startVideoCall = () => {
+  const createPeerConnection = async (userId, isInitiator = false) => {
+    const configuration = {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+      ]
+    };
+
+    const peerConnection = new RTCPeerConnection(configuration);
+    peerConnections.current[userId] = peerConnection;
+
+    // Добавляем локальный поток к peer connection
+    if (localStream) {
+      localStream.getTracks().forEach(track => {
+        peerConnection.addTrack(track, localStream);
+      });
+    }
+
+    // Обработка входящего потока
+    peerConnection.ontrack = (event) => {
+      console.log('Получен remote stream от:', userId);
+      const [remoteStream] = event.streams;
+      setRemoteStreams(prev => ({
+        ...prev,
+        [userId]: remoteStream
+      }));
+    };
+
+    // Обработка ICE candidates
+    peerConnection.onicecandidate = (event) => {
+      if (event.candidate) {
+        socketRef.current.emit('webrtc-ice-candidate', {
+          target: userId,
+          candidate: event.candidate
+        });
+      }
+    };
+
+    // Если мы инициируем соединение, создаем offer
+    if (isInitiator) {
+      try {
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+        
+        socketRef.current.emit('webrtc-offer', {
+          target: userId,
+          offer: offer
+        });
+      } catch (error) {
+        console.error('Ошибка создания offer:', error);
+      }
+    }
+
+    return peerConnection;
+  };
+
+  const startVideoCall = async () => {
     if (!selectedChannel) {
       alert('Выберите канал для видеозвонка');
       return;
     }
+    
+    const stream = await startLocalStream();
+    if (!stream) return;
+
     socketRef.current.emit('start-video-call', { 
       channel: selectedChannel,
       caller: username 
     });
     setIsVideoCallOpen(true);
-    startLocalStream();
   };
 
-  const joinVideoCall = () => {
+  const joinVideoCall = async () => {
+    const stream = await startLocalStream();
+    if (!stream) return;
+
     setIsVideoCallOpen(true);
     setVideoCallNotification(null);
-    startLocalStream();
+    
     if (selectedChannel) {
       socketRef.current.emit('join-video-call', { 
         channel: selectedChannel,
@@ -309,7 +381,7 @@ function App() {
       stopLocalStream();
     });
 
-    socketRef.current.on('user-joined-video-call', (data) => {
+    socketRef.current.on('user-joined-video-call', async (data) => {
       console.log('User joined video call:', data);
       setVideoCallParticipants(prev => {
         if (!prev.find(p => p.id === data.userId)) {
@@ -317,6 +389,11 @@ function App() {
         }
         return prev;
       });
+
+      // Создаем peer connection с новым участником (мы инициируем)
+      if (localStream && !peerConnections.current[data.userId]) {
+        await createPeerConnection(data.userId, true);
+      }
     });
 
     socketRef.current.on('user-left-video-call', (data) => {
@@ -327,6 +404,62 @@ function App() {
         delete newStreams[data.userId];
         return newStreams;
       });
+
+      // Закрываем peer connection
+      if (peerConnections.current[data.userId]) {
+        peerConnections.current[data.userId].close();
+        delete peerConnections.current[data.userId];
+      }
+    });
+
+    // WebRTC сигналинг
+    socketRef.current.on('webrtc-offer', async (data) => {
+      console.log('Получен WebRTC offer от:', data.sender);
+      
+      if (!peerConnections.current[data.sender]) {
+        await createPeerConnection(data.sender, false);
+      }
+
+      const peerConnection = peerConnections.current[data.sender];
+      
+      try {
+        await peerConnection.setRemoteDescription(data.offer);
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+        
+        socketRef.current.emit('webrtc-answer', {
+          target: data.sender,
+          answer: answer
+        });
+      } catch (error) {
+        console.error('Ошибка обработки offer:', error);
+      }
+    });
+
+    socketRef.current.on('webrtc-answer', async (data) => {
+      console.log('Получен WebRTC answer от:', data.sender);
+      
+      const peerConnection = peerConnections.current[data.sender];
+      if (peerConnection) {
+        try {
+          await peerConnection.setRemoteDescription(data.answer);
+        } catch (error) {
+          console.error('Ошибка обработки answer:', error);
+        }
+      }
+    });
+
+    socketRef.current.on('webrtc-ice-candidate', async (data) => {
+      console.log('Получен ICE candidate от:', data.sender);
+      
+      const peerConnection = peerConnections.current[data.sender];
+      if (peerConnection) {
+        try {
+          await peerConnection.addIceCandidate(data.candidate);
+        } catch (error) {
+          console.error('Ошибка добавления ICE candidate:', error);
+        }
+      }
     });
 
     // Новый обработчик: обновлять список каналов при появлении нового
@@ -347,6 +480,9 @@ function App() {
       socketRef.current && socketRef.current.off('video-call-ended');
       socketRef.current && socketRef.current.off('user-joined-video-call');
       socketRef.current && socketRef.current.off('user-left-video-call');
+      socketRef.current && socketRef.current.off('webrtc-offer');
+      socketRef.current && socketRef.current.off('webrtc-answer');
+      socketRef.current && socketRef.current.off('webrtc-ice-candidate');
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     };
     // eslint-disable-next-line
@@ -612,14 +748,18 @@ function App() {
     };
 
     if (isMobile && mobileMenuOpen) {
-      document.addEventListener('touchstart', handleClickOutside);
-      document.addEventListener('click', handleClickOutside);
+      // Небольшая задержка перед добавлением обработчиков, чтобы не конфликтовать с кликом кнопки
+      const timer = setTimeout(() => {
+        document.addEventListener('touchstart', handleClickOutside);
+        document.addEventListener('click', handleClickOutside);
+      }, 100);
+      
+      return () => {
+        clearTimeout(timer);
+        document.removeEventListener('touchstart', handleClickOutside);
+        document.removeEventListener('click', handleClickOutside);
+      };
     }
-
-    return () => {
-      document.removeEventListener('touchstart', handleClickOutside);
-      document.removeEventListener('click', handleClickOutside);
-    };
   }, [mobileMenuOpen, isMobile]);
 
   // --- Мобильный header ---
@@ -650,14 +790,14 @@ function App() {
   );
 
   // --- Мобильное меню ---
-  const mobileMenu = mobileMenuOpen && (
+  const mobileMenu = (
     <div 
-      style={chatStyles.mobileMenuOverlay} 
+      style={{
+        ...chatStyles.mobileMenuOverlay,
+        display: mobileMenuOpen ? 'flex' : 'none'
+      }} 
       className="govchat-mobile-menu-overlay"
-      onClick={(e) => {
-        e.stopPropagation();
-        setMobileMenuOpen(false);
-      }}
+      onClick={() => setMobileMenuOpen(false)}
     >
       <div
         style={chatStyles.mobileMenu}
@@ -666,10 +806,7 @@ function App() {
       >
         <button
           style={chatStyles.mobileMenuCloseBtn}
-          onClick={(e) => {
-            e.stopPropagation();
-            setMobileMenuOpen(false);
-          }}
+          onClick={() => setMobileMenuOpen(false)}
           aria-label="Закрыть"
         >✕</button>
         <div style={chatStyles.mobileMenuTitle}>Каналы</div>
@@ -804,7 +941,7 @@ function App() {
     <div style={themedPageStyle} className="govchat-page">
       {/* Мобильный header */}
       {isMobile && mobileHeader}
-      {/* Мобильное меню - рендерится только если открыто */}
+      {/* Мобильное меню - теперь всегда рендерится, но скрывается через display */}
       {isMobile && mobileMenu}
       
       {/* Уведомление о видеозвонке */}
@@ -961,6 +1098,7 @@ function App() {
                             }
                           }}
                           autoPlay
+                          playsInline
                           style={{
                             width: "100%",
                             height: "100%",
@@ -976,7 +1114,7 @@ function App() {
                           color: "#888"
                         }}>
                           <div style={{ fontSize: 48, marginBottom: 10 }}>👤</div>
-                          <div>Подключается...</div>
+                          <div>Соединение...</div>
                         </div>
                       )}
                       <span style={{
@@ -1025,6 +1163,7 @@ function App() {
                   ref={localVideoRef}
                   autoPlay
                   muted
+                  playsInline
                   style={{
                     width: "100%",
                     height: "100%",
