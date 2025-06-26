@@ -21,7 +21,7 @@ export const sidebar = {
   display: "flex",
   flexDirection: "column",
   minHeight: "100vh",
-  position: "relative", // добавлено
+  position: "relative",
 };
 
 export const sidebarTitle = {
@@ -37,7 +37,7 @@ export const channelList = {
   flex: 1,
   overflowY: "auto",
   marginBottom: 18,
-  paddingBottom: 60, // добавлено, чтобы не перекрывалось кнопкой "Выйти"
+  paddingBottom: 60,
 };
 
 export const channelItem = isActive => ({
@@ -67,24 +67,6 @@ export const createBtn = {
   transition: "background 0.2s, box-shadow 0.2s",
 };
 
-export const logoutBtn = {
-  marginTop: "auto", // теперь всегда внизу
-  background: "none",
-  color: "#ff7675",
-  border: "1px solid #ff7675",
-  borderRadius: 8,
-  padding: "8px 0",
-  fontWeight: 600,
-  fontSize: 15,
-  cursor: "pointer",
-  transition: "background 0.2s, color 0.2s",
-  position: "sticky", // закрепить
-  bottom: 10,
-  width: "100%",
-  zIndex: 2,
-  backgroundClip: "padding-box",
-};
-
 export const chatContainer = {
   flex: 1,
   display: "flex",
@@ -93,20 +75,6 @@ export const chatContainer = {
   height: "100%",
   position: "relative",
   padding: "24px 0 8px 0",
-};
-
-export const usernameBox = {
-  position: "absolute",
-  top: -28,
-  right: 0,
-  color: "#00c3ff",
-  fontWeight: "bold",
-  fontSize: 17,
-  padding: "4px 16px",
-  background: "rgba(30,32,34,0.85)",
-  borderRadius: 16,
-  boxShadow: "0 2px 8px #00c3ff22",
-  letterSpacing: 1,
 };
 
 export const chatTitle = {
@@ -126,8 +94,7 @@ export const chatBox = {
   marginBottom: 0,
   overflowY: "auto",
   minHeight: 0,
-  paddingBottom: 70, // добавлено, чтобы не перекрывалось inputRow
-  /* Кастомный скроллбар */
+  paddingBottom: 70,
   scrollbarWidth: "thin",
   scrollbarColor: "#00c3ff #232526",
 };
@@ -198,7 +165,7 @@ export const sendBtn = {
 
 export const attachBtn = {
   background: "#fff",
-  color: "#222", // черная скрепка
+  color: "#222",
   border: "none",
   borderRadius: "50%",
   width: 44,
@@ -214,6 +181,7 @@ export const attachBtn = {
   cursor: "pointer",
   transition: "background 0.18s, box-shadow 0.18s, color 0.18s",
 };
+
 export const attachBtnHover = {
   background: "#e0e0e0",
   color: "#111",
@@ -226,9 +194,9 @@ export const typing = {
   fontSize: 14,
   margin: "0",
   minHeight: 18,
-  background: "none", // убираем фон
-  borderRadius: 0,    // убираем скругления
-  boxShadow: "none",  // убираем тень
+  background: "none",
+  borderRadius: 0,
+  boxShadow: "none",
 };
 
 export const authContainer = {
@@ -242,7 +210,7 @@ export const authContainer = {
   display: "flex",
   flexDirection: "column",
   alignItems: "center",
-  justifyContent: "center", // добавлено для вертикального центрирования
+  justifyContent: "center",
 };
 
 export const authTitle = {
@@ -268,7 +236,7 @@ export const authInput = {
   outline: "none",
   marginBottom: 12,
   transition: "border 0.2s",
-  boxSizing: "border-box", // чтобы padding не увеличивал ширину
+  boxSizing: "border-box",
 };
 
 export const authBtn = {
@@ -310,7 +278,7 @@ export const error = {
 
 export const profileBtnBox = {
   position: "absolute",
-  right: 70, // было 38, теперь ещё левее
+  right: 70,
   bottom: 70,
   zIndex: 10,
   display: "flex",
@@ -368,15 +336,15 @@ export const profileAvatar = {
   justifyContent: "center",
   fontSize: 54,
   color: "#b2bec3",
-  margin: "10px auto 10px auto", // уменьшили верхний и нижний отступ
+  margin: "10px auto 10px auto",
   boxShadow: "0 2px 12px #0003",
 };
 
 export const profileTitle = {
   fontWeight: 700,
-  fontSize: 19, // уменьшили размер
+  fontSize: 19,
   color: "#fff",
-  margin: "0 auto 4px auto", // уменьшили нижний отступ
+  margin: "0 auto 4px auto",
   textAlign: "center",
   letterSpacing: 0.5,
 };
@@ -401,17 +369,8 @@ export const profileCloseBtn = {
   zIndex: 101,
 };
 
-export const profileSectionTitle = {
-  color: "#b2bec3",
-  fontWeight: 500,
-  fontSize: 15,
-  marginTop: 22,
-  marginBottom: 2,
-  letterSpacing: 0.2,
-};
-
 export const profileField = {
-  marginBottom: 6, // уменьшили отступ между полями
+  marginBottom: 6,
   display: "flex",
   flexDirection: "column",
   gap: 2,
@@ -424,24 +383,8 @@ export const profileLabel = {
   marginBottom: 0,
 };
 
-export const profileValue = {
-  color: "#fff",
-  fontWeight: 500,
-  fontSize: 16,
-  marginBottom: 0,
-  wordBreak: "break-word",
-};
-
-export const profilePhone = {
-  color: "#fff",
-  fontWeight: 500,
-  fontSize: 17,
-  letterSpacing: 0.5,
-  marginBottom: 0,
-};
-
 export const profileLogoutBtn = {
-  marginTop: 0, // убран верхний отступ для выравнивания по горизонтали
+  marginTop: 0,
   background: "#35363a",
   color: "#ff7675",
   border: "none",
@@ -456,14 +399,6 @@ export const profileLogoutBtn = {
   marginLeft: 0,
 };
 
-export const profileInfoNote = {
-  color: "#b2bec3",
-  fontSize: 13,
-  marginTop: 18,
-  textAlign: "center",
-  opacity: 0.8,
-};
-
 export const profileEditBtn = {
   background: "linear-gradient(90deg,#00c3ff,#3a7bd5)",
   color: "#fff",
@@ -473,7 +408,7 @@ export const profileEditBtn = {
   fontWeight: 600,
   fontSize: 15,
   cursor: "pointer",
-  marginTop: 0, // убран верхний отступ для выравнивания по горизонтали
+  marginTop: 0,
   marginBottom: 0,
   boxShadow: "0 2px 8px #00c3ff33",
   transition: "background 0.2s, box-shadow 0.2s",
@@ -515,15 +450,6 @@ export const themes = [
     chatBg: "#e3f6fd"
   }
 ];
-
-// Можно добавить стили для превью файлов и модального окна, если потребуется
-
-// Для кнопки записи используем attachBtn, можно добавить отдельный стиль при необходимости
-export const recordBtn = {
-  ...attachBtn,
-  background: "#fff",
-  color: "#222",
-};
 
 export const mobileHeader = {
   position: "fixed",
@@ -568,7 +494,7 @@ export const mobileMenuOverlay = {
   display: "flex",
   alignItems: "flex-start",
   justifyContent: "flex-start",
-  touchAction: "none", // предотвращаем прокрутку фона
+  touchAction: "none",
 };
 
 export const mobileMenu = {
@@ -584,7 +510,7 @@ export const mobileMenu = {
   flexDirection: "column",
   zIndex: 201,
   animation: "slideInLeft 0.22s",
-  touchAction: "auto", // разрешаем прокрутку внутри меню
+  touchAction: "auto",
 };
 
 export const mobileMenuCloseBtn = {
@@ -628,37 +554,6 @@ export const mobileMenuTitle = {
   color: "#00c3ff",
   textShadow: "0 2px 8px #0002",
   textAlign: "center",
-};
-
-export const mobileMenuBtnAction = {
-  background: "linear-gradient(90deg,#00c3ff,#3a7bd5)",
-  color: "#fff",
-  border: "none",
-  borderRadius: 8,
-  padding: "10px 0",
-  fontWeight: 600,
-  fontSize: 16,
-  cursor: "pointer",
-  marginBottom: 0,
-  marginTop: 0,
-  boxShadow: "0 2px 8px #00c3ff33",
-  transition: "background 0.2s, box-shadow 0.2s",
-  width: "100%",
-};
-
-export const mobileMenuBtnSecondary = {
-  background: "none",
-  color: "#00c3ff",
-  border: "1px solid #00c3ff",
-  borderRadius: 8,
-  padding: "10px 0",
-  fontWeight: 600,
-  fontSize: 16,
-  cursor: "pointer",
-  marginBottom: 0,
-  marginTop: 0,
-  transition: "background 0.2s, color 0.2s",
-  width: "100%",
 };
 
 export const videoCallBtn = {
@@ -713,25 +608,6 @@ export const videoCallBox = {
   position: "relative",
 };
 
-export const videoRow = {
-  display: "flex",
-  flexDirection: "row",
-  gap: 10,
-  alignItems: "center",
-  justifyContent: "center",
-  width: "100%",
-  marginBottom: 10,
-  position: "relative", // добавлено для абсолютного позиционирования локального видео
-};
-
-export const video = {
-  width: 180,
-  height: 130,
-  background: "#000",
-  borderRadius: 10,
-  objectFit: "cover",
-};
-
 export const videoCallControls = {
   display: "flex",
   flexDirection: "row",
@@ -756,7 +632,6 @@ export const videoCallEndBtn = {
   marginLeft: 0,
 };
 
-// НОВОЕ: стили для кнопок управления видеозвонком
 export const videoCallControlBtn = {
   background: "#35363a",
   color: "#fff",
@@ -775,56 +650,6 @@ export const videoCallControlBtn = {
   transition: "background 0.2s, color 0.2s",
   boxShadow: "0 2px 8px #0002",
   marginLeft: 0,
-};
-
-// НОВОЕ: стиль для отключенных кнопок управления
-export const videoCallControlBtnDisabled = {
-  background: "#ff7675",
-  color: "#fff",
-  border: "none",
-  borderRadius: 8,
-  padding: "8px 12px",
-  fontWeight: 600,
-  fontSize: 18,
-  cursor: "pointer",
-  width: "auto",
-  minWidth: 44,
-  height: 36,
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  transition: "background 0.2s, color 0.2s",
-  boxShadow: "0 2px 8px #ff767533",
-  marginLeft: 0,
-};
-
-export const videoCallIncomingBox = {
-  background: "#232526",
-  color: "#fff",
-  borderRadius: 12,
-  boxShadow: "0 2px 16px #00c3ff33",
-  padding: "24px 18px",
-  minWidth: 220,
-  maxWidth: 340,
-  display: "flex",
-  flexDirection: "column",
-  alignItems: "center",
-  zIndex: 2100,
-  position: "relative", // добавлено для корректного позиционирования
-};
-
-export const videoCallIncomingBtn = {
-  background: "linear-gradient(90deg,#00c3ff,#3a7bd5)",
-  color: "#fff",
-  border: "none",
-  borderRadius: 8,
-  padding: "8px 18px",
-  fontWeight: 600,
-  fontSize: 15,
-  cursor: "pointer",
-  margin: "10px 0 0 0",
-  boxShadow: "0 2px 8px #00c3ff33",
-  transition: "background 0.2s, box-shadow 0.2s",
 };
 
 export const videoCallBanner = {
@@ -883,7 +708,6 @@ export const videoCallBannerDeclineBtn = {
   transition: "background 0.2s, box-shadow 0.2s",
 };
 
-// --- Адаптивные стили ---
 export const responsive = `
 @keyframes slideIn {
   from {
@@ -930,7 +754,6 @@ export const responsive = `
   }
 }
 
-/* НОВОЕ: Анимация для индикатора звонка */
 @keyframes callPulse {
   0%, 100% {
     opacity: 1;
@@ -982,14 +805,12 @@ export const responsive = `
     min-height: 0 !important;
     overflow-y: auto !important;
   }
-  /* Предотвращаем случайное открытие меню */
   .govchat-mobile-menu-overlay {
     pointer-events: auto !important;
   }
   .govchat-mobile-menu {
     pointer-events: auto !important;
   }
-  /* --- Меньше окно профиля по центру на мобильном --- */
   .govchat-profile-popup {
     left: 50% !important;
     top: 50% !important;
@@ -1010,7 +831,6 @@ export const responsive = `
     display: flex !important;
     flex-direction: column !important;
   }
-  /* --- Поднять строку ввода выше на мобильном --- */
   .govchat-input-row {
     position: fixed !important;
     left: 0 !important;
@@ -1028,7 +848,7 @@ export const responsive = `
   }
   .govchat-input-row button[title="Отправить"] {
     margin-left: 0vw !important;
-    margin-right: 7vw !important; /* добавьте или увеличьте это значение */
+    margin-right: 7vw !important;
   }
   .govchat-mobile-profile-actions {
     margin-top: 114px !important;
@@ -1039,7 +859,6 @@ export const responsive = `
     align-items: center !important;
     justify-content: center !important;
   }
-  
   .govchat-video-call-banner {
     padding: 8px 12px !important;
     font-size: 14px !important;
@@ -1047,18 +866,15 @@ export const responsive = `
     gap: 8px !important;
     align-items: stretch !important;
   }
-  
   .govchat-video-call-banner-text {
     text-align: center !important;
     margin-bottom: 0 !important;
   }
-  
   .govchat-video-call-banner-buttons {
     display: flex !important;
     gap: 8px !important;
     justify-content: center !important;
   }
-  
   .govchat-video-call-banner-btn,
   .govchat-video-call-banner-decline-btn {
     flex: 1 !important;
@@ -1066,8 +882,6 @@ export const responsive = `
     font-size: 13px !important;
     padding: 6px 8px !important;
   }
-  
-  /* НОВОЕ: Улучшенная анимация для индикатора звонка */
   .govchat-call-indicator {
     animation: callPulse 2s infinite !important;
   }

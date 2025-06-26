@@ -46,24 +46,18 @@ function App() {
     age: "",
   });
   const [showProfile, setShowProfile] = useState(false);
-  const [showProfileModal, setShowProfileModal] = useState(false);
-  const [profileModalData, setProfileModalData] = useState({
-    city: "",
-    status: "",
-    age: "",
-  });
   const [registering, setRegistering] = useState(false);
   const socketRef = useRef(null);
   const messagesEndRef = useRef(null);
-  const fileInputRefChat = React.useRef(null); // для вложений в чат
-  const fileInputRefAvatar = React.useRef(null); // для аватара профиля
+  const fileInputRefChat = React.useRef(null);
+  const fileInputRefAvatar = React.useRef(null);
   const [avatarVersion, setAvatarVersion] = useState(Date.now());
   const [fileToSend, setFileToSend] = useState(null);
   const [filePreviewUrl, setFilePreviewUrl] = useState(null);
-  const [modalMedia, setModalMedia] = useState(null); // {type, url, name}
-  const [attachBtnHover, setAttachBtnHover] = useState(false); // Состояние для ховера кнопки вложений
-  const [showCustomizer, setShowCustomizer] = useState(false); // новое состояние
-  const [theme, setTheme] = useState(chatStyles.themes[0]); // выбранная тема
+  const [modalMedia, setModalMedia] = useState(null);
+  const [attachBtnHover, setAttachBtnHover] = useState(false);
+  const [showCustomizer, setShowCustomizer] = useState(false);
+  const [theme, setTheme] = useState(chatStyles.themes[0]);
   const [recording, setRecording] = useState(false);
   const [recordTime, setRecordTime] = useState(0);
   const [mediaRecorder, setMediaRecorder] = useState(null);
@@ -72,142 +66,49 @@ function App() {
   const recordTimerRef = useRef(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [recaptchaToken, setRecaptchaToken] = useState("");
-  const recaptchaRef = useRef(null); // обычная капча
-  const recaptchaInvisibleRef = useRef(null); // невидимая капча для автологина
+  const recaptchaRef = useRef(null);
   const [videoCall, setVideoCall] = useState({ active: false, incoming: false, from: null });
-  const [videoStreams, setVideoStreams] = useState({ local: null, remotes: {} }); // remotes: {socketId: MediaStream}
-  const [videoPeers, setVideoPeers] = useState({}); // {socketId: RTCPeerConnection}
+  const [videoStreams, setVideoStreams] = useState({ local: null, remotes: {} });
+  const [videoPeers, setVideoPeers] = useState({});
   const [videoError, setVideoError] = useState("");
   const [videoConnecting, setVideoConnecting] = useState(false);
-  const [mySocketId, setMySocketId] = useState(null);
-  const [activeCallInChannel, setActiveCallInChannel] = useState(null); // новое состояние для отслеживания активного звонка в канале
-  const [activeCallsInChannels, setActiveCallsInChannels] = useState({}); // новое состояние для отслеживания звонков в каналах
-  // НОВОЕ: состояния для управления микрофоном и камерой
+  const [activeCallInChannel, setActiveCallInChannel] = useState(null);
+  const [activeCallsInChannels, setActiveCallsInChannels] = useState({});
   const [micEnabled, setMicEnabled] = useState(true);
   const [cameraEnabled, setCameraEnabled] = useState(true);
 
-  // --- WebRTC helpers ---
   const localVideoRef = useRef(null);
-  const remoteVideosRef = useRef({}); // {socketId: ref}
-  const videoPeersRef = useRef({}); // Добавляем ref для синхронного доступа к peers
+  const remoteVideosRef = useRef({});
+  const videoPeersRef = useRef({});
 
-  // НОВОЕ: улучшенная функция переключения камеры
-  const toggleCamera = async () => {
-    if (!videoStreams.local) return;
-    
-    if (cameraEnabled) {
-      // Отключаем камеру
-      const videoTrack = videoStreams.local.getVideoTracks()[0];
-      if (videoTrack) {
-        videoTrack.stop();
-        // Удаляем трек из потока
-        videoStreams.local.removeTrack(videoTrack);
-        setCameraEnabled(false);
-        
-        // Уведомляем peer connections об удалении трека
-        Object.values(videoPeersRef.current).forEach(pc => {
-          const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
-          if (sender) {
-            pc.removeTrack(sender);
-          }
-        });
-      }
-    } else {
-      // Включаем камеру
-      try {
-        const newStream = await navigator.mediaDevices.getUserMedia({ 
-          video: true, 
-          audio: false 
-        });
-        
-        const newVideoTrack = newStream.getVideoTracks()[0];
-        if (newVideoTrack) {
-          // Добавляем новый трек в существующий поток
-          videoStreams.local.addTrack(newVideoTrack);
-          setCameraEnabled(true);
-          
-          // Добавляем трек в существующие peer connections
-          Object.values(videoPeersRef.current).forEach(async pc => {
-            try {
-              await pc.addTrack(newVideoTrack, videoStreams.local);
-            } catch (error) {
-              console.warn("Error adding video track to peer:", error);
-            }
-          });
-          
-          // Обновляем локальное видео
-          if (localVideoRef.current) {
-            localVideoRef.current.srcObject = videoStreams.local;
-          }
-          
-          console.log("Camera enabled successfully");
-        }
-      } catch (error) {
-        console.error("Error enabling camera:", error);
-        setVideoError("Не удалось включить камеру: " + error.message);
-      }
-    }
-  };
-
-  // НОВОЕ: улучшенная функция переключения микрофона
-  const toggleMicrophone = async () => {
-    if (!videoStreams.local) return;
-    
-    if (micEnabled) {
-      // Отключаем микрофон
+  const toggleMicrophone = () => {
+    if (videoStreams.local) {
       const audioTrack = videoStreams.local.getAudioTracks()[0];
       if (audioTrack) {
-        audioTrack.stop();
-        videoStreams.local.removeTrack(audioTrack);
-        setMicEnabled(false);
-        
-        // Уведомляем peer connections об удалении трека
-        Object.values(videoPeersRef.current).forEach(pc => {
-          const sender = pc.getSenders().find(s => s.track && s.track.kind === 'audio');
-          if (sender) {
-            pc.removeTrack(sender);
-          }
-        });
-      }
-    } else {
-      // Включаем микрофон
-      try {
-        const newStream = await navigator.mediaDevices.getUserMedia({ 
-          video: false, 
-          audio: true 
-        });
-        
-        const newAudioTrack = newStream.getAudioTracks()[0];
-        if (newAudioTrack) {
-          videoStreams.local.addTrack(newAudioTrack);
-          setMicEnabled(true);
-          
-          // Добавляем трек в существующие peer connections
-          Object.values(videoPeersRef.current).forEach(async pc => {
-            try {
-              await pc.addTrack(newAudioTrack, videoStreams.local);
-            } catch (error) {
-              console.warn("Error adding audio track to peer:", error);
-            }
-          });
-          
-          console.log("Microphone enabled successfully");
-        }
-      } catch (error) {
-        console.error("Error enabling microphone:", error);
-        setVideoError("Не удалось включить микрофон: " + error.message);
+        audioTrack.enabled = !audioTrack.enabled;
+        setMicEnabled(audioTrack.enabled);
+        console.log("Microphone", audioTrack.enabled ? "enabled" : "disabled");
       }
     }
   };
 
-  // --- Видеозвонок: инициация ---
+  const toggleCamera = () => {
+    if (videoStreams.local) {
+      const videoTrack = videoStreams.local.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.enabled = !videoTrack.enabled;
+        setCameraEnabled(videoTrack.enabled);
+        console.log("Camera", videoTrack.enabled ? "enabled" : "disabled");
+      }
+    }
+  };
+
   const startVideoCall = async () => {
     if (!selectedChannel) {
       alert("Выберите канал для начала видеозвонка");
       return;
     }
     
-    console.log("Starting video call in channel:", selectedChannel);
     setVideoError("");
     setVideoConnecting(true);
     
@@ -217,35 +118,27 @@ function App() {
         audio: true 
       });
       
-      console.log("Got local stream");
       setVideoStreams(s => ({ ...s, local: stream }));
       setVideoCall({ active: true, incoming: false, from: null, channel: selectedChannel });
-      setActiveCallInChannel(null); // убираем уведомление о входящем звонке
-      // НОВОЕ: сбрасываем состояния микрофона и камеры
+      setActiveCallInChannel(null);
       setMicEnabled(true);
       setCameraEnabled(true);
       
-      // Сначала присоединяемся к звонку
       socketRef.current.emit("video-call-join", { channel: selectedChannel });
       
-      // Затем инициируем звонок для других
       setTimeout(() => {
-        console.log("Sending initiate signal to channel:", selectedChannel);
         socketRef.current.emit("video-call-initiate", { channel: selectedChannel });
         setVideoConnecting(false);
       }, 500);
       
     } catch (error) {
-      console.error("Error starting video call:", error);
       setVideoError("Ошибка доступа к камере/микрофону: " + error.message);
       setVideoConnecting(false);
       setVideoCall({ active: false, incoming: false, from: null });
     }
   };
 
-  // --- Видеозвонок: принять входящий ---
   const acceptVideoCall = async () => {
-    console.log("Accepting video call from:", activeCallInChannel?.from, "in channel:", activeCallInChannel?.channel);
     setVideoError("");
     setVideoConnecting(true);
     
@@ -255,7 +148,6 @@ function App() {
         audio: true 
       });
       
-      console.log("Got local stream for incoming call");
       setVideoStreams(s => ({ ...s, local: stream }));
       setVideoCall({ 
         active: true, 
@@ -263,12 +155,10 @@ function App() {
         from: null, 
         channel: activeCallInChannel?.channel 
       });
-      setActiveCallInChannel(null); // убираем уведомление
-      // НОВОЕ: сбрасываем состояния микрофона и камеры
+      setActiveCallInChannel(null);
       setMicEnabled(true);
       setCameraEnabled(true);
       
-      // Присоединяемся к звонку
       socketRef.current.emit("video-call-join", { channel: activeCallInChannel?.channel });
       
       setTimeout(() => {
@@ -276,22 +166,18 @@ function App() {
       }, 1000);
       
     } catch (error) {
-      console.error("Error accepting video call:", error);
       setVideoError("Ошибка доступа к камере/микрофону: " + error.message);
       setVideoConnecting(false);
       setVideoCall({ active: false, incoming: false, from: null });
     }
   };
 
-  // --- Видеозвонок: создать PeerConnection ---
   const createPeer = async (peerId, isInitiator, localStream = null) => {
-    // Проверяем в ref, а не в state
     if (videoPeersRef.current[peerId]) {
       console.log("Peer already exists for:", peerId);
       return videoPeersRef.current[peerId];
     }
     
-    // Используем переданный поток или текущий локальный
     const streamToUse = localStream || videoStreams.local;
     if (!streamToUse) {
       console.log("No local stream available for peer:", peerId);
@@ -307,7 +193,6 @@ function App() {
         { urls: "stun:stun2.l.google.com:19302" },
         { urls: "stun:stun3.l.google.com:19302" },
         { urls: "stun:stun4.l.google.com:19302" },
-        // Добавляем публичные TURN серверы для лучшей связности
         {
           urls: "turn:openrelay.metered.ca:80",
           username: "openrelayproject",
@@ -327,38 +212,13 @@ function App() {
       iceCandidatePoolSize: 10
     });
     
-    // Сразу сохраняем в ref для синхронного доступа
     videoPeersRef.current[peerId] = pc;
     
-    // Добавить локальные треки
     streamToUse.getTracks().forEach(track => {
       console.log("Adding track to peer:", peerId, track.kind);
       pc.addTrack(track, streamToUse);
     });
     
-    // НОВОЕ: обработка изменений треков в локальном потоке
-    const handleTrackUpdate = () => {
-      // Обновляем треки при изменении локального потока
-      const currentTracks = streamToUse.getTracks();
-      const senders = pc.getSenders();
-      
-      // Удаляем старые треки
-      senders.forEach(sender => {
-        if (sender.track && !currentTracks.includes(sender.track)) {
-          pc.removeTrack(sender);
-        }
-      });
-      
-      // Добавляем новые треки
-      currentTracks.forEach(track => {
-        const existingSender = senders.find(s => s.track === track);
-        if (!existingSender) {
-          pc.addTrack(track, streamToUse);
-        }
-      });
-    };
-    
-    // Обработка ICE кандидатов
     pc.onicecandidate = (event) => {
       if (event.candidate) {
         console.log("Sending ICE candidate to:", peerId, event.candidate.type);
@@ -372,12 +232,10 @@ function App() {
       }
     };
     
-    // Обработка удаленного потока
     pc.ontrack = (event) => {
       console.log("Received remote stream from:", peerId, "tracks:", event.streams[0].getTracks().length);
       const remoteStream = event.streams[0];
       
-      // Проверяем что поток содержит треки
       if (remoteStream.getTracks().length > 0) {
         setVideoStreams(s => ({
           ...s,
@@ -388,24 +246,21 @@ function App() {
       }
     };
     
-    // Расширенный мониторинг состояния соединения
     pc.onconnectionstatechange = () => {
       console.log(`Connection state with ${peerId}:`, pc.connectionState);
       
       if (pc.connectionState === "connected") {
         console.log("✅ WebRTC connection established with:", peerId);
-        setVideoError(""); // Очищаем ошибки при успешном соединении
+        setVideoError("");
       } else if (pc.connectionState === "connecting") {
         console.log("🔄 Connecting to:", peerId);
       } else if (["disconnected", "failed", "closed"].includes(pc.connectionState)) {
         console.log("❌ Connection failed/closed with:", peerId, "- removing peer");
         
-        // Показываем ошибку только если это было активное соединение
         if (pc.connectionState === "failed") {
           setVideoError("Не удалось установить соединение. Проверьте подключение к интернету.");
         }
         
-        // Небольшая задержка перед удалением для возможного восстановления
         setTimeout(() => {
           if (videoPeersRef.current[peerId] && 
               ["disconnected", "failed", "closed"].includes(videoPeersRef.current[peerId].connectionState)) {
@@ -415,28 +270,24 @@ function App() {
       }
     };
     
-    // Мониторинг ICE состояния
     pc.oniceconnectionstatechange = () => {
       console.log(`ICE connection state with ${peerId}:`, pc.iceConnectionState);
       
       if (pc.iceConnectionState === "failed") {
         console.log("ICE connection failed with:", peerId, "- attempting restart");
-        // Попытка перезапуска ICE
         pc.restartIce();
       }
     };
     
-    // Обновить state
     setVideoPeers(peers => ({ ...peers, [peerId]: pc }));
     
-    // Создать offer если мы инициаторы
     if (isInitiator) {
       try {
         console.log("Creating offer for:", peerId);
         const offer = await pc.createOffer({
           offerToReceiveAudio: true,
           offerToReceiveVideo: true,
-          voiceActivityDetection: false // отключаем VAD для стабильности
+          voiceActivityDetection: false
         });
         await pc.setLocalDescription(offer);
         
@@ -455,11 +306,9 @@ function App() {
     return pc;
   };
 
-  // --- Видеозвонок: удалить PeerConnection ---
   const removePeer = (peerId) => {
     console.log("Removing peer:", peerId);
     
-    // Удаляем из ref
     if (videoPeersRef.current[peerId]) {
       videoPeersRef.current[peerId].close();
       delete videoPeersRef.current[peerId];
@@ -476,18 +325,15 @@ function App() {
     });
   };
 
-  // --- Видеозвонок: завершить ---
   const endVideoCall = () => {
     console.log("Ending video call");
     
-    // Закрыть все peer connections через ref
     Object.values(videoPeersRef.current).forEach(pc => {
       if (pc) pc.close();
     });
     videoPeersRef.current = {};
     setVideoPeers({});
     
-    // Остановить локальный поток
     if (videoStreams.local) {
       videoStreams.local.getTracks().forEach(track => {
         track.stop();
@@ -498,12 +344,10 @@ function App() {
     setVideoCall({ active: false, incoming: false, from: null });
     setVideoConnecting(false);
     setVideoError("");
-    // НОВОЕ: сбрасываем состояния микрофона и камеры
     setMicEnabled(true);
     setCameraEnabled(true);
   };
 
-  // --- Видеозвонок: покинуть звонок ---
   const leaveVideoCall = () => {
     if (videoCall.active && selectedChannel) {
       socketRef.current.emit("video-call-leave", { channel: selectedChannel });
@@ -511,13 +355,11 @@ function App() {
     endVideoCall();
   };
 
-  // --- Отклонить входящий звонок ---
   const declineVideoCall = () => {
     setActiveCallInChannel(null);
   };
 
-  // Определяем кнопку видеозвонка
-  const videoCallButton = selectedChannel ? (
+  const videoCallButton = selectedChannel && (
     <button
       style={{
         ...chatStyles.videoCallBtn,
@@ -527,11 +369,10 @@ function App() {
       disabled={videoConnecting}
       title={videoCall.active ? "Завершить видеозвонок" : "Начать видеозвонок"}
     >
-      {videoConnecting ? "⏳" : videoCall.active ? "📹" : "📹"}
+      {videoConnecting ? "⏳" : "📹"}
     </button>
-  ) : null;
+  );
 
-  // Функция для старта записи аудио
   const startRecording = async () => {
     if (!navigator.mediaDevices || !window.MediaRecorder) {
       alert("Ваш браузер не поддерживает запись аудио");
@@ -565,7 +406,6 @@ function App() {
     }
   };
 
-  // Функция для остановки записи аудио
   const stopRecording = () => {
     if (mediaRecorder) {
       mediaRecorder.stop();
@@ -578,7 +418,6 @@ function App() {
     }
   };
 
-  // Функция для отправки аудиосообщения
   const sendAudioMessage = async () => {
     if (!audioBlob || !selectedChannel) return;
     const t = parseToken(token);
@@ -615,7 +454,6 @@ function App() {
           headers: { Authorization: `Bearer ${token}` },
         });
         setUserProfile(res.data);
-        // Применяем тему из профиля
         if (res.data.theme && (res.data.theme.pageBg || res.data.theme.chatBg)) {
           const found = chatStyles.themes.find(
             t => t.pageBg === res.data.theme.pageBg && t.chatBg === res.data.theme.chatBg
@@ -657,7 +495,6 @@ function App() {
       typingTimeoutRef.current = setTimeout(() => setTyping(""), 2000);
     });
 
-    // Новые обработчики для отслеживания активных звонков
     socketRef.current.on("video-call-status", ({ channel, active }) => {
       setActiveCallsInChannels(prev => {
         if (active) {
@@ -669,7 +506,6 @@ function App() {
       });
     });
 
-    // Новый обработчик: обновлять список каналов при появлении нового
     const handleNewChannel = () => {
       axios
         .get(`${API_URL}/channels`, {
@@ -681,13 +517,12 @@ function App() {
     socketRef.current.on("new-channel", handleNewChannel);
 
     return () => {
-      socketRef.current && socketRef.current.disconnect();
-      socketRef.current && socketRef.current.off("new-channel", handleNewChannel);
-      socketRef.current && socketRef.current.off("video-call-status");
+      socketRef.current?.disconnect();
+      socketRef.current?.off("new-channel", handleNewChannel);
+      socketRef.current?.off("video-call-status");
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     };
-    // eslint-disable-next-line
-  }, [token]);
+  }, [token, selectedChannel]);
 
   useEffect(() => {
     if (token && selectedChannel) {
@@ -698,8 +533,6 @@ function App() {
         .then((res) => setMessages(res.data));
       socketRef.current && socketRef.current.emit("join", selectedChannel);
       
-      // НОВОЕ: Сбрасываем уведомление о звонке при смене канала
-      // Оно будет восстановлено сервером если звонок активен
       setActiveCallInChannel(null);
     }
   }, [token, selectedChannel]);
@@ -734,7 +567,6 @@ function App() {
       setChannels(chs.data);
       setSelectedChannel(res.data._id);
       socketRef.current && socketRef.current.emit("join", res.data._id);
-      // socketRef.current && socketRef.current.emit("new-channel"); // УДАЛЕНО, теперь сервер сам эмитит
     } catch {
       alert("Ошибка создания канала");
     }
@@ -764,7 +596,6 @@ function App() {
     if (fileInputRefChat.current) fileInputRefChat.current.value = "";
   };
 
-  // Обработчик регистрации
   const handleRegister = async (e) => {
     e.preventDefault();
     setError("");
@@ -780,7 +611,6 @@ function App() {
         password,
         recaptcha: recaptchaToken,
       });
-      // После успешной регистрации сразу логинимся (без капчи)
       const res = await axios.post(`${API_URL}/login`, {
         username,
         password,
@@ -796,12 +626,10 @@ function App() {
     setRegistering(false);
   };
 
-  // Обработчик входа
   const handleLogin = async (e) => {
     e.preventDefault();
     setError("");
     setRegistering(true);
-    // Капча не требуется для входа
     try {
       const res = await axios.post(`${API_URL}/login`, {
         username,
@@ -818,7 +646,6 @@ function App() {
     setRegistering(false);
   };
 
-  // Функция для отправки изменений профиля
   const handleProfileSave = async () => {
     try {
       const payload = {
@@ -845,22 +672,10 @@ function App() {
     }
   };
 
-  const handleProfilePopupBgClick = (e) => {
-    // Если клик по фону (а не по самому popup), закрываем
-    setShowProfile(false);
-  };
-
-  useEffect(() => {
-    if (userProfile) {
-      setEditData(d => ({
-        ...d,
-      }));
-    }
-  }, [userProfile]);
+  const handleProfilePopupBgClick = () => setShowProfile(false);
 
   useEffect(() => {
     document.title = "ГоВЧат 2.1 Beta";
-    // Добавляем/заменяем favicon
     const faviconId = "govchat-favicon";
     let link = document.querySelector(`link[rel="icon"]#${faviconId}`);
     if (!link) {
@@ -869,16 +684,11 @@ function App() {
       link.id = faviconId;
       document.head.appendChild(link);
     }
-    // SVG-эмодзи-иконка (например, 🦆)
     link.type = "image/svg+xml";
     link.href =
       'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><text y="52" font-size="52">🦆</text></svg>';
-    return () => {
-      // Не удаляем favicon при размонтировании
-    };
   }, []);
 
-  // Показывать превью выбранного файла
   useEffect(() => {
     if (fileToSend) {
       if (fileToSend.type.startsWith("image/") || fileToSend.type.startsWith("video/")) {
@@ -893,7 +703,6 @@ function App() {
     }
   }, [fileToSend]);
 
-  // Сохранение выбранной темы в профиль
   const handleThemeSelect = async (t) => {
     setTheme(t);
     setShowCustomizer(false);
@@ -907,11 +716,9 @@ function App() {
     }
   };
 
-  // Применяем тему к стилям
   const themedPageStyle = { ...chatStyles.page, background: theme.pageBg };
   const themedChatBoxStyle = { ...chatStyles.chatBox, background: theme.chatBg };
 
-  // Вставляем адаптивные стили в <head>
   useEffect(() => {
     const styleId = "govchat-responsive-style";
     if (!document.getElementById(styleId)) {
@@ -920,13 +727,8 @@ function App() {
       style.innerHTML = chatStyles.responsive;
       document.head.appendChild(style);
     }
-    
-    // Убираем лишние overflow стили с body и html
-    document.documentElement.style.overflow = '';
-    document.body.style.overflow = '';
   }, []);
 
-  // Для определения мобильного режима
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 700);
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth <= 700);
@@ -934,27 +736,21 @@ function App() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  // --- Видеозвонок: обработка сигналов и событий ---
   useEffect(() => {
     if (!socketRef.current) return;
 
     const onConnect = () => {
       setMySocketId(socketRef.current.id);
       console.log("Connected with socket ID:", socketRef.current.id);
-      // Запросить текущий статус звонков при подключении
       socketRef.current.emit("get-active-calls");
     };
 
     const onIncoming = ({ from, channel, initiatorSocketId }) => {
       console.log("Incoming call from:", from, "in channel:", channel, "my channel:", selectedChannel);
-      // ОБНОВЛЕНО: Показываем уведомление если мы находимся в том же канале и не участвуем в звонке
-      // Убираем проверку на from !== username, так как может быть ситуация когда один пользователь
-      // инициировал звонок, а другой присоединился к каналу позже
       if (channel === selectedChannel && !videoCall.active) {
         console.log("Showing incoming call notification");
         setActiveCallInChannel({ from, channel, initiatorSocketId });
       }
-      // Обновляем статус активного звонка в канале
       setActiveCallsInChannels(prev => ({ ...prev, [channel]: true }));
     };
 
@@ -962,7 +758,6 @@ function App() {
       console.log("Participants in call:", participants);
       setVideoConnecting(false);
       
-      // Ждем пока локальный поток будет доступен
       const waitForLocalStream = () => {
         return new Promise((resolve) => {
           const checkStream = () => {
@@ -978,11 +773,9 @@ function App() {
       
       const localStream = await waitForLocalStream();
       
-      // Создать PeerConnection для каждого участника с небольшой задержкой
       for (const peerId of participants) {
         if (peerId !== socketRef.current.id && !videoPeersRef.current[peerId]) {
           console.log("Creating peer for existing participant:", peerId);
-          // Добавляем задержку между созданием peer connections
           await new Promise(resolve => setTimeout(resolve, 500));
           await createPeer(peerId, true, localStream);
         }
@@ -993,10 +786,8 @@ function App() {
       console.log("User joined call:", user, socketId);
       if (socketId !== socketRef.current.id && !videoPeersRef.current[socketId]) {
         console.log("Creating peer for new participant:", socketId);
-        // Используем текущий локальный поток
         const localStream = videoStreams.local;
         if (localStream) {
-          // Добавляем небольшую задержку для стабильности
           await new Promise(resolve => setTimeout(resolve, 1000));
           await createPeer(socketId, false, localStream);
         } else {
@@ -1013,7 +804,6 @@ function App() {
     const onSignal = async ({ from, data, username: remoteName }) => {
       console.log("Received signal from:", from, "type:", data.type || 'candidate');
       
-      // Используем ref для проверки существования peer
       let pc = videoPeersRef.current[from];
       
       if (!pc && (data.type === "offer" || data.type === "answer")) {
@@ -1052,7 +842,6 @@ function App() {
             await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
           } catch (error) {
             console.warn("Error adding ICE candidate:", error);
-            // Не прерываем выполнение, так как некоторые кандидаты могут быть неприменимы
           }
         }
       } catch (error) {
@@ -1065,7 +854,6 @@ function App() {
       console.log("Call ended by server, ended by:", by, "in channel:", channel);
       endVideoCall();
       setActiveCallInChannel(null);
-      // Убираем индикатор активного звонка в канале
       setActiveCallsInChannels(prev => {
         const { [channel]: removed, ...rest } = prev;
         return rest;
@@ -1097,15 +885,12 @@ function App() {
     };
   }, [selectedChannel, username, videoStreams.local, videoCall.active]);
 
-  // --- Видеозвонок: отображение видео ---
   useEffect(() => {
-    // Локальное видео
     if (localVideoRef.current && videoStreams.local) {
       localVideoRef.current.srcObject = videoStreams.local;
       console.log("Set local video stream");
     }
     
-    // Удаленные видео
     Object.entries(videoStreams.remotes || {}).forEach(([peerId, stream]) => {
       if (remoteVideosRef.current[peerId] && stream) {
         remoteVideosRef.current[peerId].srcObject = stream;
@@ -1114,7 +899,6 @@ function App() {
     });
   }, [videoStreams, videoCall.active]);
 
-  // --- Модальное окно видеозвонка ---
   const videoCallModal = videoCall.active && (
     <div style={chatStyles.videoCallModal} onClick={(e) => e.stopPropagation()}>
       <div
@@ -1122,38 +906,33 @@ function App() {
           ...chatStyles.videoCallBox,
           width: isMobile ? "96vw" : 520,
           minHeight: isMobile ? 280 : 360,
-          padding: isMobile ? "12px 8px 12px 8px" : "20px 20px 16px 20px",
+          padding: isMobile ? "12px 8px" : "20px 20px 16px",
           position: "relative"
         }}
         onClick={e => e.stopPropagation()}
       >
-        <div
-          style={{
-            fontWeight: 700,
-            fontSize: 18,
-            color: "#00c3ff",
-            marginBottom: 16,
-            textAlign: "center",
-          }}
-        >
+        <div style={{
+          fontWeight: 700,
+          fontSize: 18,
+          color: "#00c3ff",
+          marginBottom: 16,
+          textAlign: "center",
+        }}>
           📹 Видеозвонок: {channels.find((ch) => ch._id === selectedChannel)?.name || ""}
         </div>
         
-        <div
-          style={{
-            position: "relative",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            minHeight: isMobile ? 180 : 240,
-            background: "#000",
-            borderRadius: 12,
-            overflow: "hidden",
-            marginBottom: 16,
-          }}
-        >
-          {/* Удаленные видео */}
+        <div style={{
+          position: "relative",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          minHeight: isMobile ? 180 : 240,
+          background: "#000",
+          borderRadius: 12,
+          overflow: "hidden",
+          marginBottom: 16,
+        }}>
           {Object.entries(videoStreams.remotes || {}).length > 0 ? (
             <div style={{
               display: "grid",
@@ -1192,7 +971,6 @@ function App() {
             </div>
           )}
           
-          {/* Мое видео - маленькое в углу */}
           {videoStreams.local && (
             <div style={{
               position: "absolute",
@@ -1242,7 +1020,6 @@ function App() {
           flexWrap: "wrap",
           justifyContent: "center",
         }}>
-          {/* Кнопка микрофона */}
           <button
             style={{
               ...chatStyles.videoCallControlBtn,
@@ -1255,7 +1032,6 @@ function App() {
             {micEnabled ? "🎤" : "🔇"}
           </button>
           
-          {/* Кнопка камеры */}
           <button
             style={{
               ...chatStyles.videoCallControlBtn,
@@ -1268,7 +1044,6 @@ function App() {
             {cameraEnabled ? "📹" : "📷"}
           </button>
           
-          {/* Кнопка завершения */}
           <button
             style={chatStyles.videoCallEndBtn}
             onClick={leaveVideoCall}
@@ -1278,14 +1053,12 @@ function App() {
         </div>
         
         {videoError && (
-          <div
-            style={{
-              color: "#ff7675",
-              marginTop: 12,
-              fontWeight: 500,
-              textAlign: "center",
-            }}
-          >
+          <div style={{
+            color: "#ff7675",
+            marginTop: 12,
+            fontWeight: 500,
+            textAlign: "center",
+          }}>
             {videoError}
           </div>
         )}
@@ -1293,16 +1066,13 @@ function App() {
     </div>
   );
 
-  // --- Уведомление о входящем звонке (теперь постоянное) ---
   const videoCallBanner = activeCallInChannel && selectedChannel === activeCallInChannel.channel && !videoCall.active && (
     <div style={chatStyles.videoCallBanner}>
       <div style={chatStyles.videoCallBannerText}>
         <span style={chatStyles.videoCallBannerIcon}>📹</span>
-        {isMobile ? (
-          <span><strong>{activeCallInChannel.from}</strong> начал видеозвонок</span>
-        ) : (
-          <span><strong>{activeCallInChannel.from}</strong> начал видеозвонок в этом канале</span>
-        )}
+        <span>
+          <strong>{activeCallInChannel.from}</strong> начал видеозвонок{!isMobile && " в этом канале"}
+        </span>
       </div>
       <div>
         <button
@@ -1351,7 +1121,6 @@ function App() {
               required
               autoComplete="current-password"
             />
-            {/* Обычная reCAPTCHA только для регистрации */}
             <div style={{ margin: "12px 0", display: "flex", justifyContent: "center" }}>
               {authMode === "register" && (
                 <ReCAPTCHA
@@ -1390,7 +1159,6 @@ function App() {
     );
   }
 
-  // --- Мобильный header ---
   const mobileHeader = (
     <div style={chatStyles.mobileHeader} className="govchat-mobile-header">
       <button
@@ -1413,7 +1181,6 @@ function App() {
     </div>
   );
 
-  // --- Мобильное меню ---
   const mobileMenu = (
     <div style={chatStyles.mobileMenuOverlay} onClick={() => setMobileMenuOpen(false)}>
       <div
@@ -1437,7 +1204,7 @@ function App() {
                 key={ch._id}
                 style={{
                   ...chatStyles.channelItem(selectedChannel === ch._id),
-                  position: "relative", // для позиционирования индикатора
+                  position: "relative",
                 }}
                 onClick={() => {
                   setSelectedChannel(ch._id);
@@ -1445,7 +1212,6 @@ function App() {
                 }}
               >
                 {ch.name}
-                {/* Красная точка для активного звонка */}
                 {activeCallsInChannels[ch._id] && (
                   <div
                     style={{
@@ -1486,7 +1252,6 @@ function App() {
             </div>
           )}
         </div>
-        {/* Кнопки профиля и кастомизации теперь после списка каналов */}
         <div
           className="govchat-mobile-profile-actions"
           style={{
@@ -1498,7 +1263,6 @@ function App() {
             margin: "18px 0 16px 0",
           }}
         >
-          {/* Профиль */}
           <button
             style={{
               ...chatStyles.profileBtn,
@@ -1522,7 +1286,6 @@ function App() {
               <ellipse cx="13" cy="19" rx="7" ry="4" fill="#fff" />
             </svg>
           </button>
-          {/* Кастомизация */}
           <button
             style={{
               ...chatStyles.profileBtn,
@@ -1553,13 +1316,11 @@ function App() {
           </button>
         </div>
         <div style={chatStyles.mobileMenuFooter}>
-          {/* Кнопка "Выйти" убрана из мобильного меню */}
         </div>
       </div>
     </div>
   );
 
-  // --- Десктопное меню ---
   const desktopMenu = (
     <div style={chatStyles.sidebar} className="govchat-sidebar">
       <div style={chatStyles.sidebarTitle}>ГоВЧат 2.1 Beta</div>
@@ -1575,12 +1336,11 @@ function App() {
               key={ch._id}
               style={{
                 ...chatStyles.channelItem(selectedChannel === ch._id),
-                position: "relative", // для позиционирования индикатора
+                position: "relative",
               }}
               onClick={() => setSelectedChannel(ch._id)}
             >
               {ch.name}
-              {/* Красная точка для активного звонка */}
               {activeCallsInChannels[ch._id] && (
                 <div
                   style={{
@@ -1622,7 +1382,6 @@ function App() {
           </div>
         )}
       </div>
-      {/* --- Кнопки профиля и кастомизации для десктопа --- */}
       <div style={{
         ...chatStyles.profileBtnBox,
         left: "auto",
@@ -1634,7 +1393,6 @@ function App() {
         gap: 10,
         zIndex: 10
       }}>
-        {/* Кнопка профиля */}
         <button
           style={chatStyles.profileBtn}
           onClick={() => {
@@ -1649,7 +1407,6 @@ function App() {
             <ellipse cx="13" cy="19" rx="7" ry="4" fill="#fff" />
           </svg>
         </button>
-        {/* Кнопка кастомизации */}
         <button
           style={{
             ...chatStyles.profileBtn,
@@ -1675,24 +1432,18 @@ function App() {
 
   return (
     <div style={themedPageStyle} className="govchat-page">
-      {/* Мобильный header */}
       {isMobile && mobileHeader}
-      {/* Мобильное меню */}
       {isMobile && mobileMenuOpen && mobileMenu}
-      {/* Сайдбар только на десктопе */}
       {!isMobile && desktopMenu}
       
-      {/* Чат всегда на экране, но с отступом сверху на мобиле */}
       <div
         style={{
           ...chatStyles.chatContainer,
-          ...(isMobile
-            ? {
-                paddingTop: 40, // уменьшено с 64 до 40
-                height: "calc(100vh - 40px)", // уменьшить высоту чата на мобильном
-                maxHeight: "calc(100vh - 40px)",
-              }
-            : {}),
+          ...(isMobile ? {
+            paddingTop: 40,
+            height: "calc(100vh - 40px)",
+            maxHeight: "calc(100vh - 40px)",
+          } : {}),
         }}
         className="govchat-chat-container"
       >
@@ -1703,37 +1454,29 @@ function App() {
           width: "100%",
           marginBottom: 10,
           minHeight: 32,
-          marginTop: isMobile ? 18 : 0 // добавлено для мобильных
+          marginTop: isMobile ? 18 : 0
         }}>
           <div style={chatStyles.chatTitle}>Чат</div>
-          {/* Кнопка видеозвонка справа от "Чат" */}
           <div style={{ marginLeft: "auto", marginRight: 8 }}>
             {videoCallButton}
           </div>
         </div>
         
-        {/* Уведомление о видеозвонке */}
         {videoCallBanner}
         
-        <div
-          className="govchat-chat-box"
-          style={themedChatBoxStyle}
-        >
+        <div className="govchat-chat-box" style={themedChatBoxStyle}>
           {messages.map((msg) => {
             const isMine = msg.sender === username;
-            // Формат времени
             const time = msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
             return (
               <div key={msg._id} style={chatStyles.messageRow(isMine)}>
                 <div style={chatStyles.message(isMine)}>
-                  {/* Только для чужих сообщений показываем имя */}
                   {!isMine && (
                     <span style={chatStyles.messageSender}>
                       {msg.sender}:
                     </span>
                   )}
                   {msg.text}
-                  {/* Превью файлов */}
                   {msg.fileUrl && msg.fileType && (
                     <span style={{ display: "block", marginTop: 8 }}>
                       {msg.fileType.startsWith("audio/") ? (
@@ -1755,7 +1498,6 @@ function App() {
                           Ваш браузер не поддерживает видео.
                         </video>
                       ) : (
-                        // Превью для документов
                         <span
                           style={{
                             display: "flex",
@@ -1771,7 +1513,6 @@ function App() {
                             color: "#fff"
                           }}
                           onClick={() => {
-                            // Определяем тип документа для предпросмотра
                             const ext = (msg.originalName || "").split('.').pop().toLowerCase();
                             if (msg.fileType === "application/pdf") {
                               setModalMedia({ type: "pdf", url: msg.fileUrl, name: msg.originalName });
@@ -1781,7 +1522,6 @@ function App() {
                           }}
                           title={msg.originalName}
                         >
-                          {/* Иконка документа по расширению */}
                           <span style={{ fontSize: 28 }}>
                             {(() => {
                               const ext = (msg.originalName || "").split('.').pop().toLowerCase();
@@ -1804,10 +1544,8 @@ function App() {
                           </span>
                         </span>
                       )}
-                      {/* Кнопка скачать убрана отсюда */}
                     </span>
                   )}
-                  {/* Время сообщения под текстом, меньшим шрифтом */}
                   <div style={{ color: "#b2bec3", fontSize: 11, marginTop: 4, textAlign: isMine ? "right" : "left" }}>
                     {time}
                   </div>
@@ -1817,7 +1555,7 @@ function App() {
           })}
           <div ref={messagesEndRef} />
         </div>
-        {/* typing вынесен в отдельный flex-контейнер над inputRow */}
+        
         <div style={{ minHeight: 22, display: "flex", alignItems: "flex-end", marginBottom: 2 }}>
           {typing && (
             <div style={{
@@ -1838,7 +1576,7 @@ function App() {
             </div>
           )}
         </div>
-        {/* Превью выбранного файла теперь над inputRow (и на мобильном, и на десктопе) */}
+        
         {fileToSend && (
           <div
             style={{
@@ -1851,15 +1589,15 @@ function App() {
                     zIndex: 1002,
                     background: "#35363a",
                     borderRadius: "12px 12px 0 0",
-                    padding: "6px 8px 6px 8px", // уменьшили паддинги
+                    padding: "6px 8px 6px 8px",
                     maxWidth: "100vw",
                     width: "100vw",
                     display: "flex",
                     alignItems: "center",
-                    gap: 10, // уменьшили gap
+                    gap: 10,
                     boxShadow: "0 -2px 12px #0005",
                     justifyContent: "flex-start",
-                    minHeight: 44, // уменьшили высоту
+                    minHeight: 44,
                   }
                 : {
                     margin: "0 0 8px 0",
@@ -1874,7 +1612,6 @@ function App() {
               position: isMobile ? "fixed" : undefined,
             }}
           >
-            {/* Кнопка крестика для отмены - на мобильном абсолютная слева */}
             {isMobile && (
               <button
                 style={{
@@ -1901,20 +1638,19 @@ function App() {
                 ✕
               </button>
             )}
-            {/* Сдвигаем содержимое вправо если мобильный */}
             <div style={{
               display: "flex",
               alignItems: "center",
               gap: 10,
               width: "100%",
-              marginLeft: isMobile ? 36 : 0, // отступ под крестик
+              marginLeft: isMobile ? 36 : 0,
             }}>
               {fileToSend.type.startsWith("image/") && filePreviewUrl && (
                 <img
                   src={filePreviewUrl}
                   alt="preview"
                   style={{
-                    maxWidth: isMobile ? 56 : 48, // уменьшили размер
+                    maxWidth: isMobile ? 56 : 48,
                     maxHeight: isMobile ? 56 : 48,
                     borderRadius: 8,
                     objectFit: "cover",
@@ -1947,7 +1683,6 @@ function App() {
               >
                 {fileToSend.name}
               </span>
-              {/* На десктопе крестик справа, на мобиле убираем */}
               {!isMobile && (
                 <button
                   style={{
@@ -1974,14 +1709,13 @@ function App() {
           </div>
         )}
 
-        {/* --- Блок предпрослушивания и отправки голосового сообщения --- */}
         {audioBlob && audioUrl && (
           isMobile ? (
             <div style={{
               position: "fixed",
               left: 0,
               right: 0,
-              bottom: 58, // чуть выше inputRow (учитываем высоту inputRow)
+              bottom: 58,
               zIndex: 1001,
               background: "#35363a",
               borderRadius: "12px 12px 0 0",
@@ -2083,34 +1817,30 @@ function App() {
         <div
           style={{
             ...chatStyles.inputRow,
-            ...(isMobile ? { padding: "6px 2vw 6px 2vw" } : {}),
+            ...(isMobile ? { padding: "6px 2vw" } : {}),
           }}
           className="govchat-input-row"
         >
-          {/* Кнопка вложения */}
           <button
             style={{
               ...(attachBtnHover
                 ? { ...chatStyles.attachBtn, ...chatStyles.attachBtnHover }
                 : chatStyles.attachBtn),
-              ...(isMobile
-                ? {
-                    width: 34,
-                    height: 34,
-                    minWidth:  34,
-                    minHeight: 34,
-                    fontSize: 18,
-                    marginRight: 2,
-                  }
-                : {}),
+              ...(isMobile ? {
+                width: 34,
+                height: 34,
+                minWidth: 34,
+                minHeight: 34,
+                fontSize: 18,
+                marginRight: 2,
+              } : {}),
             }}
             type="button"
-            onClick={() => fileInputRefChat.current && fileInputRefChat.current.click()}
+            onClick={() => fileInputRefChat.current?.click()}
             title="Прикрепить файл"
             tabIndex={-1}
             onMouseEnter={() => setAttachBtnHover(true)}
             onMouseLeave={() => setAttachBtnHover(false)}
-            disabled={false}
           >
             <span style={{
               color: "#222",
@@ -2127,7 +1857,7 @@ function App() {
               if (e.target.files?.[0]) setFileToSend(e.target.files[0]);
             }}
           />
-          {/* Кнопка записи голосового (всегда показывать, уменьшить на мобиле) */}
+          
           <button
             style={{
               ...chatStyles.attachBtn,
@@ -2136,41 +1866,27 @@ function App() {
               marginRight: 2,
               marginLeft: 0,
               border: recording ? "2px solid #ff7675" : "none",
-              ...(isMobile
-                ? {
-                    width: 34,
-                    height: 34,
-                    minWidth: 34,
-                    minHeight: 34,
-                    fontSize: 18,
-                  }
-                : {}),
+              ...(isMobile ? {
+                width: 34,
+                height: 34,
+                minWidth: 34,
+                minHeight: 34,
+                fontSize: 18,
+              } : {}),
             }}
             type="button"
-            onClick={() => {
-              if (!recording) startRecording();
-              else stopRecording();
-            }}
+            onClick={recording ? stopRecording : startRecording}
             title={recording ? "Остановить запись" : "Записать голосовое"}
             disabled={fileToSend || audioBlob}
           >
-            {recording ? (
-              <span style={{
-                color: "#fff",
-                fontSize: isMobile ? 18 : 22,
-                display: "flex",
-                alignItems: "center"
-              }}>⏺</span>
-            ) : (
-              <span style={{
-                color: "#222",
-                fontSize: isMobile ? 18 : 22,
-                display: "flex",
-                alignItems: "center"
-              }}>🎤</span>
-            )}
+            <span style={{
+              color: recording ? "#fff" : "#222",
+              fontSize: isMobile ? 18 : 22,
+              display: "flex",
+              alignItems: "center"
+            }}>{recording ? "⏺" : "🎤"}</span>
           </button>
-          {/* Отображение времени записи */}
+          
           {recording && (
             <span style={{
               color: "#ff7675",
@@ -2178,12 +1894,10 @@ function App() {
               minWidth: isMobile ? 28 : 40,
               fontSize: isMobile ? 13 : 16,
             }}>
-              {`${Math.floor(recordTime / 60)
-                .toString()
-                .padStart(2, "0")}:${(recordTime % 60).toString().padStart(2, "0")}`}
+              {`${Math.floor(recordTime / 60).toString().padStart(2, "0")}:${(recordTime % 60).toString().padStart(2, "0")}`}
             </span>
           )}
-          {/* Поле ввода */}
+          
           <input
             style={{
               ...chatStyles.input,
@@ -2198,50 +1912,39 @@ function App() {
               }
             }}
             disabled={!selectedChannel}
-            placeholder={
-              selectedChannel
-                ? "Введите сообщение..."
-
-                : "Выберите канал"
-            }
+            placeholder={selectedChannel ? "Введите сообщение..." : "Выберите канал"}
           />
-          {/* Кнопка отправки */}
+          
           <button
             style={{
-              ...(isMobile
-                ? {
-                    background: "linear-gradient(90deg,#00c3ff,#3a7bd5)",
-                    color: "#fff",
-                    border: "none",
-                    borderRadius: 8,
-                    width: 34,
-                    height: 34,
-                    minWidth: 34,
-                    minHeight: 34,
-                    padding: 0,
-                    fontSize: 18,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    boxShadow: "0 2px 8px #00c3ff33",
-                    marginLeft: 2,
-                  }
-                : chatStyles.sendBtn),
+              ...(isMobile ? {
+                background: "linear-gradient(90deg,#00c3ff,#3a7bd5)",
+                color: "#fff",
+                border: "none",
+                borderRadius: 8,
+                width: 34,
+                height: 34,
+                minWidth: 34,
+                minHeight: 34,
+                padding: 0,
+                fontSize: 18,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                boxShadow: "0 2px 8px #00c3ff33",
+                marginLeft: 2,
+              } : chatStyles.sendBtn),
             }}
             onClick={handleSend}
             disabled={!selectedChannel || (!input.trim() && !fileToSend)}
             title="Отправить"
           >
-            {isMobile
-              ? <span style={{ fontSize: 18, color: "#fff" }}>➤</span>
-              : "Отправить"}
+            {isMobile ? <span style={{ fontSize: 18, color: "#fff" }}>➤</span> : "Отправить"}
           </button>
         </div>
         
-        {/* Модальные окна видеозвонка */}
         {videoCallModal}
         
-        {/* Модальное окно для просмотра фото/видео */}
         {modalMedia && (
           <div
             style={{
@@ -2296,7 +1999,6 @@ function App() {
                     alt={modalMedia.name}
                     style={{ maxWidth: "70vw", maxHeight: "70vh", borderRadius: 10, marginBottom: 16 }}
                   />
-                  {/* Название изображения над кнопкой скачать */}
                   {modalMedia.name && (
                     <div style={{
                       color: "#fff",
@@ -2398,7 +2100,7 @@ function App() {
           </div>
         )}
       </div>
-      {/* Модальное окно профиля */}
+      
       {showProfile && (
         <div
           style={{
@@ -2451,7 +2153,6 @@ function App() {
             className="govchat-profile-popup"
             onClick={e => e.stopPropagation()}
           >
-            {/* Фиксированная шапка для мобильного */}
             {isMobile && (
               <div style={{
                 position: "sticky",
@@ -2470,7 +2171,6 @@ function App() {
                 <div style={{ fontWeight: 700, fontSize: 17, color: "#00c3ff", flex: 1, textAlign: "center" }}>
                   Профиль
                 </div>
-                {/* Крестик справа сверху */}
                 <button
                   style={{
                     ...chatStyles.profileCloseBtn,
@@ -2492,7 +2192,6 @@ function App() {
                 >✕</button>
               </div>
             )}
-            {/* Новый аватар/значок профиля */}
             <div
               style={{
                 ...chatStyles.profileAvatar,
@@ -2520,7 +2219,6 @@ function App() {
                 onClick={() => fileInputRefAvatar.current && fileInputRefAvatar.current.click()}
                 title="Изменить фото"
               >
-                {/* Показываем пользовательский аватар только если он есть и не дефолтный */}
                 {userProfile?.avatarUrl &&
                   userProfile.avatarUrl !== "/uploads/avatar-default.png" ? (
                   <img
@@ -2545,7 +2243,6 @@ function App() {
                     }}
                   />
                 ) : (
-                  // Показываем дефолтную картинку, если нет пользовательской
                   <img
                     src={"/uploads/avatar-default.png"}
                     alt="avatar"
@@ -2595,7 +2292,6 @@ function App() {
                 />
               </div>
             </div>
-            {/* Содержимое профиля с прокруткой */}
             <div style={{
               flex: 1,
               overflowY: "auto",
@@ -2623,7 +2319,6 @@ function App() {
                   <div style={chatStyles.profileField}>
                     <span style={chatStyles.profileLabel}>Семейный статус:</span> {userProfile.status ?? "—"}
                   </div>
-                  {/* Кнопки теперь внутри скроллируемой области, сразу после информации */}
                   <div style={{
                     display: "flex",
                     gap: 8,
@@ -2728,7 +2423,6 @@ function App() {
                       onChange={e => setEditData(d => ({ ...d, status: e.target.value }))}
                     />
                   </div>
-                  {/* Кнопки теперь внутри скроллируемой области, сразу после полей */}
                   <div style={{
                     display: "flex",
                     gap: 8,
@@ -2771,11 +2465,9 @@ function App() {
                 <div style={{ color: "#b2bec3", marginBottom: 8 }}>Загрузка...</div>
               )}
             </div>
-            {/* Кнопки убраны из нижней части popup */}
           </div>
         </div>
       )}
-      {/* Модальное окно кастомизации */}
       {showCustomizer && (
         <div
           style={{

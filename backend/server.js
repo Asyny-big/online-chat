@@ -67,8 +67,9 @@ function auth(req, res, next) {
 // --- Регистрация и вход ---
 app.post('/api/register', async (req, res) => {
   let { username, password, recaptcha } = req.body;
-  // Проверка reCAPTCHA только при регистрации
+  
   if (!recaptcha) return res.status(400).json({ error: 'reCAPTCHA не пройдена' });
+  
   try {
     const verifyRes = await axios.post(
       `https://www.google.com/recaptcha/api/siteverify`,
@@ -78,35 +79,35 @@ app.post('/api/register', async (req, res) => {
       })
     );
     if (!verifyRes.data.success) {
-      console.log("reCAPTCHA fail:", verifyRes.data);
       return res.status(400).json({ error: 'Ошибка reCAPTCHA' });
     }
   } catch (e) {
-    console.log("reCAPTCHA error:", e?.response?.data || e.message);
     return res.status(400).json({ error: 'Ошибка проверки reCAPTCHA' });
   }
-  let uname = username;
-  let pass = password;
-  if (!uname) {
+  
+  if (!username?.trim()) {
     return res.status(400).json({ error: 'Имя пользователя обязательно' });
   }
-  uname = uname.trim();
-  if (uname.length > 15) {
+  
+  username = username.trim();
+  if (username.length > 15) {
     return res.status(400).json({ error: 'Имя пользователя не должно превышать 15 символов' });
   }
-  if (!pass) {
+  
+  if (!password) {
     return res.status(400).json({ error: 'Пароль обязателен' });
   }
-  // Проверка уникальности 
-  const exists = await User.findOne({ username: uname });
+  
+  const exists = await User.findOne({ username });
   if (exists) {
     return res.status(400).json({ error: 'Пользователь с таким именем уже существует' });
   }
+  
   try {
-    const hash = await bcrypt.hash(pass, 10);
-    const fs = require('fs');
+    const hash = await bcrypt.hash(password, 10);
     const defaultSource = path.join(__dirname, 'avatar-default.png');
     const defaultDest = path.join(__dirname, 'uploads', 'avatar-default.png');
+    
     if (!fs.existsSync(defaultDest)) {
       try {
         fs.copyFileSync(defaultSource, defaultDest);
@@ -114,17 +115,18 @@ app.post('/api/register', async (req, res) => {
         // Если файла нет, просто не ставим аватар
       }
     }
-    const defaultAvatar = "/uploads/avatar-default.png";
+    
     const user = new User({
-      username: uname,
+      username,
       password: hash,
       online: false,
-      avatarUrl: fs.existsSync(defaultDest) ? defaultAvatar : null,
+      avatarUrl: fs.existsSync(defaultDest) ? "/uploads/avatar-default.png" : null,
       age: null,
       city: null,
       status: null,
       theme: { pageBg: "", chatBg: "" }
     });
+    
     await user.save();
     res.json({ ok: true });
   } catch (err) {
@@ -170,7 +172,6 @@ app.get('/api/messages/:channel', auth, async (req, res) => {
 // --- Загрузка файлов ---
 const upload = multer({ dest: path.join(__dirname, 'uploads') });
 app.post('/api/upload', auth, upload.single('file'), async (req, res) => {
-  // Если передан avatar=1, обновляем профиль пользователя (оставляем старое поведение)
   let url;
   let fileType = req.file.mimetype;
   let originalName = req.file.originalname;
@@ -184,7 +185,6 @@ app.post('/api/upload', auth, upload.single('file'), async (req, res) => {
     return res.json({ url, fileType, originalName });
   }
 
-  // Для обычных файлов сохраняем в папку пользователя с оригинальным именем (UTF-8)
   const username = req.user.username;
   const uploadsDir = path.join(__dirname, 'uploads');
   const userDir = path.join(uploadsDir, username);
@@ -193,33 +193,29 @@ app.post('/api/upload', auth, upload.single('file'), async (req, res) => {
     fs.mkdirSync(userDir, { recursive: true });
   }
 
-  // Попытка исправить некорректно декодированные имена (например, "Ð¡Ð½Ð¸Ð¼Ð¾Ðº ÑÐºÑÐ°Ð½Ð°")
+  // Исправление кодировки имени файла
   let fixedOriginalName = req.file.originalname;
-  function fixCyrillic(str) {
-    try {
-      return Buffer.from(str, 'latin1').toString('utf8');
-    } catch {
-      return str;
-    }
+  try {
+    fixedOriginalName = Buffer.from(req.file.originalname, 'latin1').toString('utf8');
+  } catch {
+    // Если не удалось исправить, используем оригинальное
   }
-  fixedOriginalName = fixCyrillic(fixedOriginalName);
 
   let baseName = path.basename(fixedOriginalName, path.extname(fixedOriginalName));
   let ext = path.extname(fixedOriginalName);
   let destName = fixedOriginalName;
   let destPath = path.join(userDir, destName);
   let counter = 1;
+  
   while (fs.existsSync(destPath)) {
     destName = `${baseName}_${counter}${ext}`;
     destPath = path.join(userDir, destName);
     counter++;
   }
 
-  // --- Исправление: корректное перемещение файла, чтобы не портить видео ---
   try {
     fs.renameSync(req.file.path, destPath);
   } catch (err) {
-    // Если не удалось переименовать (например, разные диски), копируем потоками
     await new Promise((resolve, reject) => {
       const readStream = fs.createReadStream(req.file.path);
       const writeStream = fs.createWriteStream(destPath);
@@ -230,10 +226,8 @@ app.post('/api/upload', auth, upload.single('file'), async (req, res) => {
     });
     fs.unlinkSync(req.file.path);
   }
-  // --- /Исправление ---
 
   url = `/uploads/${username}/${encodeURIComponent(destName)}`;
-  // Возвращаем и оригинальное имя, и имя на сервере
   res.json({ url, fileType, originalName: fixedOriginalName, savedName: destName });
 });
 
@@ -333,8 +327,8 @@ app.patch('/api/profile', auth, async (req, res) => {
 });
 
 // --- Socket.IO ---
-const activeCalls = {}; // channelId: Set(socket.id)
-const userChannels = {}; // socketId: Set(channelId) - отслеживаем в каких каналах находится пользователь
+const activeCalls = {};
+const userChannels = {};
 
 io.use(async (socket, next) => {
   const token = socket.handshake.auth.token;
@@ -350,7 +344,6 @@ io.on('connection', (socket) => {
   console.log(`User ${socket.user.username} connected with socket ID: ${socket.id}`);
   userChannels[socket.id] = new Set();
 
-  // Отправить текущий статус активных звонков при подключении
   socket.emit('active-calls-update', { 
     activeCalls: Object.fromEntries(
       Object.entries(activeCalls).map(([channel, participants]) => [channel, participants.size > 0])
@@ -418,26 +411,20 @@ io.on('connection', (socket) => {
   socket.on('video-call-initiate', ({ channel }) => {
     console.log(`User ${socket.user.username} initiating call in channel ${channel}`);
     
-    // Убеждаемся, что пользователь присоединен к каналу
     socket.join(channel);
     if (!userChannels[socket.id]) userChannels[socket.id] = new Set();
     userChannels[socket.id].add(channel);
     
-    // Добавляем инициатора к активному звонку
     if (!activeCalls[channel]) activeCalls[channel] = new Set();
     activeCalls[channel].add(socket.id);
     
-    // Оповестить всех в канале (кроме инициатора) о входящем звонке
     socket.to(channel).emit('video-call-incoming', { 
       from: socket.user.username, 
       channel,
       initiatorSocketId: socket.id
     });
     
-    // Уведомить ВСЕХ пользователей о том, что в канале начался звонок
     io.emit('video-call-status', { channel, active: true });
-    
-    console.log(`Sent incoming call notification to channel ${channel}`);
   });
 
   socket.on('video-call-join', ({ channel }) => {
@@ -532,7 +519,6 @@ io.on('connection', (socket) => {
       await User.updateOne({ username: socket.user.username }, { online: false });
     }
     
-    // Удалить из всех звонков
     for (const channel in activeCalls) {
       if (activeCalls[channel].has(socket.id)) {
         activeCalls[channel].delete(socket.id);
@@ -543,16 +529,12 @@ io.on('connection', (socket) => {
         
         if (activeCalls[channel].size === 0) {
           delete activeCalls[channel];
-          // Уведомляем всех о завершении звонка при отключении последнего участника
           io.to(channel).emit('video-call-ended', { by: socket.user?.username, channel });
-          // Уведомить ВСЕХ пользователей о том, что звонок в канале завершился
           io.emit('video-call-status', { channel, active: false });
-          console.log(`Channel ${channel} call ended due to disconnect`);
         }
       }
     }
     
-    // Очистить каналы пользователя
     delete userChannels[socket.id];
   });
 });
