@@ -472,10 +472,14 @@ function App() {
     if (!socketRef.current) return;
 
     // Получить свой socketId
-    socketRef.current.on("connect", () => setMySocketId(socketRef.current.id));
+    const onConnect = () => {
+      setMySocketId(socketRef.current.id);
+      console.log("Connected with socket ID:", socketRef.current.id);
+    };
 
     // Входящий звонок
     const onIncoming = ({ from, channel }) => {
+      console.log("Incoming call from:", from, "in channel:", channel);
       // Если звонок инициировал не я, показываем уведомление
       if (from !== username) {
         setVideoCall({ active: false, incoming: true, from });
@@ -484,6 +488,8 @@ function App() {
 
     // Список участников звонка (при входе)
     const onParticipants = async ({ participants }) => {
+      console.log("Participants in call:", participants);
+      setVideoConnecting(false); // Убираем состояние подключения
       // Для каждого участника создать PeerConnection и отправить offer
       for (const peerId of participants) {
         await createPeer(peerId, true);
@@ -492,6 +498,7 @@ function App() {
 
     // Новый участник присоединился
     const onJoined = async ({ user, socketId }) => {
+      console.log("User joined call:", user, socketId);
       if (socketId !== socketRef.current.id) {
         await createPeer(socketId, true);
       }
@@ -499,35 +506,41 @@ function App() {
 
     // Участник покинул звонок
     const onLeft = ({ user, socketId }) => {
+      console.log("User left call:", user, socketId);
       removePeer(socketId);
     };
 
     // Сигналы WebRTC
     const onSignal = async ({ from, data, username: remoteName }) => {
+      console.log("Received signal from:", from, "type:", data.type);
       if (!videoPeers[from]) {
         await createPeer(from, false);
       }
       const pc = videoPeers[from];
       if (!pc) return;
-      if (data.type === "offer") {
-        await pc.setRemoteDescription(new RTCSessionDescription(data));
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        socketRef.current.emit("video-signal", { channel: selectedChannel, to: from, data: answer });
-      } else if (data.type === "answer") {
-        await pc.setRemoteDescription(new RTCSessionDescription(data));
-      } else if (data.candidate) {
-        try {
+      try {
+        if (data.type === "offer") {
+          await pc.setRemoteDescription(new RTCSessionDescription(data));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          socketRef.current.emit("video-signal", { channel: selectedChannel, to: from, data: answer });
+        } else if (data.type === "answer") {
+          await pc.setRemoteDescription(new RTCSessionDescription(data));
+        } else if (data.candidate) {
           await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-        } catch {}
+        }
+      } catch (error) {
+        console.error("Error handling signal:", error);
       }
     };
 
     // Звонок завершён
     const onEnded = () => {
+      console.log("Call ended");
       endVideoCall();
     };
 
+    socketRef.current.on("connect", onConnect);
     socketRef.current.on("video-call-incoming", onIncoming);
     socketRef.current.on("video-call-participants", onParticipants);
     socketRef.current.on("video-call-joined", onJoined);
@@ -536,79 +549,133 @@ function App() {
     socketRef.current.on("video-call-ended", onEnded);
 
     return () => {
-      socketRef.current.off("connect");
-      socketRef.current.off("video-call-incoming", onIncoming);
-      socketRef.current.off("video-call-participants", onParticipants);
-      socketRef.current.off("video-call-joined", onJoined);
-      socketRef.current.off("video-call-left", onLeft);
-      socketRef.current.off("video-signal", onSignal);
-      socketRef.current.off("video-call-ended", onEnded);
+      socketRef.current?.off("connect", onConnect);
+      socketRef.current?.off("video-call-incoming", onIncoming);
+      socketRef.current?.off("video-call-participants", onParticipants);
+      socketRef.current?.off("video-call-joined", onJoined);
+      socketRef.current?.off("video-call-left", onLeft);
+      socketRef.current?.off("video-signal", onSignal);
+      socketRef.current?.off("video-call-ended", onEnded);
     };
-    // eslint-disable-next-line
-  }, [socketRef.current, selectedChannel, videoPeers, videoStreams.local, mySocketId, username]);
+  }, [selectedChannel, username]); // Убрал videoPeers и videoStreams.local из зависимостей
 
   // --- Видеозвонок: инициация ---
   const startVideoCall = async () => {
+    console.log("Starting video call...");
     setVideoError("");
     setVideoConnecting(true);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      console.log("Got local stream:", stream);
       setVideoStreams(s => ({ ...s, local: stream, remotes: {} }));
       setVideoPeers({});
       setVideoCall({ active: true, incoming: false, from: null });
-      socketRef.current.emit("video-call-initiate", { channel: selectedChannel });
+      
+      // Сначала присоединяемся к звонку
       socketRef.current.emit("video-call-join", { channel: selectedChannel });
+      // Потом инициируем звонок для других
+      socketRef.current.emit("video-call-initiate", { channel: selectedChannel });
+      
+      // Если никого нет в звонке, убираем состояние подключения через небольшую задержку
+      setTimeout(() => {
+        if (Object.keys(videoPeers).length === 0) {
+          setVideoConnecting(false);
+        }
+      }, 2000);
     } catch (e) {
+      console.error("Error starting video call:", e);
       setVideoError("Ошибка доступа к камере/микрофону");
       setVideoConnecting(false);
+      setVideoCall({ active: false, incoming: false, from: null });
     }
   };
 
   // --- Видеозвонок: принять входящий ---
   const acceptVideoCall = async () => {
+    console.log("Accepting video call...");
     setVideoError("");
     setVideoConnecting(true);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      console.log("Got local stream for incoming call:", stream);
       setVideoStreams(s => ({ ...s, local: stream, remotes: {} }));
       setVideoPeers({});
       setVideoCall({ active: true, incoming: false, from: null });
       socketRef.current.emit("video-call-join", { channel: selectedChannel });
+      
+      // Убираем состояние подключения через небольшую задержку
+      setTimeout(() => {
+        setVideoConnecting(false);
+      }, 1000);
     } catch (e) {
+      console.error("Error accepting video call:", e);
       setVideoError("Ошибка доступа к камере/микрофону");
       setVideoConnecting(false);
+      setVideoCall({ active: false, incoming: false, from: null });
     }
   };
 
   // --- Видеозвонок: создать PeerConnection с участником ---
   async function createPeer(peerId, isInitiator) {
-    if (videoPeers[peerId]) return;
-    if (!videoStreams.local) return;
+    if (videoPeers[peerId]) {
+      console.log("Peer already exists:", peerId);
+      return;
+    }
+    if (!videoStreams.local) {
+      console.log("No local stream for peer:", peerId);
+      return;
+    }
+    
+    console.log("Creating peer:", peerId, "isInitiator:", isInitiator);
     const pc = new RTCPeerConnection({
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
     });
-    videoStreams.local.getTracks().forEach(track => pc.addTrack(track, videoStreams.local));
+    
+    videoStreams.local.getTracks().forEach(track => {
+      pc.addTrack(track, videoStreams.local);
+    });
+    
     pc.onicecandidate = (e) => {
       if (e.candidate) {
-        socketRef.current.emit("video-signal", { channel: selectedChannel, to: peerId, data: { candidate: e.candidate } });
+        console.log("Sending ICE candidate to:", peerId);
+        socketRef.current.emit("video-signal", { 
+          channel: selectedChannel, 
+          to: peerId, 
+          data: { candidate: e.candidate } 
+        });
       }
     };
+    
     pc.ontrack = (e) => {
+      console.log("Received remote stream from:", peerId);
       setVideoStreams(s => ({
         ...s,
         remotes: { ...s.remotes, [peerId]: e.streams[0] }
       }));
     };
+    
     pc.onconnectionstatechange = () => {
+      console.log("Connection state change for", peerId, ":", pc.connectionState);
       if (["disconnected", "failed", "closed"].includes(pc.connectionState)) {
         removePeer(peerId);
       }
     };
+    
     setVideoPeers(peers => ({ ...peers, [peerId]: pc }));
+    
     if (isInitiator) {
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      socketRef.current.emit("video-signal", { channel: selectedChannel, to: peerId, data: offer });
+      try {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        console.log("Sending offer to:", peerId);
+        socketRef.current.emit("video-signal", { 
+          channel: selectedChannel, 
+          to: peerId, 
+          data: offer 
+        });
+      } catch (error) {
+        console.error("Error creating offer for", peerId, ":", error);
+      }
     }
   }
 
