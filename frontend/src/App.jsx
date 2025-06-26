@@ -85,6 +85,8 @@ function App() {
   const [isVideoOff, setIsVideoOff] = useState(false);
   const localVideoRef = useRef(null);
   const remoteVideoRefs = useRef({});
+
+  // --- WebRTC state ---
   const peerConnections = useRef({});
 
   // Функция для старта записи аудио
@@ -170,11 +172,9 @@ function App() {
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
       }
-      return stream;
     } catch (error) {
       console.error('Ошибка доступа к камере/микрофону:', error);
       alert('Ошибка доступа к камере/микрофону');
-      return null;
     }
   };
 
@@ -183,96 +183,27 @@ function App() {
       localStream.getTracks().forEach(track => track.stop());
       setLocalStream(null);
     }
-    
-    // Закрываем все peer connections
-    Object.values(peerConnections.current).forEach(pc => {
-      pc.close();
-    });
-    peerConnections.current = {};
-    
     setVideoCallParticipants([]);
     setRemoteStreams({});
   };
 
-  const createPeerConnection = async (userId, isInitiator = false) => {
-    const configuration = {
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
-      ]
-    };
-
-    const peerConnection = new RTCPeerConnection(configuration);
-    peerConnections.current[userId] = peerConnection;
-
-    // Добавляем локальный поток к peer connection
-    if (localStream) {
-      localStream.getTracks().forEach(track => {
-        peerConnection.addTrack(track, localStream);
-      });
-    }
-
-    // Обработка входящего потока
-    peerConnection.ontrack = (event) => {
-      console.log('Получен remote stream от:', userId);
-      const [remoteStream] = event.streams;
-      setRemoteStreams(prev => ({
-        ...prev,
-        [userId]: remoteStream
-      }));
-    };
-
-    // Обработка ICE candidates
-    peerConnection.onicecandidate = (event) => {
-      if (event.candidate) {
-        socketRef.current.emit('webrtc-ice-candidate', {
-          target: userId,
-          candidate: event.candidate
-        });
-      }
-    };
-
-    // Если мы инициируем соединение, создаем offer
-    if (isInitiator) {
-      try {
-        const offer = await peerConnection.createOffer();
-        await peerConnection.setLocalDescription(offer);
-        
-        socketRef.current.emit('webrtc-offer', {
-          target: userId,
-          offer: offer
-        });
-      } catch (error) {
-        console.error('Ошибка создания offer:', error);
-      }
-    }
-
-    return peerConnection;
-  };
-
-  const startVideoCall = async () => {
+  const startVideoCall = () => {
     if (!selectedChannel) {
       alert('Выберите канал для видеозвонка');
       return;
     }
-    
-    const stream = await startLocalStream();
-    if (!stream) return;
-
     socketRef.current.emit('start-video-call', { 
       channel: selectedChannel,
       caller: username 
     });
     setIsVideoCallOpen(true);
+    startLocalStream();
   };
 
-  const joinVideoCall = async () => {
-    const stream = await startLocalStream();
-    if (!stream) return;
-
+  const joinVideoCall = () => {
     setIsVideoCallOpen(true);
     setVideoCallNotification(null);
-    
+    startLocalStream();
     if (selectedChannel) {
       socketRef.current.emit('join-video-call', { 
         channel: selectedChannel,
@@ -310,6 +241,132 @@ function App() {
       setIsVideoOff(!isVideoOff);
     }
   };
+
+  // Функция для отправки сигналов WebRTC через Socket.IO
+  const sendSignal = (type, payload) => {
+    if (selectedChannel) {
+      socketRef.current.emit('video-signal', {
+        channel: selectedChannel,
+        type,
+        ...payload,
+      });
+    }
+  };
+
+  // --- WebRTC обработчики ---
+  useEffect(() => {
+    if (!isVideoCallOpen || !localStream || !selectedChannel) return;
+
+    // При получении сигнала WebRTC
+    const handleSignal = async (data) => {
+      const { from, type, sdp, candidate } = data;
+      if (from === socketRef.current.id) return; // не обрабатывать свои сигналы
+
+      // Создаём PeerConnection если нет
+      if (!peerConnections.current[from]) {
+        const pc = new RTCPeerConnection({
+          iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        });
+        peerConnections.current[from] = pc;
+
+        // Добавляем свои треки
+        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+        // ICE candidates
+        pc.onicecandidate = (event) => {
+          if (event.candidate) {
+            sendSignal('ice-candidate', { to: from, candidate: event.candidate });
+          }
+        };
+
+        // Получение remote stream
+        pc.ontrack = (event) => {
+          setRemoteStreams(prev => ({
+            ...prev,
+            [from]: event.streams[0]
+          }));
+        };
+      }
+      const pc = peerConnections.current[from];
+
+      if (type === 'offer') {
+        await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        sendSignal('answer', { to: from, sdp: answer });
+      } else if (type === 'answer') {
+        await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+      } else if (type === 'ice-candidate' && candidate) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        } catch {}
+      }
+    };
+
+    socketRef.current.on('video-signal', handleSignal);
+
+    // При появлении нового участника инициируем offer
+    const handleUserJoined = (data) => {
+      const { userId } = data;
+      if (userId === socketRef.current.id) return;
+      if (!peerConnections.current[userId]) {
+        const pc = new RTCPeerConnection({
+          iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        });
+        peerConnections.current[userId] = pc;
+        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+        pc.onicecandidate = (event) => {
+          if (event.candidate) {
+            sendSignal('ice-candidate', { to: userId, candidate: event.candidate });
+          }
+        };
+        pc.ontrack = (event) => {
+          setRemoteStreams(prev => ({
+            ...prev,
+            [userId]: event.streams[0]
+          }));
+        };
+        // Создаём offer
+        pc.createOffer().then(offer => {
+          pc.setLocalDescription(offer);
+          sendSignal('offer', { to: userId, sdp: offer });
+        });
+      }
+    };
+
+    socketRef.current.on('user-joined-video-call', handleUserJoined);
+
+    // Удаляем remote stream и peerConnection при выходе пользователя
+    const handleUserLeft = (data) => {
+      const { userId } = data;
+      if (peerConnections.current[userId]) {
+        peerConnections.current[userId].close();
+        delete peerConnections.current[userId];
+      }
+      setRemoteStreams(prev => {
+        const newStreams = { ...prev };
+        delete newStreams[userId];
+        return newStreams;
+      });
+    };
+
+    socketRef.current.on('user-left-video-call', handleUserLeft);
+
+    return () => {
+      socketRef.current.off('video-signal', handleSignal);
+      socketRef.current.off('user-joined-video-call', handleUserJoined);
+      socketRef.current.off('user-left-video-call', handleUserLeft);
+    };
+  }, [isVideoCallOpen, localStream, selectedChannel]);
+
+  // Очищаем peerConnections при завершении звонка
+  useEffect(() => {
+    if (!isVideoCallOpen) {
+      Object.values(peerConnections.current).forEach(pc => pc.close());
+      peerConnections.current = {};
+      setRemoteStreams({});
+    }
+  }, [isVideoCallOpen]);
 
   useEffect(() => {
     setUsername(parseToken(token));
@@ -381,19 +438,13 @@ function App() {
       stopLocalStream();
     });
 
-    socketRef.current.on('user-joined-video-call', async (data) => {
-      console.log('User joined video call:', data);
+    socketRef.current.on('user-joined-video-call', (data) => {
       setVideoCallParticipants(prev => {
         if (!prev.find(p => p.id === data.userId)) {
           return [...prev, { id: data.userId, username: data.username || 'Участник' }];
         }
         return prev;
       });
-
-      // Создаем peer connection с новым участником (мы инициируем)
-      if (localStream && !peerConnections.current[data.userId]) {
-        await createPeerConnection(data.userId, true);
-      }
     });
 
     socketRef.current.on('user-left-video-call', (data) => {
@@ -404,62 +455,6 @@ function App() {
         delete newStreams[data.userId];
         return newStreams;
       });
-
-      // Закрываем peer connection
-      if (peerConnections.current[data.userId]) {
-        peerConnections.current[data.userId].close();
-        delete peerConnections.current[data.userId];
-      }
-    });
-
-    // WebRTC сигналинг
-    socketRef.current.on('webrtc-offer', async (data) => {
-      console.log('Получен WebRTC offer от:', data.sender);
-      
-      if (!peerConnections.current[data.sender]) {
-        await createPeerConnection(data.sender, false);
-      }
-
-      const peerConnection = peerConnections.current[data.sender];
-      
-      try {
-        await peerConnection.setRemoteDescription(data.offer);
-        const answer = await peerConnection.createAnswer();
-        await peerConnection.setLocalDescription(answer);
-        
-        socketRef.current.emit('webrtc-answer', {
-          target: data.sender,
-          answer: answer
-        });
-      } catch (error) {
-        console.error('Ошибка обработки offer:', error);
-      }
-    });
-
-    socketRef.current.on('webrtc-answer', async (data) => {
-      console.log('Получен WebRTC answer от:', data.sender);
-      
-      const peerConnection = peerConnections.current[data.sender];
-      if (peerConnection) {
-        try {
-          await peerConnection.setRemoteDescription(data.answer);
-        } catch (error) {
-          console.error('Ошибка обработки answer:', error);
-        }
-      }
-    });
-
-    socketRef.current.on('webrtc-ice-candidate', async (data) => {
-      console.log('Получен ICE candidate от:', data.sender);
-      
-      const peerConnection = peerConnections.current[data.sender];
-      if (peerConnection) {
-        try {
-          await peerConnection.addIceCandidate(data.candidate);
-        } catch (error) {
-          console.error('Ошибка добавления ICE candidate:', error);
-        }
-      }
     });
 
     // Новый обработчик: обновлять список каналов при появлении нового
@@ -480,9 +475,6 @@ function App() {
       socketRef.current && socketRef.current.off('video-call-ended');
       socketRef.current && socketRef.current.off('user-joined-video-call');
       socketRef.current && socketRef.current.off('user-left-video-call');
-      socketRef.current && socketRef.current.off('webrtc-offer');
-      socketRef.current && socketRef.current.off('webrtc-answer');
-      socketRef.current && socketRef.current.off('webrtc-ice-candidate');
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     };
     // eslint-disable-next-line
@@ -791,157 +783,156 @@ function App() {
 
   // --- Мобильное меню ---
   const mobileMenu = (
-    <div 
-      style={{
-        ...chatStyles.mobileMenuOverlay,
-        display: mobileMenuOpen ? 'flex' : 'none'
-      }} 
-      className="govchat-mobile-menu-overlay"
-      onClick={() => setMobileMenuOpen(false)}
-    >
-      <div
-        style={chatStyles.mobileMenu}
-        className="govchat-mobile-menu"
-        onClick={e => e.stopPropagation()}
+    mobileMenuOpen && (
+      <div 
+        style={chatStyles.mobileMenuOverlay}
+        className="govchat-mobile-menu-overlay"
+        onClick={() => setMobileMenuOpen(false)}
       >
-        <button
-          style={chatStyles.mobileMenuCloseBtn}
-          onClick={() => setMobileMenuOpen(false)}
-          aria-label="Закрыть"
-        >✕</button>
-        <div style={chatStyles.mobileMenuTitle}>Каналы</div>
-        <div style={chatStyles.mobileMenuChannels}>
-          {channels.length === 0 ? (
-            <div style={{ color: "#b2bec3", marginBottom: 8 }}>
-              Нет доступных каналов
-            </div>
-          ) : (
-            channels.map((ch) => (
-              <div
-                key={ch._id}
-                style={chatStyles.channelItem(selectedChannel === ch._id)}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setSelectedChannel(ch._id);
-                  setMobileMenuOpen(false);
-                }}
-              >
-                {ch.name}
-              </div>
-            ))
-          )
-          }
-          <button
-            style={chatStyles.createBtn}
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowCreate((v) => !v);
-            }}
-          >
-            {showCreate ? "Скрыть создание" : "Создать канал"}
-          </button>
-          {showCreate && (
-            <div style={{ marginTop: 10 }}>
-              <input
-                style={chatStyles.input}
-                placeholder="Название канала"
-                value={newChannel}
-                onChange={e => setNewChannel(e.target.value)}
-                onClick={e => e.stopPropagation()}
-              />
-              <button 
-                style={chatStyles.createBtn} 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleCreateChannel();
-                  setMobileMenuOpen(false);
-                }}
-              >
-                Создать
-              </button>
-            </div>
-          )}
-        </div>
-        {/* Кнопки профиля и кастомизации теперь после списка каналов */}
         <div
-          className="govchat-mobile-profile-actions"
-          style={{
-            display: "flex",
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 18,
-            margin: "18px 0 16px 0",
-          }}
+          style={chatStyles.mobileMenu}
+          className="govchat-mobile-menu"
+          onClick={e => e.stopPropagation()}
         >
-          {/* Профиль */}
           <button
+            style={chatStyles.mobileMenuCloseBtn}
+            onClick={() => setMobileMenuOpen(false)}
+            aria-label="Закрыть"
+          >✕</button>
+          <div style={chatStyles.mobileMenuTitle}>Каналы</div>
+          <div style={chatStyles.mobileMenuChannels}>
+            {channels.length === 0 ? (
+              <div style={{ color: "#b2bec3", marginBottom: 8 }}>
+                Нет доступных каналов
+              </div>
+            ) : (
+              channels.map((ch) => (
+                <div
+                  key={ch._id}
+                  style={chatStyles.channelItem(selectedChannel === ch._id)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedChannel(ch._id);
+                    setMobileMenuOpen(false);
+                  }}
+                >
+                  {ch.name}
+                </div>
+              ))
+            )
+            }
+            <button
+              style={chatStyles.createBtn}
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowCreate((v) => !v);
+              }}
+            >
+              {showCreate ? "Скрыть создание" : "Создать канал"}
+            </button>
+            {showCreate && (
+              <div style={{ marginTop: 10 }}>
+                <input
+                  style={chatStyles.input}
+                  placeholder="Название канала"
+                  value={newChannel}
+                  onChange={e => setNewChannel(e.target.value)}
+                  onClick={e => e.stopPropagation()}
+                />
+                <button 
+                  style={chatStyles.createBtn} 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleCreateChannel();
+                    setMobileMenuOpen(false);
+                  }}
+                >
+                  Создать
+                </button>
+              </div>
+            )}
+          </div>
+          {/* Кнопки профиля и кастомизации теперь после списка каналов */}
+          <div
+            className="govchat-mobile-profile-actions"
             style={{
-              ...chatStyles.profileBtn,
-              width: 48,
-              height: 48,
-              fontSize: 24,
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center"
-            }}
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowProfile(true);
-              setMobileMenuOpen(false);
-              setEditMode(false);
-            }}
-            title="Профиль"
-          >
-            <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
-              <circle cx="13" cy="13" r="13" fill="#00c3ff" />
-              <circle cx="13" cy="10" r="4" fill="#fff" />
-              <ellipse cx="13" cy="19" rx="7" ry="4" fill="#fff" />
-            </svg>
-          </button>
-          {/* Кастомизация */}
-          <button
-            style={{
-              ...chatStyles.profileBtn,
-              width: 48,
-              height: 48,
-              fontSize: 24,
-              flexDirection: "column",
+              display: "flex",
+              flexDirection: "row",
               alignItems: "center",
               justifyContent: "center",
-              background: "none",
-              border: "none",
-              marginRight: 0,
-              marginLeft: 0,
-              boxShadow: "0 2px 8px #00c3ff33"
+              gap: 18,
+              margin: "18px 0 16px 0",
             }}
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowCustomizer(true);
-              setMobileMenuOpen(false);
-            }}
-            title="Кастомизация"
           >
-            <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
-              <circle cx="13" cy="13" r="13" fill="#ffb347" />
-              <path d="M7 19c0-2 2-4 4-4s4 2 4 4" stroke="#fff" strokeWidth="2" />
-              <rect x="10" y="6" width="6" height="8" rx="2" fill="#fff" stroke="#ffb347" strokeWidth="1.5"/>
-              <rect x="8" y="14" width="10" height="4" rx="2" fill="#ffb347" stroke="#fff" strokeWidth="1.5"/>
-            </svg>
-          </button>
-        </div>
-        <div style={chatStyles.mobileMenuFooter}>
-          {/* Кнопка "Выйти" убрана из мобильного меню */}
+            {/* Профиль */}
+            <button
+              style={{
+                ...chatStyles.profileBtn,
+                width: 48,
+                height: 48,
+                fontSize: 24,
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center"
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowProfile(true);
+                setMobileMenuOpen(false);
+                setEditMode(false);
+              }}
+              title="Профиль"
+            >
+              <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
+                <circle cx="13" cy="13" r="13" fill="#00c3ff" />
+                <circle cx="13" cy="10" r="4" fill="#fff" />
+                <ellipse cx="13" cy="19" rx="7" ry="4" fill="#fff" />
+              </svg>
+            </button>
+            {/* Кастомизация */}
+            <button
+              style={{
+                ...chatStyles.profileBtn,
+                width: 48,
+                height: 48,
+                fontSize: 24,
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "none",
+                border: "none",
+                marginRight: 0,
+                marginLeft: 0,
+                boxShadow: "0 2px 8px #00c3ff33"
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowCustomizer(true);
+                setMobileMenuOpen(false);
+              }}
+              title="Кастомизация"
+            >
+              <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
+                <circle cx="13" cy="13" r="13" fill="#ffb347" />
+                <path d="M7 19c0-2 2-4 4-4s4 2 4 4" stroke="#fff" strokeWidth="2" />
+                <rect x="10" y="6" width="6" height="8" rx="2" fill="#fff" stroke="#ffb347" strokeWidth="1.5"/>
+                <rect x="8" y="14" width="10" height="4" rx="2" fill="#ffb347" stroke="#fff" strokeWidth="1.5"/>
+              </svg>
+            </button>
+          </div>
+          <div style={chatStyles.mobileMenuFooter}>
+            {/* Кнопка "Выйти" убрана из мобильного меню */}
+          </div>
         </div>
       </div>
-    </div>
+    )
   );
 
   return (
     <div style={themedPageStyle} className="govchat-page">
       {/* Мобильный header */}
       {isMobile && mobileHeader}
-      {/* Мобильное меню - теперь всегда рендерится, но скрывается через display */}
+      {/* Мобильное меню - теперь только если открыто */}
       {isMobile && mobileMenu}
       
       {/* Уведомление о видеозвонке */}
@@ -1098,7 +1089,6 @@ function App() {
                             }
                           }}
                           autoPlay
-                          playsInline
                           style={{
                             width: "100%",
                             height: "100%",
@@ -1114,7 +1104,7 @@ function App() {
                           color: "#888"
                         }}>
                           <div style={{ fontSize: 48, marginBottom: 10 }}>👤</div>
-                          <div>Соединение...</div>
+                          <div>Подключается...</div>
                         </div>
                       )}
                       <span style={{
@@ -1163,7 +1153,6 @@ function App() {
                   ref={localVideoRef}
                   autoPlay
                   muted
-                  playsInline
                   style={{
                     width: "100%",
                     height: "100%",

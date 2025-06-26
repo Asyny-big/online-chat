@@ -6,7 +6,7 @@ const handleVideoCall = (io, socket) => {
     
     if (!activeVideoCalls.has(channel)) {
       activeVideoCalls.set(channel, {
-        participants: [{ id: socket.id, username: caller }],
+        participants: [socket.id],
         caller
       });
       
@@ -19,57 +19,17 @@ const handleVideoCall = (io, socket) => {
   });
 
   socket.on('join-video-call', (data) => {
-    const { channel, username } = data;
+    const { channel } = data;
     
     if (activeVideoCalls.has(channel)) {
       const call = activeVideoCalls.get(channel);
+      call.participants.push(socket.id);
       
-      // Проверяем, не присоединился ли уже этот пользователь
-      if (!call.participants.find(p => p.id === socket.id)) {
-        call.participants.push({ id: socket.id, username: username || 'Участник' });
-        
-        // Присоединяем сокет к комнате канала для видеозвонка
-        socket.join(channel);
-        
-        // Уведомить других участников о новом пользователе
-        socket.to(channel).emit('user-joined-video-call', {
-          userId: socket.id,
-          username: username || 'Участник'
-        });
-        
-        // Отправить новому участнику список всех существующих участников
-        call.participants.forEach(participant => {
-          if (participant.id !== socket.id) {
-            socket.emit('user-joined-video-call', {
-              userId: participant.id,
-              username: participant.username
-            });
-          }
-        });
-      }
+      // Уведомить других участников о новом пользователе
+      socket.to(channel).emit('user-joined-video-call', {
+        userId: socket.id
+      });
     }
-  });
-
-  // Добавляем обработчики для WebRTC сигналинга
-  socket.on('webrtc-offer', (data) => {
-    socket.to(data.target).emit('webrtc-offer', {
-      offer: data.offer,
-      sender: socket.id
-    });
-  });
-
-  socket.on('webrtc-answer', (data) => {
-    socket.to(data.target).emit('webrtc-answer', {
-      answer: data.answer,
-      sender: socket.id
-    });
-  });
-
-  socket.on('webrtc-ice-candidate', (data) => {
-    socket.to(data.target).emit('webrtc-ice-candidate', {
-      candidate: data.candidate,
-      sender: socket.id
-    });
   });
 
   socket.on('leave-video-call', (data) => {
@@ -77,9 +37,7 @@ const handleVideoCall = (io, socket) => {
     
     if (activeVideoCalls.has(channel)) {
       const call = activeVideoCalls.get(channel);
-      call.participants = call.participants.filter(p => p.id !== socket.id);
-      
-      socket.leave(channel);
+      call.participants = call.participants.filter(id => id !== socket.id);
       
       if (call.participants.length === 0) {
         activeVideoCalls.delete(channel);
@@ -95,9 +53,8 @@ const handleVideoCall = (io, socket) => {
   socket.on('disconnect', () => {
     // Удалить пользователя из всех активных видеозвонков
     for (const [channel, call] of activeVideoCalls.entries()) {
-      const participantIndex = call.participants.findIndex(p => p.id === socket.id);
-      if (participantIndex !== -1) {
-        call.participants.splice(participantIndex, 1);
+      if (call.participants.includes(socket.id)) {
+        call.participants = call.participants.filter(id => id !== socket.id);
         
         if (call.participants.length === 0) {
           activeVideoCalls.delete(channel);
@@ -108,6 +65,18 @@ const handleVideoCall = (io, socket) => {
           });
         }
       }
+    }
+  });
+
+  // Новый обработчик для сигналов WebRTC
+  socket.on('video-signal', (data) => {
+    const { channel, to, ...rest } = data;
+    if (to) {
+      io.to(to).emit('video-signal', {
+        ...rest,
+        from: socket.id,
+        channel
+      });
     }
   });
 };

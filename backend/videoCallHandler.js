@@ -83,6 +83,18 @@ const handleVideoCall = (io, socket) => {
       }
     }
   });
+
+  // Новый обработчик для сигналов WebRTC
+  socket.on('video-signal', (data) => {
+    const { channel, to, ...rest } = data;
+    if (to) {
+      io.to(to).emit('video-signal', {
+        ...rest,
+        from: socket.id,
+        channel
+      });
+    }
+  });
 };
 
 module.exports = handleVideoCall;
