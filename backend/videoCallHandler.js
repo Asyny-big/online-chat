@@ -6,7 +6,7 @@ const handleVideoCall = (io, socket) => {
     
     if (!activeVideoCalls.has(channel)) {
       activeVideoCalls.set(channel, {
-        participants: [socket.id],
+        participants: [{ id: socket.id, username: caller }],
         caller
       });
       
@@ -19,16 +19,31 @@ const handleVideoCall = (io, socket) => {
   });
 
   socket.on('join-video-call', (data) => {
-    const { channel } = data;
+    const { channel, username } = data;
     
     if (activeVideoCalls.has(channel)) {
       const call = activeVideoCalls.get(channel);
-      call.participants.push(socket.id);
       
-      // Уведомить других участников о новом пользователе
-      socket.to(channel).emit('user-joined-video-call', {
-        userId: socket.id
-      });
+      // Проверяем, не присоединился ли уже этот пользователь
+      if (!call.participants.find(p => p.id === socket.id)) {
+        call.participants.push({ id: socket.id, username: username || 'Участник' });
+        
+        // Уведомить других участников о новом пользователе
+        socket.to(channel).emit('user-joined-video-call', {
+          userId: socket.id,
+          username: username || 'Участник'
+        });
+        
+        // Отправить новому участнику список всех участников
+        call.participants.forEach(participant => {
+          if (participant.id !== socket.id) {
+            socket.emit('user-joined-video-call', {
+              userId: participant.id,
+              username: participant.username
+            });
+          }
+        });
+      }
     }
   });
 
@@ -37,7 +52,7 @@ const handleVideoCall = (io, socket) => {
     
     if (activeVideoCalls.has(channel)) {
       const call = activeVideoCalls.get(channel);
-      call.participants = call.participants.filter(id => id !== socket.id);
+      call.participants = call.participants.filter(p => p.id !== socket.id);
       
       if (call.participants.length === 0) {
         activeVideoCalls.delete(channel);
@@ -53,8 +68,9 @@ const handleVideoCall = (io, socket) => {
   socket.on('disconnect', () => {
     // Удалить пользователя из всех активных видеозвонков
     for (const [channel, call] of activeVideoCalls.entries()) {
-      if (call.participants.includes(socket.id)) {
-        call.participants = call.participants.filter(id => id !== socket.id);
+      const participantIndex = call.participants.findIndex(p => p.id === socket.id);
+      if (participantIndex !== -1) {
+        call.participants.splice(participantIndex, 1);
         
         if (call.participants.length === 0) {
           activeVideoCalls.delete(channel);

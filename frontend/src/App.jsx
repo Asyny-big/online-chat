@@ -84,6 +84,7 @@ function App() {
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
   const localVideoRef = useRef(null);
+  const remoteVideoRefs = useRef({});
 
   // Функция для старта записи аудио
   const startRecording = async () => {
@@ -179,6 +180,8 @@ function App() {
       localStream.getTracks().forEach(track => track.stop());
       setLocalStream(null);
     }
+    setVideoCallParticipants([]);
+    setRemoteStreams({});
   };
 
   const startVideoCall = () => {
@@ -199,7 +202,10 @@ function App() {
     setVideoCallNotification(null);
     startLocalStream();
     if (selectedChannel) {
-      socketRef.current.emit('join-video-call', { channel: selectedChannel });
+      socketRef.current.emit('join-video-call', { 
+        channel: selectedChannel,
+        username: username 
+      });
     }
   };
 
@@ -304,13 +310,23 @@ function App() {
     });
 
     socketRef.current.on('user-joined-video-call', (data) => {
-      // Обработка присоединения пользователя к видеозвонку
-      console.log('User joined video call:', data.userId);
+      console.log('User joined video call:', data);
+      setVideoCallParticipants(prev => {
+        if (!prev.find(p => p.id === data.userId)) {
+          return [...prev, { id: data.userId, username: data.username || 'Участник' }];
+        }
+        return prev;
+      });
     });
 
     socketRef.current.on('user-left-video-call', (data) => {
-      // Обработка выхода пользователя из видеозвонка
       console.log('User left video call:', data.userId);
+      setVideoCallParticipants(prev => prev.filter(p => p.id !== data.userId));
+      setRemoteStreams(prev => {
+        const newStreams = { ...prev };
+        delete newStreams[data.userId];
+        return newStreams;
+      });
     });
 
     // Новый обработчик: обновлять список каналов при появлении нового
@@ -795,7 +811,7 @@ function App() {
       {/* Мобильный header */}
       {isMobile && mobileHeader}
       {/* Мобильное меню */}
-      {isMobile && mobileMenuOpen && mobileMenu}
+      {isMobile && mobileMenu}
       
       {/* Уведомление о видеозвонке */}
       {videoCallNotification && (
@@ -916,18 +932,100 @@ function App() {
             
             <div style={{
               flex: 1,
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
-              gap: 10,
-              padding: 20,
-              overflowY: "auto"
+              position: "relative",
+              background: "#333",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center"
             }}>
+              {/* Основная область для видео других участников */}
+              {videoCallParticipants.length > 0 ? (
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: videoCallParticipants.length === 1 ? "1fr" : "repeat(auto-fit, minmax(300px, 1fr))",
+                  gap: 10,
+                  width: "100%",
+                  height: "100%",
+                  padding: 20
+                }}>
+                  {videoCallParticipants.map((participant) => (
+                    <div key={participant.id} style={{
+                      position: "relative",
+                      background: "#444",
+                      borderRadius: 10,
+                      overflow: "hidden",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      minHeight: 200
+                    }}>
+                      {remoteStreams[participant.id] ? (
+                        <video
+                          ref={el => {
+                            if (el && remoteStreams[participant.id]) {
+                              el.srcObject = remoteStreams[participant.id];
+                            }
+                          }}
+                          autoPlay
+                          style={{
+                            width: "100%",
+                            height: "100%",
+                            objectFit: "cover"
+                          }}
+                        />
+                      ) : (
+                        <div style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          color: "#888"
+                        }}>
+                          <div style={{ fontSize: 48, marginBottom: 10 }}>👤</div>
+                          <div>Подключается...</div>
+                        </div>
+                      )}
+                      <span style={{
+                        position: "absolute",
+                        bottom: 10,
+                        left: 10,
+                        background: "rgba(0, 0, 0, 0.7)",
+                        color: "white",
+                        padding: "5px 10px",
+                        borderRadius: 5,
+                        fontSize: 14
+                      }}>
+                        {participant.username}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{
+                  color: "#888",
+                  fontSize: 18,
+                  textAlign: "center"
+                }}>
+                  <div style={{ fontSize: 48, marginBottom: 20 }}>📹</div>
+                  <div>Ожидание участников...</div>
+                  <div style={{ fontSize: 14, marginTop: 10 }}>
+                    Пригласите других пользователей присоединиться к видеозвонку
+                  </div>
+                </div>
+              )}
+
+              {/* Мое видео в углу (маленькое) */}
               <div style={{
-                position: "relative",
-                background: "#333",
+                position: "absolute",
+                top: 20,
+                right: 20,
+                width: 200,
+                height: 150,
+                background: "#222",
                 borderRadius: 10,
                 overflow: "hidden",
-                minHeight: 200
+                border: "2px solid #00c3ff",
+                zIndex: 10
               }}>
                 <video
                   ref={localVideoRef}
@@ -941,15 +1039,15 @@ function App() {
                 />
                 <span style={{
                   position: "absolute",
-                  bottom: 10,
-                  left: 10,
+                  bottom: 5,
+                  left: 5,
                   background: "rgba(0, 0, 0, 0.7)",
                   color: "white",
-                  padding: "5px 10px",
-                  borderRadius: 5,
-                  fontSize: 14
+                  padding: "2px 6px",
+                  borderRadius: 3,
+                  fontSize: 12
                 }}>
-                  {username} (Вы)
+                  Вы
                 </span>
               </div>
             </div>
