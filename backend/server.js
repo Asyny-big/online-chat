@@ -334,6 +334,7 @@ app.patch('/api/profile', auth, async (req, res) => {
 
 // --- Socket.IO ---
 const activeCalls = {}; // channelId: Set(socket.id)
+const userChannels = {}; // socketId: Set(channelId) - отслеживаем в каких каналах находится пользователь
 
 io.use(async (socket, next) => {
   const token = socket.handshake.auth.token;
@@ -344,9 +345,15 @@ io.use(async (socket, next) => {
     next();
   });
 });
+
 io.on('connection', (socket) => {
+  console.log(`User ${socket.user.username} connected with socket ID: ${socket.id}`);
+  userChannels[socket.id] = new Set();
+
   socket.on('join', (channel) => {
     socket.join(channel);
+    userChannels[socket.id].add(channel);
+    console.log(`User ${socket.user.username} joined channel: ${channel}`);
   });
   socket.on('message', async (msg) => {
     // Добавляем время, если не пришло с клиента
@@ -374,30 +381,40 @@ io.on('connection', (socket) => {
   // --- Видеозвонки ---
   socket.on('video-call-initiate', ({ channel }) => {
     console.log(`User ${socket.user.username} initiating call in channel ${channel}`);
-    console.log(`Sending incoming call notification to channel ${channel} (except initiator)`);
+    
+    // Убеждаемся, что пользователь присоединен к каналу
+    socket.join(channel);
+    if (!userChannels[socket.id]) userChannels[socket.id] = new Set();
+    userChannels[socket.id].add(channel);
+    
     // Оповестить всех в канале (кроме инициатора) о входящем звонке
     socket.to(channel).emit('video-call-incoming', { 
       from: socket.user.username, 
-      channel 
+      channel,
+      initiatorSocketId: socket.id
     });
+    
+    console.log(`Sent incoming call notification to channel ${channel}`);
   });
 
   socket.on('video-call-join', ({ channel }) => {
     console.log(`User ${socket.user.username} joining call in channel ${channel}`);
     
-    // Присоединиться к комнате канала (если еще не присоединился)
+    // Присоединиться к комнате канала
     socket.join(channel);
+    if (!userChannels[socket.id]) userChannels[socket.id] = new Set();
+    userChannels[socket.id].add(channel);
     
     if (!activeCalls[channel]) activeCalls[channel] = new Set();
     
     // Получить список других участников до добавления текущего
     const others = Array.from(activeCalls[channel]).filter(id => id !== socket.id);
-    console.log(`Existing participants in ${channel}:`, others);
+    console.log(`Existing participants in ${channel}:`, others.length);
     
     // Добавить текущего пользователя
     activeCalls[channel].add(socket.id);
     
-    // Сообщить новому участнику о других участниках звонка (их socket.id)
+    // Сообщить новому участнику о других участниках звонка
     socket.emit('video-call-participants', { participants: others });
     
     // Оповестить других, что пользователь присоединился к звонку
@@ -406,23 +423,51 @@ io.on('connection', (socket) => {
       socketId: socket.id 
     });
     
-    console.log(`Active calls in ${channel}:`, Array.from(activeCalls[channel]));
+    console.log(`User ${socket.user.username} joined call. Total participants in ${channel}:`, activeCalls[channel].size);
   });
 
   socket.on('video-call-leave', ({ channel }) => {
     console.log(`User ${socket.user.username} leaving call in channel ${channel}`);
     if (activeCalls[channel]) {
       activeCalls[channel].delete(socket.id);
-      socket.to(channel).emit('video-call-left', { user: socket.user.username, socketId: socket.id });
+      socket.to(channel).emit('video-call-left', { 
+        user: socket.user.username, 
+        socketId: socket.id 
+      });
+      
       if (activeCalls[channel].size === 0) {
         delete activeCalls[channel];
         console.log(`Channel ${channel} call ended - no participants left`);
+      } else {
+        console.log(`Participants remaining in ${channel}:`, activeCalls[channel].size);
       }
+    }
+  });
+
+  socket.on('video-call-end', ({ channel }) => {
+    console.log(`User ${socket.user.username} ending call in channel ${channel}`);
+    // Оповестить всех о завершении звонка
+    socket.to(channel).emit('video-call-ended', { by: socket.user.username });
+    if (activeCalls[channel]) {
+      delete activeCalls[channel];
+    }
+  });
+
+  // WebRTC signaling
+  socket.on('video-signal', ({ channel, to, data }) => {
+    console.log(`Relaying ${data.type || 'candidate'} from ${socket.id} to ${to}`);
+    if (to) {
+      io.to(to).emit('video-signal', { 
+        from: socket.id, 
+        data, 
+        username: socket.user.username 
+      });
     }
   });
 
   socket.on('disconnect', async () => {
     console.log(`User ${socket.user?.username} disconnected`);
+    
     if (socket.user?.username) {
       await User.updateOne({ username: socket.user.username }, { online: false });
     }
@@ -431,31 +476,20 @@ io.on('connection', (socket) => {
     for (const channel in activeCalls) {
       if (activeCalls[channel].has(socket.id)) {
         activeCalls[channel].delete(socket.id);
-        socket.to(channel).emit('video-call-left', { user: socket.user?.username, socketId: socket.id });
+        socket.to(channel).emit('video-call-left', { 
+          user: socket.user?.username, 
+          socketId: socket.id 
+        });
+        
         if (activeCalls[channel].size === 0) {
           delete activeCalls[channel];
           console.log(`Channel ${channel} call ended due to disconnect`);
         }
       }
     }
-  });
-
-  // WebRTC signaling: offer/answer/candidate
-  socket.on('video-signal', ({ channel, to, data }) => {
-    console.log(`Relaying signal from ${socket.id} to ${to} in channel ${channel}`);
-    // Переслать сигнал конкретному участнику по socket.id
-    if (to) {
-      io.to(to).emit('video-signal', { from: socket.id, data, username: socket.user.username });
-    }
-  });
-
-  socket.on('video-call-end', ({ channel }) => {
-    console.log(`User ${socket.user.username} ending call in channel ${channel}`);
-    // Оповестить всех о завершении звонка
-    io.to(channel).emit('video-call-ended', { by: socket.user.username });
-    if (activeCalls[channel]) {
-      delete activeCalls[channel];
-    }
+    
+    // Очистить каналы пользователя
+    delete userChannels[socket.id];
   });
 });
 
