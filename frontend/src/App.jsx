@@ -81,6 +81,7 @@ function App() {
   const [videoConnecting, setVideoConnecting] = useState(false);
   const [mySocketId, setMySocketId] = useState(null);
   const [activeCallInChannel, setActiveCallInChannel] = useState(null); // новое состояние для отслеживания активного звонка в канале
+  const [activeCallsInChannels, setActiveCallsInChannels] = useState({}); // новое состояние для отслеживания звонков в каналах
 
   // --- WebRTC helpers ---
   const localVideoRef = useRef(null);
@@ -513,6 +514,18 @@ function App() {
       typingTimeoutRef.current = setTimeout(() => setTyping(""), 2000);
     });
 
+    // Новые обработчики для отслеживания активных звонков
+    socketRef.current.on("video-call-status", ({ channel, active }) => {
+      setActiveCallsInChannels(prev => {
+        if (active) {
+          return { ...prev, [channel]: true };
+        } else {
+          const { [channel]: removed, ...rest } = prev;
+          return rest;
+        }
+      });
+    });
+
     // Новый обработчик: обновлять список каналов при появлении нового
     const handleNewChannel = () => {
       axios
@@ -527,6 +540,7 @@ function App() {
     return () => {
       socketRef.current && socketRef.current.disconnect();
       socketRef.current && socketRef.current.off("new-channel", handleNewChannel);
+      socketRef.current && socketRef.current.off("video-call-status");
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     };
     // eslint-disable-next-line
@@ -780,6 +794,8 @@ function App() {
     const onConnect = () => {
       setMySocketId(socketRef.current.id);
       console.log("Connected with socket ID:", socketRef.current.id);
+      // Запросить текущий статус звонков при подключении
+      socketRef.current.emit("get-active-calls");
     };
 
     const onIncoming = ({ from, channel, initiatorSocketId }) => {
@@ -789,6 +805,8 @@ function App() {
         console.log("Showing incoming call notification");
         setActiveCallInChannel({ from, channel, initiatorSocketId });
       }
+      // Обновляем статус активного звонка в канале
+      setActiveCallsInChannels(prev => ({ ...prev, [channel]: true }));
     };
 
     const onParticipants = async ({ participants }) => {
@@ -894,10 +912,19 @@ function App() {
       }
     };
 
-    const onEnded = ({ by }) => {
-      console.log("Call ended by server, ended by:", by);
+    const onEnded = ({ by, channel }) => {
+      console.log("Call ended by server, ended by:", by, "in channel:", channel);
       endVideoCall();
-      setActiveCallInChannel(null); // убираем уведомление при завершении звонка
+      setActiveCallInChannel(null);
+      // Убираем индикатор активного звонка в канале
+      setActiveCallsInChannels(prev => {
+        const { [channel]: removed, ...rest } = prev;
+        return rest;
+      });
+    };
+
+    const onActiveCallsUpdate = ({ activeCalls }) => {
+      setActiveCallsInChannels(activeCalls);
     };
 
     socketRef.current.on("connect", onConnect);
@@ -907,6 +934,7 @@ function App() {
     socketRef.current.on("video-call-left", onLeft);
     socketRef.current.on("video-signal", onSignal);
     socketRef.current.on("video-call-ended", onEnded);
+    socketRef.current.on("active-calls-update", onActiveCallsUpdate);
 
     return () => {
       socketRef.current?.off("connect", onConnect);
@@ -916,6 +944,7 @@ function App() {
       socketRef.current?.off("video-call-left", onLeft);
       socketRef.current?.off("video-signal", onSignal);
       socketRef.current?.off("video-call-ended", onEnded);
+      socketRef.current?.off("active-calls-update", onActiveCallsUpdate);
     };
   }, [selectedChannel, username, videoStreams.local, videoCall.active]);
 
@@ -1204,17 +1233,37 @@ function App() {
             channels.map((ch) => (
               <div
                 key={ch._id}
-                style={chatStyles.channelItem(selectedChannel === ch._id)}
+                style={{
+                  ...chatStyles.channelItem(selectedChannel === ch._id),
+                  position: "relative", // для позиционирования индикатора
+                }}
                 onClick={() => {
                   setSelectedChannel(ch._id);
                   setMobileMenuOpen(false);
                 }}
               >
                 {ch.name}
+                {/* Красная точка для активного звонка */}
+                {activeCallsInChannels[ch._id] && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: 8,
+                      right: 8,
+                      width: 8,
+                      height: 8,
+                      borderRadius: "50%",
+                      background: "#ff4757",
+                      border: "2px solid #fff",
+                      boxShadow: "0 0 6px #ff4757",
+                      animation: "pulse 2s infinite",
+                    }}
+                    title="Активный видеозвонок"
+                  />
+                )}
               </div>
             ))
-          )
-          }
+          )}
           <button
             style={chatStyles.createBtn}
             onClick={() => setShowCreate((v) => !v)}
@@ -1308,6 +1357,120 @@ function App() {
     </div>
   );
 
+  // --- Десктопное меню ---
+  const desktopMenu = (
+    <div style={chatStyles.sidebar} className="govchat-sidebar">
+      <div style={chatStyles.sidebarTitle}>ГоВЧат 2.1 Beta</div>
+      <div style={chatStyles.channelList} className="govchat-channel-list">
+        <div style={{ fontWeight: 600, color: "#fff", marginBottom: 10 }}>Каналы</div>
+        {channels.length === 0 ? (
+          <div style={{ color: "#b2bec3", marginBottom: 8 }}>
+            Нет доступных каналов
+          </div>
+        ) : (
+          channels.map((ch) => (
+            <div
+              key={ch._id}
+              style={{
+                ...chatStyles.channelItem(selectedChannel === ch._id),
+                position: "relative", // для позиционирования индикатора
+              }}
+              onClick={() => setSelectedChannel(ch._id)}
+            >
+              {ch.name}
+              {/* Красная точка для активного звонка */}
+              {activeCallsInChannels[ch._id] && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "50%",
+                    right: 12,
+                    transform: "translateY(-50%)",
+                    width: 8,
+                    height: 8,
+                    borderRadius: "50%",
+                    background: "#ff4757",
+                    border: "2px solid #fff",
+                    boxShadow: "0 0 6px #ff4757",
+                    animation: "pulse 2s infinite",
+                  }}
+                  title="Активный видеозвонок"
+                />
+              )}
+            </div>
+          ))
+        )}
+        <button
+          style={chatStyles.createBtn}
+          onClick={() => setShowCreate((v) => !v)}
+        >
+          {showCreate ? "Скрыть создание" : "Создать канал"}
+        </button>
+        {showCreate && (
+          <div style={{ marginTop: 10 }}>
+            <input
+              style={chatStyles.input}
+              placeholder="Название канала"
+              value={newChannel}
+              onChange={e => setNewChannel(e.target.value)}
+            />
+            <button style={chatStyles.createBtn} onClick={handleCreateChannel}>
+              Создать
+            </button>
+          </div>
+        )}
+      </div>
+      {/* --- Кнопки профиля и кастомизации для десктопа --- */}
+      <div style={{
+        ...chatStyles.profileBtnBox,
+        left: "auto",
+        right: 178,
+        bottom: 70,
+        display: "flex",
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 10,
+        zIndex: 10
+      }}>
+        {/* Кнопка профиля */}
+        <button
+          style={chatStyles.profileBtn}
+          onClick={() => {
+            setShowProfile(v => !v);
+            setEditMode(false);
+          }}
+          title="Профиль"
+        >
+          <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
+            <circle cx="13" cy="13" r="13" fill="#00c3ff" />
+            <circle cx="13" cy="10" r="4" fill="#fff" />
+            <ellipse cx="13" cy="19" rx="7" ry="4" fill="#fff" />
+          </svg>
+        </button>
+        {/* Кнопка кастомизации */}
+        <button
+          style={{
+            ...chatStyles.profileBtn,
+            background: "none",
+            border: "none",
+            marginRight: 0,
+            marginLeft: 0,
+            boxShadow: "0 2px 8px #00c3ff33"
+          }}
+          onClick={() => setShowCustomizer(v => !v)}
+          title="Кастомизация"
+        >
+          <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
+            <circle cx="13" cy="13" r="13" fill="#ffb347" />
+            <path d="M7 19c0-2 2-4 4-4s4 2 4 4" stroke="#fff" strokeWidth="2" />
+            <rect x="10" y="6" width="6" height="8" rx="2" fill="#fff" stroke="#ffb347" strokeWidth="1.5"/>
+            <rect x="8" y="14" width="10" height="4" rx="2" fill="#ffb347" stroke="#fff" strokeWidth="1.5"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <div style={themedPageStyle} className="govchat-page">
       {/* Мобильный header */}
@@ -1315,98 +1478,8 @@ function App() {
       {/* Мобильное меню */}
       {isMobile && mobileMenuOpen && mobileMenu}
       {/* Сайдбар только на десктопе */}
-      {!isMobile && (
-        <div style={chatStyles.sidebar} className="govchat-sidebar">
-          <div style={chatStyles.sidebarTitle}>ГоВЧат 2.1 Beta</div>
-          <div style={chatStyles.channelList} className="govchat-channel-list">
-            <div style={{ fontWeight: 600, color: "#fff", marginBottom: 10 }}>Каналы</div>
-            {channels.length === 0 ? (
-              <div style={{ color: "#b2bec3", marginBottom: 8 }}>
-                Нет доступных каналов
-              </div>
-            ) : (
-              <>
-                {channels.map((ch) => (
-                  <div
-                    key={ch._id}
-                    style={chatStyles.channelItem(selectedChannel === ch._id)}
-                    onClick={() => setSelectedChannel(ch._id)}
-                  >
-                    {ch.name}
-                  </div>
-                ))}
-              </>
-            )}
-            <button
-              style={chatStyles.createBtn}
-              onClick={() => setShowCreate((v) => !v)}
-            >
-              {showCreate ? "Скрыть создание" : "Создать канал"}
-            </button>
-            {showCreate && (
-              <div style={{ marginTop: 10 }}>
-                <input
-                  style={chatStyles.input}
-                  placeholder="Название канала"
-                  value={newChannel}
-                  onChange={e => setNewChannel(e.target.value)}
-                />
-                <button style={chatStyles.createBtn} onClick={handleCreateChannel}>
-                  Создать
-                </button>
-              </div>
-            )}
-          </div>
-          {/* --- Кнопки профиля и кастомизации для десктопа --- */}
-          <div style={{
-            ...chatStyles.profileBtnBox,
-            left: "auto",
-            right: 178,
-            bottom: 70,
-            display: "flex",
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 10,
-            zIndex: 10
-          }}>
-            {/* Кнопка профиля */}
-            <button
-              style={chatStyles.profileBtn}
-              onClick={() => {
-                setShowProfile(v => !v);
-                setEditMode(false);
-              }}
-              title="Профиль"
-            >
-              <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
-                <circle cx="13" cy="13" r="13" fill="#00c3ff" />
-                <circle cx="13" cy="10" r="4" fill="#fff" />
-                <ellipse cx="13" cy="19" rx="7" ry="4" fill="#fff" />
-              </svg>
-            </button>
-            {/* Кнопка кастомизации */}
-            <button
-              style={{
-                ...chatStyles.profileBtn,
-                background: "none",
-                border: "none",
-                marginRight: 0,
-                marginLeft: 0,
-                boxShadow: "0 2px 8px #00c3ff33"
-              }}
-              onClick={() => setShowCustomizer(v => !v)}
-              title="Кастомизация"
-            >
-              <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
-                <circle cx="13" cy="13" r="13" fill="#ffb347" />
-                <path d="M7 19c0-2 2-4 4-4s4 2 4 4" stroke="#fff" strokeWidth="2" />
-                <rect x="10" y="6" width="6" height="8" rx="2" fill="#fff" stroke="#ffb347" strokeWidth="1.5"/>
-                <rect x="8" y="14" width="10" height="4" rx="2" fill="#ffb347" stroke="#fff" strokeWidth="1.5"/>
-              </svg>
-            </button>
-          </div>
-        </div>
-      )}
+      {!isMobile && desktopMenu}
+      
       {/* Чат всегда на экране, но с отступом сверху на мобиле */}
       <div
         style={{
@@ -1926,6 +1999,7 @@ function App() {
             placeholder={
               selectedChannel
                 ? "Введите сообщение..."
+
                 : "Выберите канал"
             }
           />
@@ -2017,7 +2091,6 @@ function App() {
                 <>
                   <img
                     src={modalMedia.url}
-                   
                     alt={modalMedia.name}
                     style={{ maxWidth: "70vw", maxHeight: "70vh", borderRadius: 10, marginBottom: 16 }}
                   />

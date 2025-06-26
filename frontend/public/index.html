@@ -19,6 +19,12 @@
           width: 100vw;
         }
       }
+      /* Анимация для индикатора активного звонка */
+      @keyframes pulse {
+        0% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.7; transform: scale(1.2); }
+        100% { opacity: 1; transform: scale(1); }
+      }
     </style>
     <!-- reCAPTCHA -->
     <script src="https://www.google.com/recaptcha/api.js" async defer></script>
@@ -26,7 +32,5 @@
   <body>
     <noscript>Вам нужно включить JavaScript для запуска этого приложения.</noscript>
     <div id="root"></div>
-  </body>
-</html>
   </body>
 </html>

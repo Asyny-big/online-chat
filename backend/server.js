@@ -350,6 +350,21 @@ io.on('connection', (socket) => {
   console.log(`User ${socket.user.username} connected with socket ID: ${socket.id}`);
   userChannels[socket.id] = new Set();
 
+  // Отправить текущий статус активных звонков при подключении
+  socket.emit('active-calls-update', { 
+    activeCalls: Object.fromEntries(
+      Object.entries(activeCalls).map(([channel, participants]) => [channel, participants.size > 0])
+    )
+  });
+
+  socket.on('get-active-calls', () => {
+    socket.emit('active-calls-update', { 
+      activeCalls: Object.fromEntries(
+        Object.entries(activeCalls).map(([channel, participants]) => [channel, participants.size > 0])
+      )
+    });
+  });
+
   socket.on('join', (channel) => {
     socket.join(channel);
     userChannels[socket.id].add(channel);
@@ -398,6 +413,9 @@ io.on('connection', (socket) => {
       initiatorSocketId: socket.id
     });
     
+    // Уведомить ВСЕХ пользователей о том, что в канале начался звонок
+    io.emit('video-call-status', { channel, active: true });
+    
     console.log(`Sent incoming call notification to channel ${channel}`);
   });
 
@@ -427,13 +445,15 @@ io.on('connection', (socket) => {
       socketId: socket.id 
     });
     
-    // Если это первый участник, оповестить всех о начале звонка
+    // Если это первый участник, уведомить всех о начале звонка
     if (activeCalls[channel].size === 1) {
       socket.to(channel).emit('video-call-incoming', { 
         from: socket.user.username, 
         channel,
         initiatorSocketId: socket.id
       });
+      // Уведомить ВСЕХ пользователей о том, что в канале начался звонок
+      io.emit('video-call-status', { channel, active: true });
     }
     
     console.log(`User ${socket.user.username} joined call. Total participants in ${channel}:`, activeCalls[channel].size);
@@ -451,7 +471,9 @@ io.on('connection', (socket) => {
       if (activeCalls[channel].size === 0) {
         delete activeCalls[channel];
         // Уведомляем всех в канале о завершении звонка
-        io.to(channel).emit('video-call-ended', { by: socket.user.username });
+        io.to(channel).emit('video-call-ended', { by: socket.user.username, channel });
+        // Уведомить ВСЕХ пользователей о том, что звонок в канале завершился
+        io.emit('video-call-status', { channel, active: false });
         console.log(`Channel ${channel} call ended - no participants left`);
       } else {
         console.log(`Participants remaining in ${channel}:`, activeCalls[channel].size);
@@ -462,7 +484,9 @@ io.on('connection', (socket) => {
   socket.on('video-call-end', ({ channel }) => {
     console.log(`User ${socket.user.username} ending call in channel ${channel}`);
     // Оповестить всех о завершении звонка
-    io.to(channel).emit('video-call-ended', { by: socket.user.username });
+    io.to(channel).emit('video-call-ended', { by: socket.user.username, channel });
+    // Уведомить ВСЕХ пользователей о том, что звонок в канале завершился
+    io.emit('video-call-status', { channel, active: false });
     if (activeCalls[channel]) {
       delete activeCalls[channel];
     }
@@ -499,7 +523,9 @@ io.on('connection', (socket) => {
         if (activeCalls[channel].size === 0) {
           delete activeCalls[channel];
           // Уведомляем всех о завершении звонка при отключении последнего участника
-          io.to(channel).emit('video-call-ended', { by: socket.user?.username });
+          io.to(channel).emit('video-call-ended', { by: socket.user?.username, channel });
+          // Уведомить ВСЕХ пользователей о том, что звонок в канале завершился
+          io.emit('video-call-status', { channel, active: false });
           console.log(`Channel ${channel} call ended due to disconnect`);
         }
       }
