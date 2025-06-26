@@ -569,6 +569,7 @@ export const mobileMenuOverlay = {
   alignItems: "flex-start",
   justifyContent: "flex-start",
   touchAction: "none", // предотвращаем прокрутку фона
+  visibility: "visible", // явно указываем видимость
 };
 
 export const mobileMenu = {
@@ -585,6 +586,7 @@ export const mobileMenu = {
   zIndex: 201,
   animation: "slideInLeft 0.22s",
   touchAction: "auto", // разрешаем прокрутку внутри меню
+  visibility: "visible", // явно указываем видимость
 };
 
 export const mobileMenuCloseBtn = {
@@ -723,8 +725,13 @@ export const responsive = `
     min-height: 0 !important;
     overflow-y: auto !important;
   }
-  /* Предотвращаем случайное открытие меню */
+  /* Скрываем мобильное меню по умолчанию */
   .govchat-mobile-menu-overlay {
+    display: none !important;
+  }
+  /* Показываем мобильное меню только когда оно активно */
+  .govchat-mobile-menu-overlay.active {
+    display: flex !important;
     pointer-events: auto !important;
   }
   .govchat-mobile-menu {

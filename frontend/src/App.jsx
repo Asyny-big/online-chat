@@ -611,7 +611,7 @@ function App() {
       }
     };
 
-    if (isMobile) {
+    if (isMobile && mobileMenuOpen) {
       document.addEventListener('touchstart', handleClickOutside);
       document.addEventListener('click', handleClickOutside);
     }
@@ -621,74 +621,6 @@ function App() {
       document.removeEventListener('click', handleClickOutside);
     };
   }, [mobileMenuOpen, isMobile]);
-
-  if (!token) {
-    return (
-      <div style={chatStyles.page}>
-        <div style={chatStyles.authContainer}>
-          <div style={chatStyles.authTitle}>
-            {authMode === "register" ? "Регистрация" : "Вход"}
-          </div>
-          {error && <div style={chatStyles.error}>{error}</div>}
-          <form
-            onSubmit={authMode === "register" ? handleRegister : handleLogin}
-            style={{ width: "100%" }}
-          >
-            <input
-              style={chatStyles.authInput}
-              placeholder="Имя"
-              value={username}
-              onChange={e => setUsername(e.target.value)}
-              required
-              autoComplete="username"
-            />
-            <input
-              style={chatStyles.authInput}
-              placeholder="Пароль"
-              type="password"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              required
-              autoComplete="current-password"
-            />
-            {/* Обычная reCAPTCHA только для регистрации */}
-            <div style={{ margin: "12px 0", display: "flex", justifyContent: "center" }}>
-              {authMode === "register" && (
-                <ReCAPTCHA
-                  ref={recaptchaRef}
-                  sitekey="6Lddfm0rAAAAAGiUK6xobnuL-5YsdM3eFWbykEB9"
-                  onChange={token => setRecaptchaToken(token)}
-                  onExpired={() => setRecaptchaToken("")}
-                  key={authMode}
-                  size="normal"
-                />
-              )}
-            </div>
-            <button
-              style={chatStyles.authBtn}
-              type="submit"
-              disabled={registering || (authMode === "register" && !recaptchaToken)}
-            >
-              {authMode === "register" ? "Зарегистрироваться" : "Войти"}
-            </button>
-          </form>
-          <button
-            style={chatStyles.switchBtn}
-            type="button"
-            onClick={() => {
-              setAuthMode(authMode === "register" ? "login" : "register");
-              setError("");
-              setRecaptchaToken("");
-              setUsername("");
-              setPassword("");
-            }}
-          >
-            {authMode === "register" ? "Войти" : "Регистрация"}
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   // --- Мобильный header ---
   const mobileHeader = (
@@ -718,7 +650,7 @@ function App() {
   );
 
   // --- Мобильное меню ---
-  const mobileMenu = (
+  const mobileMenu = mobileMenuOpen && (
     <div 
       style={chatStyles.mobileMenuOverlay} 
       className="govchat-mobile-menu-overlay"
@@ -785,6 +717,7 @@ function App() {
                 onClick={(e) => {
                   e.stopPropagation();
                   handleCreateChannel();
+                  setMobileMenuOpen(false);
                 }}
               >
                 Создать
@@ -871,7 +804,7 @@ function App() {
     <div style={themedPageStyle} className="govchat-page">
       {/* Мобильный header */}
       {isMobile && mobileHeader}
-      {/* Мобильное меню */}
+      {/* Мобильное меню - рендерится только если открыто */}
       {isMobile && mobileMenu}
       
       {/* Уведомление о видеозвонке */}
