@@ -75,6 +75,16 @@ function App() {
   const recaptchaRef = useRef(null); // обычная капча
   const recaptchaInvisibleRef = useRef(null); // невидимая капча для автологина
 
+  // Добавляем состояния для видеозвонков
+  const [isVideoCallOpen, setIsVideoCallOpen] = useState(false);
+  const [videoCallNotification, setVideoCallNotification] = useState(null);
+  const [videoCallParticipants, setVideoCallParticipants] = useState([]);
+  const [localStream, setLocalStream] = useState(null);
+  const [remoteStreams, setRemoteStreams] = useState({});
+  const [isMuted, setIsMuted] = useState(false);
+  const [isVideoOff, setIsVideoOff] = useState(false);
+  const localVideoRef = useRef(null);
+
   // Функция для старта записи аудио
   const startRecording = async () => {
     if (!navigator.mediaDevices || !window.MediaRecorder) {
@@ -201,6 +211,32 @@ function App() {
       typingTimeoutRef.current = setTimeout(() => setTyping(""), 2000);
     });
 
+    // Добавляем обработчики видеозвонков
+    socketRef.current.on('video-call-started', (data) => {
+      if (data.caller !== username) {
+        setVideoCallNotification({
+          caller: data.caller,
+          channel: data.channel
+        });
+      }
+    });
+
+    socketRef.current.on('video-call-ended', () => {
+      setIsVideoCallOpen(false);
+      setVideoCallNotification(null);
+      stopLocalStream();
+    });
+
+    socketRef.current.on('user-joined-video-call', (data) => {
+      // Обработка присоединения пользователя к видеозвонку
+      console.log('User joined video call:', data.userId);
+    });
+
+    socketRef.current.on('user-left-video-call', (data) => {
+      // Обработка выхода пользователя из видеозвонка
+      console.log('User left video call:', data.userId);
+    });
+
     // Новый обработчик: обновлять список каналов при появлении нового
     const handleNewChannel = () => {
       axios
@@ -215,10 +251,14 @@ function App() {
     return () => {
       socketRef.current && socketRef.current.disconnect();
       socketRef.current && socketRef.current.off("new-channel", handleNewChannel);
+      socketRef.current && socketRef.current.off('video-call-started');
+      socketRef.current && socketRef.current.off('video-call-ended');
+      socketRef.current && socketRef.current.off('user-joined-video-call');
+      socketRef.current && socketRef.current.off('user-left-video-call');
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     };
     // eslint-disable-next-line
-  }, [token]);
+  }, [token, username]);
 
   useEffect(() => {
     if (token && selectedChannel) {
@@ -779,14 +819,15 @@ function App() {
           ...chatStyles.chatContainer,
           ...(isMobile
             ? {
-                paddingTop: 40, // уменьшено с 64 до 40
-                height: "calc(100vh - 40px)", // уменьшить высоту чата на мобильном
+                paddingTop: 40,
+                height: "calc(100vh - 40px)",
                 maxHeight: "calc(100vh - 40px)",
               }
             : {}),
         }}
         className="govchat-chat-container"
       >
+        {/* Заголовок чата с кнопкой видеозвонка */}
         <div style={{
           display: "flex",
           alignItems: "center",
@@ -794,10 +835,40 @@ function App() {
           width: "100%",
           marginBottom: 10,
           minHeight: 32,
-          marginTop: isMobile ? 18 : 0 // добавлено для мобильных
+          marginTop: isMobile ? 18 : 0,
+          position: "relative"
         }}>
           <div style={chatStyles.chatTitle}>Чат</div>
+          {selectedChannel && (
+            <button
+              style={{
+                position: "absolute",
+                right: isMobile ? 16 : 0,
+                background: "#007bff",
+                color: "white",
+                border: "none",
+                borderRadius: "50%",
+                width: 40,
+                height: 40,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                transition: "background-color 0.3s",
+                fontSize: 16,
+                boxShadow: "0 2px 8px rgba(0, 123, 255, 0.3)"
+              }}
+              onClick={startVideoCall}
+              title="Начать видеозвонок"
+              onMouseEnter={(e) => e.target.style.background = "#0056b3"}
+              onMouseLeave={(e) => e.target.style.background = "#007bff"}
+            >
+              {/* Заменяем <FaVideo /> на эмодзи */}
+              📹
+            </button>
+          )}
         </div>
+
         <div
           className="govchat-chat-box"
           style={themedChatBoxStyle}

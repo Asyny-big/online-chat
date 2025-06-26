@@ -9,6 +9,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const axios = require('axios'); // добавить импорт axios для проверки reCAPTCHA
+const handleVideoCall = require('./videoCallHandler');
 
 const app = express();
 const server = http.createServer(app);
@@ -342,6 +343,7 @@ io.use(async (socket, next) => {
     next();
   });
 });
+
 io.on('connection', (socket) => {
   socket.on('join', (channel) => {
     socket.join(channel);
@@ -368,6 +370,9 @@ io.on('connection', (socket) => {
   socket.on('disconnect', async () => {
     await User.updateOne({ username: socket.user.username }, { online: false });
   });
+
+  // Обработка видеозвонков
+  handleVideoCall(io, socket);
 });
 
 // --- Запуск ---
