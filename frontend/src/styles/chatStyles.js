@@ -654,6 +654,17 @@ export const mobileMenuBtnSecondary = {
 
 // --- Адаптивные стили ---
 export const responsive = `
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
 @media (max-width: 700px) {
   html, body, #root {
     height: 100vh !important;

@@ -157,6 +157,82 @@ function App() {
     setAudioUrl(null);
   };
 
+  // Функции для работы с видеозвонками
+  const startLocalStream = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true
+      });
+      setLocalStream(stream);
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+      }
+    } catch (error) {
+      console.error('Ошибка доступа к камере/микрофону:', error);
+      alert('Ошибка доступа к камере/микрофону');
+    }
+  };
+
+  const stopLocalStream = () => {
+    if (localStream) {
+      localStream.getTracks().forEach(track => track.stop());
+      setLocalStream(null);
+    }
+  };
+
+  const startVideoCall = () => {
+    if (!selectedChannel) {
+      alert('Выберите канал для видеозвонка');
+      return;
+    }
+    socketRef.current.emit('start-video-call', { 
+      channel: selectedChannel,
+      caller: username 
+    });
+    setIsVideoCallOpen(true);
+    startLocalStream();
+  };
+
+  const joinVideoCall = () => {
+    setIsVideoCallOpen(true);
+    setVideoCallNotification(null);
+    startLocalStream();
+    if (selectedChannel) {
+      socketRef.current.emit('join-video-call', { channel: selectedChannel });
+    }
+  };
+
+  const endVideoCall = () => {
+    stopLocalStream();
+    if (selectedChannel) {
+      socketRef.current.emit('leave-video-call', { channel: selectedChannel });
+    }
+    setIsVideoCallOpen(false);
+  };
+
+  const dismissVideoNotification = () => {
+    setVideoCallNotification(null);
+  };
+
+  const toggleMute = () => {
+    if (localStream) {
+      localStream.getAudioTracks().forEach(track => {
+        track.enabled = isMuted;
+      });
+      setIsMuted(!isMuted);
+    }
+  };
+
+  const toggleVideo = () => {
+    if (localStream) {
+      localStream.getVideoTracks().forEach(track => {
+        track.enabled = isVideoOff;
+      });
+      setIsVideoOff(!isVideoOff);
+    }
+  };
+
   useEffect(() => {
     setUsername(parseToken(token));
   }, [token]);
@@ -1979,6 +2055,7 @@ function App() {
             >✕</button>
             <div style={{ fontWeight: 700, fontSize: 20, color: "#ffb347", marginBottom: 18 }}>
               Кастомизация оформления
+           
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 18, width: "100%" }}>
               {chatStyles.themes.map((t, idx) => (
