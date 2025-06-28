@@ -152,11 +152,11 @@ app.post('/api/channels', auth, async (req, res) => {
   const channel = new Channel({ name, members });
   await channel.save();
   res.json(channel);
-  // уведомить всех клиентов о новом канале
+  //  уведомить всех клиентов о новом канале
   io.emit('new-channel');
 });
 app.get('/api/channels', auth, async (_req, res) => {
-  // все каналы для любого пользователя
+  //  все каналы для любого пользователя
   const channels = await Channel.find();
   res.json(channels);
 });
@@ -193,9 +193,20 @@ app.post('/api/upload', auth, upload.single('file'), async (req, res) => {
     fs.mkdirSync(userDir, { recursive: true });
   }
 
-  let baseName = path.basename(req.file.originalname, path.extname(req.file.originalname));
-  let ext = path.extname(req.file.originalname);
-  let destName = req.file.originalname;
+  // Попытка исправить некорректно декодированные имена (например, "Ð¡Ð½Ð¸Ð¼Ð¾Ðº ÑÐºÑÐ°Ð½Ð°")
+  let fixedOriginalName = req.file.originalname;
+  function fixCyrillic(str) {
+    try {
+      return Buffer.from(str, 'latin1').toString('utf8');
+    } catch {
+      return str;
+    }
+  }
+  fixedOriginalName = fixCyrillic(fixedOriginalName);
+
+  let baseName = path.basename(fixedOriginalName, path.extname(fixedOriginalName));
+  let ext = path.extname(fixedOriginalName);
+  let destName = fixedOriginalName;
   let destPath = path.join(userDir, destName);
   let counter = 1;
   while (fs.existsSync(destPath)) {
@@ -223,7 +234,7 @@ app.post('/api/upload', auth, upload.single('file'), async (req, res) => {
 
   url = `/uploads/${username}/${encodeURIComponent(destName)}`;
   // Возвращаем и оригинальное имя, и имя на сервере
-  res.json({ url, fileType, originalName: req.file.originalname, savedName: destName });
+  res.json({ url, fileType, originalName: fixedOriginalName, savedName: destName });
 });
 
 // --- Только express.static для отдачи файлов ---
