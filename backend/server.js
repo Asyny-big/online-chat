@@ -8,7 +8,7 @@ const bcrypt = require('bcryptjs');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const axios = require('axios'); // добавить импорт axios для проверки reCAPTCHA
+const axios = require('axios'); // axios для проверки reCAPTCHA
 
 const app = express();
 const server = http.createServer(app);
@@ -152,11 +152,11 @@ app.post('/api/channels', auth, async (req, res) => {
   const channel = new Channel({ name, members });
   await channel.save();
   res.json(channel);
-  // Новое: уведомить всех клиентов о новом канале
+  // уведомить всех клиентов о новом канале
   io.emit('new-channel');
 });
 app.get('/api/channels', auth, async (_req, res) => {
-  // Возвращаем абсолютно все каналы для любого пользователя
+  // все каналы для любого пользователя
   const channels = await Channel.find();
   res.json(channels);
 });
@@ -193,16 +193,6 @@ app.post('/api/upload', auth, upload.single('file'), async (req, res) => {
     fs.mkdirSync(userDir, { recursive: true });
   }
 
-  // Попытка исправить некорректно декодированные имена (например, "Ð¡Ð½Ð¸Ð¼Ð¾Ðº ÑÐºÑÐ°Ð½Ð°")
-  let fixedOriginalName = req.file.originalname;
-  function fixCyrillic(str) {
-    try {
-      return Buffer.from(str, 'latin1').toString('utf8');
-    } catch {
-      return str;
-    }
-  }
-  fixedOriginalName = fixCyrillic(fixedOriginalName);
 
   let baseName = path.basename(fixedOriginalName, path.extname(fixedOriginalName));
   let ext = path.extname(fixedOriginalName);
