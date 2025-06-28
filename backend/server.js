@@ -193,10 +193,9 @@ app.post('/api/upload', auth, upload.single('file'), async (req, res) => {
     fs.mkdirSync(userDir, { recursive: true });
   }
 
-
-  let baseName = path.basename(fixedOriginalName, path.extname(fixedOriginalName));
-  let ext = path.extname(fixedOriginalName);
-  let destName = fixedOriginalName;
+  let baseName = path.basename(req.file.originalname, path.extname(req.file.originalname));
+  let ext = path.extname(req.file.originalname);
+  let destName = req.file.originalname;
   let destPath = path.join(userDir, destName);
   let counter = 1;
   while (fs.existsSync(destPath)) {
@@ -224,7 +223,7 @@ app.post('/api/upload', auth, upload.single('file'), async (req, res) => {
 
   url = `/uploads/${username}/${encodeURIComponent(destName)}`;
   // Возвращаем и оригинальное имя, и имя на сервере
-  res.json({ url, fileType, originalName: fixedOriginalName, savedName: destName });
+  res.json({ url, fileType, originalName: req.file.originalname, savedName: destName });
 });
 
 // --- Только express.static для отдачи файлов ---
