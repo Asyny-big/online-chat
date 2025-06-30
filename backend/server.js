@@ -40,8 +40,8 @@ const messageSchema = new mongoose.Schema({
   sender: String,
   channel: String,
   fileUrl: String,
-  fileType: String, // добавлено
-  originalName: String, // добавлено
+  fileType: String, 
+  originalName: String, 
   createdAt: { type: Date, default: Date.now },
 });
 const channelSchema = new mongoose.Schema({
@@ -170,7 +170,7 @@ app.get('/api/messages/:channel', auth, async (req, res) => {
 // --- Загрузка файлов ---
 const upload = multer({ dest: path.join(__dirname, 'uploads') });
 app.post('/api/upload', auth, upload.single('file'), async (req, res) => {
-  // Если передан avatar=1, обновляем профиль пользователя (оставляем старое поведение)
+  // Если передан avatar=1, обновляем профиль пользователя
   let url;
   let fileType = req.file.mimetype;
   let originalName = req.file.originalname;
@@ -184,7 +184,7 @@ app.post('/api/upload', auth, upload.single('file'), async (req, res) => {
     return res.json({ url, fileType, originalName });
   }
 
-  // Для обычных файлов сохраняем в папку пользователя с оригинальным именем (UTF-8)
+  // Для обычных файлов сохраняем в папку пользователя с оригинальным именем UTF-8
   const username = req.user.username;
   const uploadsDir = path.join(__dirname, 'uploads');
   const userDir = path.join(uploadsDir, username);
@@ -193,7 +193,7 @@ app.post('/api/upload', auth, upload.single('file'), async (req, res) => {
     fs.mkdirSync(userDir, { recursive: true });
   }
 
-  // Попытка исправить некорректно декодированные имена (например, "Ð¡Ð½Ð¸Ð¼Ð¾Ðº ÑÐºÑÐ°Ð½Ð°")
+  // Попытка исправить некорректно декодированные имена
   let fixedOriginalName = req.file.originalname;
   function fixCyrillic(str) {
     try {
@@ -215,11 +215,11 @@ app.post('/api/upload', auth, upload.single('file'), async (req, res) => {
     counter++;
   }
 
-  // --- Исправление: корректное перемещение файла, чтобы не портить видео ---
+  //  корректное перемещение файла, чтобы не портить видео
   try {
     fs.renameSync(req.file.path, destPath);
   } catch (err) {
-    // Если не удалось переименовать (например, разные диски), копируем потоками
+    // Если не удалось переименовать  копируем потоками
     await new Promise((resolve, reject) => {
       const readStream = fs.createReadStream(req.file.path);
       const writeStream = fs.createWriteStream(destPath);
@@ -230,7 +230,7 @@ app.post('/api/upload', auth, upload.single('file'), async (req, res) => {
     });
     fs.unlinkSync(req.file.path);
   }
-  // --- /Исправление ---
+  // Создаём URL для доступа к файлу
 
   url = `/uploads/${username}/${encodeURIComponent(destName)}`;
   // Возвращаем и оригинальное имя, и имя на сервере
@@ -250,7 +250,7 @@ if (fs.existsSync(path.join(pathToFrontendBuild, 'index.html'))) {
     res.sendFile(path.join(pathToFrontendBuild, 'index.html'));
   });
 } else {
-  // Если build отсутствует, показываем простую заглушку
+  // Если build отсутствует, показываем  заглушку
   app.get('*', (_req, res) => {
     res.send(`
       <html>
@@ -264,8 +264,7 @@ if (fs.existsSync(path.join(pathToFrontendBuild, 'index.html'))) {
         <body>
           <div class="msg">
             <h2>Фронтенд не собран</h2>
-            <p>Соберите React-фронтенд командой <code>npm run build</code> в папке <b>frontend</b>.<br/>
-            Или откройте <a href="http://localhost:3000" style="color:#00c3ff">http://localhost:3000</a> если используете dev-сервер.</p>
+            <p>Соберите React-фронтенд командой <code>npm run build</code> в папке <b>frontend</b>.<br/></p>
           </div>
         </body>
       </html>
@@ -288,7 +287,7 @@ app.get('/api/profile', auth, async (req, res) => {
     city: user.city ?? null,
     status: user.status ?? null,
     avatarUrl: user.avatarUrl ?? null,
-    theme: user.theme ?? { pageBg: "", chatBg: "" } // добавлено
+    theme: user.theme ?? { pageBg: "", chatBg: "" } 
   });
 });
 
@@ -316,7 +315,7 @@ app.patch('/api/profile', auth, async (req, res) => {
   if (status !== undefined) user.status = status;
   if (age !== undefined && age !== "" && !isNaN(Number(age))) user.age = Number(age);
   if (avatarUrl !== undefined) user.avatarUrl = avatarUrl; // обновление аватара
-  if (theme !== undefined) user.theme = theme; // добавлено
+  if (theme !== undefined) user.theme = theme;
   await user.save();
   const resp = {
     username: user.username,
@@ -324,7 +323,7 @@ app.patch('/api/profile', auth, async (req, res) => {
     city: user.city ?? null,
     status: user.status ?? null,
     avatarUrl: user.avatarUrl ?? null,
-    theme: user.theme ?? { pageBg: "", chatBg: "" } // добавлено
+    theme: user.theme ?? { pageBg: "", chatBg: "" } 
   };
   if (token) resp.token = token;
   res.json(resp);
@@ -332,7 +331,7 @@ app.patch('/api/profile', auth, async (req, res) => {
 
 // --- Socket.IO ---
 const activeCalls = {}; // channelId: Set(socket.id)
-const userChannels = {}; // socketId: Set(channelId) - отслеживаем в каких каналах находится пользователь
+const userChannels = {}; // - отслеживаем в каких каналах находится пользователь
 
 io.use(async (socket, next) => {
   const token = socket.handshake.auth.token;
@@ -368,9 +367,9 @@ io.on('connection', (socket) => {
     userChannels[socket.id].add(channel);
     console.log(`User ${socket.user.username} joined channel: ${channel}`);
     
-    // НОВОЕ: Проверяем есть ли активный звонок в канале и уведомляем пользователя
+    //  Проверяем есть ли активный звонок в канале и уведомляем пользователя
     if (activeCalls[channel] && activeCalls[channel].size > 0) {
-      // Находим инициатора звонка (первого участника)
+      // Находим инициатора звонка 
       const participants = Array.from(activeCalls[channel]);
       const initiatorSocketId = participants[0]; // берем первого как инициатора
       
@@ -425,14 +424,14 @@ io.on('connection', (socket) => {
     if (!activeCalls[channel]) activeCalls[channel] = new Set();
     activeCalls[channel].add(socket.id);
     
-    // Оповестить всех в канале (кроме инициатора) о входящем звонке
+    // Оповестить всех в канале  о входящем звонке
     socket.to(channel).emit('video-call-incoming', { 
       from: socket.user.username, 
       channel,
       initiatorSocketId: socket.id
     });
     
-    // Уведомить ВСЕХ пользователей о том, что в канале начался звонок
+    // Уведомить ВСЕХ пользователей о звонке
     io.emit('video-call-status', { channel, active: true });
     
     console.log(`Sent incoming call notification to channel ${channel}`);
@@ -471,7 +470,7 @@ io.on('connection', (socket) => {
         channel,
         initiatorSocketId: socket.id
       });
-      // Уведомить ВСЕХ пользователей о том, что в канале начался звонок
+      // Уведомить ВСЕХ пользователей о звонке
       io.emit('video-call-status', { channel, active: true });
     }
     
@@ -491,7 +490,7 @@ io.on('connection', (socket) => {
         delete activeCalls[channel];
         // Уведомляем всех в канале о завершении звонка
         io.to(channel).emit('video-call-ended', { by: socket.user.username, channel });
-        // Уведомить ВСЕХ пользователей о том, что звонок в канале завершился
+        // Уведомить ВСЕХ пользователей о завершении звонка
         io.emit('video-call-status', { channel, active: false });
         console.log(`Channel ${channel} call ended - no participants left`);
       } else {

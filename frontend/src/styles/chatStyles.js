@@ -21,7 +21,7 @@ export const sidebar = {
   display: "flex",
   flexDirection: "column",
   minHeight: "100vh",
-  position: "relative", // добавлено
+  position: "relative", 
 };
 
 export const sidebarTitle = {
@@ -37,7 +37,7 @@ export const channelList = {
   flex: 1,
   overflowY: "auto",
   marginBottom: 18,
-  paddingBottom: 60, // добавлено, чтобы не перекрывалось кнопкой "Выйти"
+  paddingBottom: 60, 
 };
 
 export const channelItem = isActive => ({
@@ -68,7 +68,7 @@ export const createBtn = {
 };
 
 export const logoutBtn = {
-  marginTop: "auto", // теперь всегда внизу
+  marginTop: "auto", 
   background: "none",
   color: "#ff7675",
   border: "1px solid #ff7675",
@@ -78,7 +78,7 @@ export const logoutBtn = {
   fontSize: 15,
   cursor: "pointer",
   transition: "background 0.2s, color 0.2s",
-  position: "sticky", // закрепить
+  position: "sticky", 
   bottom: 10,
   width: "100%",
   zIndex: 2,
@@ -127,7 +127,6 @@ export const chatBox = {
   overflowY: "auto",
   minHeight: 0,
   paddingBottom: 70, // добавлено, чтобы не перекрывалось inputRow
-  /* Кастомный скроллбар */
   scrollbarWidth: "thin",
   scrollbarColor: "#00c3ff #232526",
 };
@@ -226,9 +225,9 @@ export const typing = {
   fontSize: 14,
   margin: "0",
   minHeight: 18,
-  background: "none", // убираем фон
-  borderRadius: 0,    // убираем скругления
-  boxShadow: "none",  // убираем тень
+  background: "none", 
+  borderRadius: 0,    
+  boxShadow: "none",  
 };
 
 export const authContainer = {
@@ -242,7 +241,7 @@ export const authContainer = {
   display: "flex",
   flexDirection: "column",
   alignItems: "center",
-  justifyContent: "center", // добавлено для вертикального центрирования
+  justifyContent: "center", 
 };
 
 export const authTitle = {
@@ -268,7 +267,7 @@ export const authInput = {
   outline: "none",
   marginBottom: 12,
   transition: "border 0.2s",
-  boxSizing: "border-box", // чтобы padding не увеличивал ширину
+  boxSizing: "border-box", 
 };
 
 export const authBtn = {
@@ -310,7 +309,7 @@ export const error = {
 
 export const profileBtnBox = {
   position: "absolute",
-  right: 70, // было 38, теперь ещё левее
+  right: 70,  // 38
   bottom: 70,
   zIndex: 10,
   display: "flex",
@@ -368,15 +367,15 @@ export const profileAvatar = {
   justifyContent: "center",
   fontSize: 54,
   color: "#b2bec3",
-  margin: "10px auto 10px auto", // уменьшили верхний и нижний отступ
+  margin: "10px auto 10px auto", 
   boxShadow: "0 2px 12px #0003",
 };
 
 export const profileTitle = {
   fontWeight: 700,
-  fontSize: 19, // уменьшили размер
+  fontSize: 19, 
   color: "#fff",
-  margin: "0 auto 4px auto", // уменьшили нижний отступ
+  margin: "0 auto 4px auto",
   textAlign: "center",
   letterSpacing: 0.5,
 };
@@ -411,7 +410,7 @@ export const profileSectionTitle = {
 };
 
 export const profileField = {
-  marginBottom: 6, // уменьшили отступ между полями
+  marginBottom: 6, 
   display: "flex",
   flexDirection: "column",
   gap: 2,
@@ -516,9 +515,7 @@ export const themes = [
   }
 ];
 
-// Можно добавить стили для превью файлов и модального окна, если потребуется
-
-// Для кнопки записи используем attachBtn, можно добавить отдельный стиль при необходимости
+// Для кнопки записи используем attachBtn
 export const recordBtn = {
   ...attachBtn,
   background: "#fff",
@@ -721,7 +718,7 @@ export const videoRow = {
   justifyContent: "center",
   width: "100%",
   marginBottom: 10,
-  position: "relative", // добавлено для абсолютного позиционирования локального видео
+  position: "relative", //  для абсолютного позиционирования локального видео
 };
 
 export const video = {
@@ -756,7 +753,7 @@ export const videoCallEndBtn = {
   marginLeft: 0,
 };
 
-// НОВОЕ: стили для кнопок управления видеозвонком
+// стили для кнопок управления видеозвонком
 export const videoCallControlBtn = {
   background: "#35363a",
   color: "#fff",
@@ -789,7 +786,7 @@ export const videoCallIncomingBox = {
   flexDirection: "column",
   alignItems: "center",
   zIndex: 2100,
-  position: "relative", // добавлено для корректного позиционирования
+  position: "relative", //  для корректного позиционирования
 };
 
 export const videoCallIncomingBtn = {

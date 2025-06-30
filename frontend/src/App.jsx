@@ -74,14 +74,14 @@ function App() {
   const [recaptchaToken, setRecaptchaToken] = useState("");
   const recaptchaRef = useRef(null); // обычная капча
   const [videoCall, setVideoCall] = useState({ active: false, incoming: false, from: null });
-  const [videoStreams, setVideoStreams] = useState({ local: null, remotes: {} }); // remotes: {socketId: MediaStream}
+  const [videoStreams, setVideoStreams] = useState({ local: null, remotes: {} });
   const [, setVideoPeers] = useState({}); // {socketId: RTCPeerConnection}
   const [videoError, setVideoError] = useState("");
   const [videoConnecting, setVideoConnecting] = useState(false);
   const [, setMySocketId] = useState(null);
-  const [activeCallInChannel, setActiveCallInChannel] = useState(null); // новое состояние для отслеживания активного звонка в канале
-  const [activeCallsInChannels, setActiveCallsInChannels] = useState({}); // новое состояние для отслеживания звонков в каналах
-  // НОВОЕ: состояния для управления микрофоном и камерой
+  const [activeCallInChannel, setActiveCallInChannel] = useState(null); // для отслеживания активного звонка в канале
+  const [activeCallsInChannels, setActiveCallsInChannels] = useState({}); //  для отслеживания звонков в каналах
+  //  для управления микрофоном и камерой
   const [micEnabled, setMicEnabled] = useState(true);
   const [cameraEnabled, setCameraEnabled] = useState(true);
 
@@ -90,7 +90,7 @@ function App() {
   const remoteVideosRef = useRef({}); // {socketId: ref}
   const videoPeersRef = useRef({}); // Добавляем ref для синхронного доступа к peers
 
-  // НОВОЕ: функция переключения микрофона
+  // функция переключения микрофона
   const toggleMicrophone = () => {
     if (videoStreams.local) {
       const audioTrack = videoStreams.local.getAudioTracks()[0];
@@ -102,7 +102,7 @@ function App() {
     }
   };
 
-  // НОВОЕ: функция переключения камеры
+  //  функция переключения камеры
   const toggleCamera = () => {
     if (videoStreams.local) {
       const videoTrack = videoStreams.local.getVideoTracks()[0];
@@ -135,7 +135,7 @@ function App() {
       setVideoStreams(s => ({ ...s, local: stream }));
       setVideoCall({ active: true, incoming: false, from: null, channel: selectedChannel });
       setActiveCallInChannel(null); // убираем уведомление о входящем звонке
-      // НОВОЕ: сбрасываем состояния микрофона и камеры
+      // сбрасываем состояния микрофона и камеры
       setMicEnabled(true);
       setCameraEnabled(true);
       
@@ -178,7 +178,7 @@ function App() {
         channel: activeCallInChannel?.channel 
       });
       setActiveCallInChannel(null); // убираем уведомление
-      // НОВОЕ: сбрасываем состояния микрофона и камеры
+      // сбрасываем состояния микрофона и камеры
       setMicEnabled(true);
       setCameraEnabled(true);
       
@@ -389,7 +389,7 @@ function App() {
     setVideoCall({ active: false, incoming: false, from: null });
     setVideoConnecting(false);
     setVideoError("");
-    // НОВОЕ: сбрасываем состояния микрофона и камеры
+    // сбрасываем состояния микрофона и камеры
     setMicEnabled(true);
     setCameraEnabled(true);
   };
@@ -548,7 +548,7 @@ function App() {
       typingTimeoutRef.current = setTimeout(() => setTyping(""), 2000);
     });
 
-    // Новые обработчики для отслеживания активных звонков
+    // для отслеживания активных звонков
     socketRef.current.on("video-call-status", ({ channel, active }) => {
       setActiveCallsInChannels(prev => {
         if (active) {
@@ -587,7 +587,7 @@ function App() {
         })
         .then((res) => setMessages(res.data));
       socketRef.current && socketRef.current.emit("join", selectedChannel);
-      // НОВОЕ: Сбрасываем уведомление о звонке при смене канала
+      // Сбрасываем уведомление о звонке при смене канала
       setActiveCallInChannel(null);
     }
   }, [token, selectedChannel]);
@@ -667,7 +667,7 @@ function App() {
         password,
         recaptcha: recaptchaToken,
       });
-      // После успешной регистрации сразу логинимся (без капчи)
+      // После успешной регистрации сразу логинимся 
       const res = await axios.post(`${API_URL}/login`, {
         username,
         password,
@@ -732,7 +732,7 @@ function App() {
   };
 
   const handleProfilePopupBgClick = () => {
-    // Если клик по фону (а не по самому popup), закрываем
+    // Если клик по фону, закрываем
     setShowProfile(false);
   };
 
@@ -788,7 +788,6 @@ function App() {
       });
       setUserProfile((u) => u ? { ...u, theme: { pageBg: t.pageBg, chatBg: t.chatBg } } : u);
     } catch {
-      // ignore
     }
   };
 
@@ -956,7 +955,7 @@ function App() {
     const onActiveCallsUpdate = ({ activeCalls }) => {
       setActiveCallsInChannels(activeCalls);
     };
-
+    // Подписываемся на события сокета
     socketRef.current.on("connect", onConnect);
     socketRef.current.on("video-call-incoming", onIncoming);
     socketRef.current.on("video-call-participants", onParticipants);
@@ -1034,7 +1033,6 @@ function App() {
             marginBottom: 16,
           }}
         >
-          {/* Удаленные видео */}
           {Object.entries(videoStreams.remotes || {}).length > 0 ? (
             <div style={{
               display: "grid",
@@ -1073,7 +1071,7 @@ function App() {
             </div>
           )}
           
-          {/* Мое видео - маленькое в углу */}
+          {/* Мое видео в углу */}
           {videoStreams.local && (
             <div style={{
               position: "absolute",
@@ -1123,7 +1121,7 @@ function App() {
           flexWrap: "wrap",
           justifyContent: "center",
         }}>
-          {/* Кнопка микрофона */}
+          {/* микрофон */}
           <button
             style={{
               ...chatStyles.videoCallControlBtn,
@@ -1136,7 +1134,7 @@ function App() {
             {micEnabled ? "🎤" : "🔇"}
           </button>
           
-          {/* Кнопка камеры */}
+          {/* камера */}
           <button
             style={{
               ...chatStyles.videoCallControlBtn,
@@ -1232,7 +1230,7 @@ function App() {
               required
               autoComplete="current-password"
             />
-            {/* Обычная reCAPTCHA только для регистрации */}
+            {/* reCAPTCHA только для регистрации */}
             <div style={{ margin: "12px 0", display: "flex", justifyContent: "center" }}>
               {authMode === "register" && (
                 <ReCAPTCHA
@@ -1367,7 +1365,7 @@ function App() {
             </div>
           )}
         </div>
-        {/* Кнопки профиля и кастомизации теперь после списка каналов */}
+        {/* Кнопки профиля и кастомизации */}
         <div
           className="govchat-mobile-profile-actions"
           style={{
@@ -1434,7 +1432,6 @@ function App() {
           </button>
         </div>
         <div style={chatStyles.mobileMenuFooter}>
-          {/* Кнопка "Выйти" убрана из мобильного меню */}
         </div>
       </div>
     </div>
@@ -1562,15 +1559,13 @@ function App() {
       {isMobile && mobileMenuOpen && mobileMenu}
       {/* Сайдбар только на десктопе */}
       {!isMobile && desktopMenu}
-      
-      {/* Чат всегда на экране, но с отступом сверху на мобиле */}
       <div
         style={{
           ...chatStyles.chatContainer,
           ...(isMobile
             ? {
-                paddingTop: 40, // уменьшено с 64 до 40
-                height: "calc(100vh - 40px)", // уменьшить высоту чата на мобильном
+                paddingTop: 40, 
+                height: "calc(100vh - 40px)", 
                 maxHeight: "calc(100vh - 40px)",
               }
             : {}),
@@ -1584,10 +1579,9 @@ function App() {
           width: "100%",
           marginBottom: 10,
           minHeight: 32,
-          marginTop: isMobile ? 18 : 0 // добавлено для мобильных
+          marginTop: isMobile ? 18 : 0 
         }}>
           <div style={chatStyles.chatTitle}>Чат</div>
-          {/* Кнопка видеозвонка справа от "Чат" */}
           <div style={{ marginLeft: "auto", marginRight: 8 }}>
             {videoCallButton}
           </div>
@@ -1685,10 +1679,8 @@ function App() {
                           </span>
                         </span>
                       )}
-                      {/* Кнопка скачать убрана отсюда */}
                     </span>
                   )}
-                  {/* Время сообщения под текстом, меньшим шрифтом */}
                   <div style={{ color: "#b2bec3", fontSize: 11, marginTop: 4, textAlign: isMine ? "right" : "left" }}>
                     {time}
                   </div>
@@ -1698,7 +1690,6 @@ function App() {
           })}
           <div ref={messagesEndRef} />
         </div>
-        {/* typing вынесен в отдельный flex-контейнер над inputRow */}
         <div style={{ minHeight: 22, display: "flex", alignItems: "flex-end", marginBottom: 2 }}>
           {typing && (
             <div style={{
@@ -1719,7 +1710,6 @@ function App() {
             </div>
           )}
         </div>
-        {/* Превью выбранного файла теперь над inputRow (и на мобильном, и на десктопе) */}
         {fileToSend && (
           <div
             style={{
@@ -1732,15 +1722,15 @@ function App() {
                     zIndex: 1002,
                     background: "#35363a",
                     borderRadius: "12px 12px 0 0",
-                    padding: "6px 8px 6px 8px", // уменьшили паддинги
+                    padding: "6px 8px 6px 8px", 
                     maxWidth: "100vw",
                     width: "100vw",
                     display: "flex",
                     alignItems: "center",
-                    gap: 10, // уменьшили gap
+                    gap: 10,
                     boxShadow: "0 -2px 12px #0005",
                     justifyContent: "flex-start",
-                    minHeight: 44, // уменьшили высоту
+                    minHeight: 44,
                   }
                 : {
                     margin: "0 0 8px 0",
@@ -1755,7 +1745,7 @@ function App() {
               position: isMobile ? "fixed" : undefined,
             }}
           >
-            {/* Кнопка крестика для отмены - на мобильном абсолютная слева */}
+            {/* Кнопка крестика для отмены */}
             {isMobile && (
               <button
                 style={{
@@ -1788,14 +1778,14 @@ function App() {
               alignItems: "center",
               gap: 10,
               width: "100%",
-              marginLeft: isMobile ? 36 : 0, // отступ под крестик
+              marginLeft: isMobile ? 36 : 0, 
             }}>
               {fileToSend.type.startsWith("image/") && filePreviewUrl && (
                 <img
                   src={filePreviewUrl}
                   alt="preview"
                   style={{
-                    maxWidth: isMobile ? 56 : 48, // уменьшили размер
+                    maxWidth: isMobile ? 56 : 48, 
                     maxHeight: isMobile ? 56 : 48,
                     borderRadius: 8,
                     objectFit: "cover",
@@ -1828,7 +1818,6 @@ function App() {
               >
                 {fileToSend.name}
               </span>
-              {/* На десктопе крестик справа, на мобиле убираем */}
               {!isMobile && (
                 <button
                   style={{
@@ -1855,14 +1844,14 @@ function App() {
           </div>
         )}
 
-        {/* --- Блок предпрослушивания и отправки голосового сообщения --- */}
+        {/*  предпрослушивания и отправки голосовух */}
         {audioBlob && audioUrl && (
           isMobile ? (
             <div style={{
               position: "fixed",
               left: 0,
               right: 0,
-              bottom: 58, // чуть выше inputRow (учитываем высоту inputRow)
+              bottom: 58, 
               zIndex: 1001,
               background: "#35363a",
               borderRadius: "12px 12px 0 0",
@@ -2008,7 +1997,6 @@ function App() {
               if (e.target.files?.[0]) setFileToSend(e.target.files[0]);
             }}
           />
-          {/* Кнопка записи голосового (всегда показывать, уменьшить на мобиле) */}
           <button
             style={{
               ...chatStyles.attachBtn,
@@ -2051,7 +2039,7 @@ function App() {
               }}>🎤</span>
             )}
           </button>
-          {/* Отображение времени записи */}
+          {/* время записи */}
           {recording && (
             <span style={{
               color: "#ff7675",
@@ -2401,7 +2389,6 @@ function App() {
                 onClick={() => fileInputRefAvatar.current && fileInputRefAvatar.current.click()}
                 title="Изменить фото"
               >
-                {/* Показываем пользовательский аватар только если он есть и не дефолтный */}
                 {userProfile?.avatarUrl &&
                   userProfile.avatarUrl !== "/uploads/avatar-default.png" ? (
                   <img
@@ -2504,7 +2491,6 @@ function App() {
                   <div style={chatStyles.profileField}>
                     <span style={chatStyles.profileLabel}>Семейный статус:</span> {userProfile.status ?? "—"}
                   </div>
-                  {/* Кнопки теперь внутри скроллируемой области, сразу после информации */}
                   <div style={{
                     display: "flex",
                     gap: 8,
@@ -2609,7 +2595,6 @@ function App() {
                       onChange={e => setEditData(d => ({ ...d, status: e.target.value }))}
                     />
                   </div>
-                  {/* Кнопки теперь внутри скроллируемой области, сразу после полей */}
                   <div style={{
                     display: "flex",
                     gap: 8,
@@ -2652,7 +2637,6 @@ function App() {
                 <div style={{ color: "#b2bec3", marginBottom: 8 }}>Загрузка...</div>
               )}
             </div>
-            {/* Кнопки убраны из нижней части popup */}
           </div>
         </div>
       )}
