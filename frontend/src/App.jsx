@@ -745,7 +745,62 @@ function App() {
   }, [userProfile]);
 
   useEffect(() => {
-    document.title = "ГоВЧат 2.1 Beta";
+    // Улучшенные мета-теги для текущей страницы
+    document.title = selectedChannel 
+      ? `${channels.find(ch => ch._id === selectedChannel)?.name || 'Канал'} - ГоВЧат 2.1 Beta`
+      : "ГоВЧат 2.1 Beta - Современный онлайн чат с видеозвонками";
+    
+    // Обновляем description в зависимости от состояния
+    const metaDescription = document.querySelector('meta[name="description"]');
+    if (metaDescription) {
+      if (selectedChannel) {
+        const channelName = channels.find(ch => ch._id === selectedChannel)?.name || 'канале';
+        metaDescription.setAttribute('content', 
+          `Общение в канале "${channelName}" - ГоВЧат с видеозвонками, обменом файлами и голосовыми сообщениями`
+        );
+      } else {
+        metaDescription.setAttribute('content', 
+          'ГоВЧат - бесплатный онлайн чат с видеозвонками, обменом файлами и голосовыми сообщениями. Создавайте каналы, общайтесь в реальном времени.'
+        );
+      }
+    }
+    
+    // Добавляем structured data для текущего состояния
+    const existingStructuredData = document.querySelector('#dynamic-structured-data');
+    if (existingStructuredData) {
+      existingStructuredData.remove();
+    }
+    
+    if (selectedChannel && messages.length > 0) {
+      const channelName = channels.find(ch => ch._id === selectedChannel)?.name || 'Канал';
+      const structuredData = {
+        "@context": "https://schema.org",
+        "@type": "DiscussionForumPosting",
+        "headline": `Общение в канале ${channelName}`,
+        "description": `Активное общение в канале ${channelName} - ГоВЧат`,
+        "dateCreated": messages[0]?.createdAt || new Date().toISOString(),
+        "dateModified": messages[messages.length - 1]?.createdAt || new Date().toISOString(),
+        "author": {
+          "@type": "Organization", 
+          "name": "Участники ГоВЧат"
+        },
+        "publisher": {
+          "@type": "Organization",
+          "name": "ГоВЧат"
+        },
+        "mainEntityOfPage": {
+          "@type": "WebPage",
+          "@id": window.location.href
+        }
+      };
+      
+      const script = document.createElement('script');
+      script.id = 'dynamic-structured-data';
+      script.type = 'application/ld+json';
+      script.textContent = JSON.stringify(structuredData);
+      document.head.appendChild(script);
+    }
+    
     // Добавляем/заменяем favicon
     const faviconId = "govchat-favicon";
     let link = document.querySelector(`link[rel="icon"]#${faviconId}`);
@@ -761,7 +816,7 @@ function App() {
     return () => {
       // Не удаляем favicon при размонтировании
     };
-  }, []);
+  }, [selectedChannel, channels, messages]);
 
   // Показывать превью выбранного файла
   useEffect(() => {
@@ -1322,6 +1377,7 @@ function App() {
                   setSelectedChannel(ch._id);
                   setMobileMenuOpen(false);
                 }}
+                title={`Перейти в канал ${ch.name}`}
               >
                 {ch.name}
                 {/* Красная точка для активного звонка */}
@@ -1340,6 +1396,7 @@ function App() {
                       animation: "pulse 2s infinite",
                     }}
                     title="Активный видеозвонок"
+                    className="govchat-call-indicator"
                   />
                 )}
               </div>
@@ -1456,6 +1513,7 @@ function App() {
                 position: "relative", // для позиционирования индикатора
               }}
               onClick={() => setSelectedChannel(ch._id)}
+              title={`Перейти в канал ${ch.name}`}
             >
               {ch.name}
               {/* Красная точка для активного звонка */}
@@ -1475,6 +1533,7 @@ function App() {
                     animation: "pulse 2s infinite",
                   }}
                   title="Активный видеозвонок"
+                  className="govchat-call-indicator"
                 />
               )}
             </div>
@@ -1553,13 +1612,191 @@ function App() {
 
   return (
     <div style={themedPageStyle} className="govchat-page">
+      {/* Семантическая разметка */}
+      <header style={{ display: 'none' }}>
+        <h1>ГоВЧат 2.1 Beta - Современный онлайн чат</h1>
+        <p>Бесплатный онлайн чат с видеозвонками, обменом файлов и голосовыми сообщениями</p>
+      </header>
+      
       {/* Мобильный header */}
-      {isMobile && mobileHeader}
+      {isMobile && (
+        <header style={chatStyles.mobileHeader} className="govchat-mobile-header">
+          <nav>
+            <button
+              style={chatStyles.mobileMenuBtn}
+              onClick={() => setMobileMenuOpen(true)}
+              aria-label="Открыть меню навигации"
+              title="Меню"
+            >
+              <span style={{ fontSize: 28 }}>☰</span>
+            </button>
+          </nav>
+          <h2 style={{
+            fontWeight: 700,
+            fontSize: 20,
+            color: "#00c3ff",
+            letterSpacing: 1,
+            textShadow: "0 2px 8px #0002",
+            margin: "0 auto",
+          }}>
+            ГоВЧат 2.1 Beta
+          </h2>
+        </header>
+      )}
+
       {/* Мобильное меню */}
-      {isMobile && mobileMenuOpen && mobileMenu}
+      {isMobile && mobileMenuOpen && (
+        <nav style={chatStyles.mobileMenuOverlay} onClick={() => setMobileMenuOpen(false)}>
+          <div
+            style={chatStyles.mobileMenu}
+            onClick={e => e.stopPropagation()}
+            role="navigation"
+            aria-label="Главное меню"
+          >
+            <button
+              style={chatStyles.mobileMenuCloseBtn}
+              onClick={() => setMobileMenuOpen(false)}
+              aria-label="Закрыть меню"
+            >✕</button>
+            <h3 style={chatStyles.mobileMenuTitle}>Каналы</h3>
+            <section style={chatStyles.mobileMenuChannels} className="govchat-channel-navigation">
+              {channels.length === 0 ? (
+                <div style={{ color: "#b2bec3", marginBottom: 8 }}>
+                  Нет доступных каналов
+                </div>
+              ) : (
+                channels.map((ch) => (
+                  <button
+                    key={ch._id}
+                    style={{
+                      ...chatStyles.channelItem(selectedChannel === ch._id),
+                      position: "relative",
+                      width: "100%",
+                      textAlign: "left",
+                    }}
+                    onClick={() => {
+                      setSelectedChannel(ch._id);
+                      setMobileMenuOpen(false);
+                    }}
+                    title={`Перейти в канал ${ch.name}`}
+                  >
+                    {ch.name}
+                    {activeCallsInChannels[ch._id] && (
+                      <span
+                        style={{
+                          position: "absolute",
+                          top: 8,
+                          right: 8,
+                          width: 8,
+                          height: 8,
+                          borderRadius: "50%",
+                          background: "#ff4757",
+                          border: "2px solid #fff",
+                          boxShadow: "0 0 6px #ff4757",
+                          animation: "pulse 2s infinite",
+                        }}
+                        title="Активный видеозвонок"
+                        className="govchat-call-indicator"
+                      />
+                    )}
+                  </button>
+                ))
+              )}
+              <button
+                style={chatStyles.createBtn}
+                onClick={() => setShowCreate((v) => !v)}
+              >
+                {showCreate ? "Скрыть создание" : "Создать канал"}
+              </button>
+              {showCreate && (
+                <div style={{ marginTop: 10 }}>
+                  <input
+                    style={chatStyles.input}
+                    placeholder="Название канала"
+                    value={newChannel}
+                    onChange={e => setNewChannel(e.target.value)}
+                  />
+                  <button style={chatStyles.createBtn} onClick={handleCreateChannel}>
+                    Создать
+                  </button>
+                </div>
+              )}
+            </section>
+          </div>
+        </nav>
+      )}
+
       {/* Сайдбар только на десктопе */}
-      {!isMobile && desktopMenu}
-      <div
+      {!isMobile && (
+        <aside style={chatStyles.sidebar} className="govchat-sidebar">
+          <h2 style={chatStyles.sidebarTitle}>ГоВЧат 2.1 Beta</h2>
+          <section style={chatStyles.channelList} className="govchat-channel-list">
+            <h3 style={{ fontWeight: 600, color: "#fff", marginBottom: 10 }}>Каналы</h3>
+            {channels.length === 0 ? (
+              <div style={{ color: "#b2bec3", marginBottom: 8 }}>
+                Нет доступных каналов
+              </div>
+            ) : (
+              channels.map((ch) => (
+                <button
+                  key={ch._id}
+                  style={{
+                    ...chatStyles.channelItem(selectedChannel === ch._id),
+                    position: "relative",
+                    width: "100%",
+                    textAlign: "left",
+                  }}
+                  onClick={() => setSelectedChannel(ch._id)}
+                  title={`Перейти в канал ${ch.name}`}
+                >
+                  {ch.name}
+                  {activeCallsInChannels[ch._id] && (
+                    <span
+                      style={{
+                        position: "absolute",
+                        top: "50%",
+                        right: 12,
+                        transform: "translateY(-50%)",
+                        width: 8,
+                        height: 8,
+                        borderRadius: "50%",
+                        background: "#ff4757",
+                        border: "2px solid #fff",
+                        boxShadow: "0 0 6px #ff4757",
+                        animation: "pulse 2s infinite",
+                      }}
+                      title="Активный видеозвонок"
+                      className="govchat-call-indicator"
+                    />
+                  )}
+                </button>
+              ))
+            )}
+            <button
+              style={chatStyles.createBtn}
+              onClick={() => setShowCreate((v) => !v)}
+            >
+              {showCreate ? "Скрыть создание" : "Создать канал"}
+            </button>
+            {showCreate && (
+              <div style={{ marginTop: 10 }}>
+                <input
+                  style={chatStyles.input}
+                  placeholder="Название канала"
+                  value={newChannel}
+                  onChange={e => setNewChannel(e.target.value)}
+                />
+                <button style={chatStyles.createBtn} onClick={handleCreateChannel}>
+                  Создать
+                </button>
+              </div>
+            )}
+          </section>
+          {/* ...existing code... */}
+        </aside>
+      )}
+
+      <main
         style={{
           ...chatStyles.chatContainer,
           ...(isMobile
@@ -1572,7 +1809,7 @@ function App() {
         }}
         className="govchat-chat-container"
       >
-        <div style={{
+        <header style={{
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -1581,36 +1818,41 @@ function App() {
           minHeight: 32,
           marginTop: isMobile ? 18 : 0 
         }}>
-          <div style={chatStyles.chatTitle}>Чат</div>
+          <h1 style={chatStyles.chatTitle} className="govchat-main-header">
+            {selectedChannel 
+              ? `Канал: ${channels.find(ch => ch._id === selectedChannel)?.name || 'Чат'}`
+              : 'Выберите канал для общения'
+            }
+          </h1>
           <div style={{ marginLeft: "auto", marginRight: 8 }}>
             {videoCallButton}
           </div>
-        </div>
+        </header>
         
         {/* Уведомление о видеозвонке */}
         {videoCallBanner}
         
-        <div
-          className="govchat-chat-box"
+        <section
+          className="govchat-chat-box govchat-chat-messages"
           style={themedChatBoxStyle}
+          role="log"
+          aria-label="Сообщения чата"
+          aria-live="polite"
         >
           {messages.map((msg) => {
             const isMine = msg.sender === username;
-            // Формат времени
             const time = msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
             return (
-              <div key={msg._id} style={chatStyles.messageRow(isMine)}>
+              <article key={msg._id} style={chatStyles.messageRow(isMine)} className="govchat-user-message">
                 <div style={chatStyles.message(isMine)}>
-                  {/* Только для чужих сообщений показываем имя */}
                   {!isMine && (
-                    <span style={chatStyles.messageSender}>
+                    <cite style={chatStyles.messageSender}>
                       {msg.sender}:
-                    </span>
+                    </cite>
                   )}
-                  {msg.text}
-                  {/* Превью файлов */}
+                  <p style={{ margin: 0 }}>{msg.text}</p>
                   {msg.fileUrl && msg.fileType && (
-                    <span style={{ display: "block", marginTop: 8 }}>
+                    <div style={{ display: "block", marginTop: 8 }} className="govchat-file-attachment">
                       {msg.fileType.startsWith("audio/") ? (
                         <audio src={msg.fileUrl} controls style={{ maxWidth: 220, borderRadius: 8, background: "#232526" }} />
                       ) : msg.fileType.startsWith("image/") ? (
@@ -1679,17 +1921,18 @@ function App() {
                           </span>
                         </span>
                       )}
-                    </span>
+                    </div>
                   )}
-                  <div style={{ color: "#b2bec3", fontSize: 11, marginTop: 4, textAlign: isMine ? "right" : "left" }}>
+                  <time style={{ color: "#b2bec3", fontSize: 11, marginTop: 4, textAlign: isMine ? "right" : "left" }}>
                     {time}
-                  </div>
+                  </time>
                 </div>
-              </div>
+              </article>
             );
           })}
           <div ref={messagesEndRef} />
-        </div>
+        </section>
+
         <div style={{ minHeight: 22, display: "flex", alignItems: "flex-end", marginBottom: 2 }}>
           {typing && (
             <div style={{
@@ -1744,7 +1987,7 @@ function App() {
                   }),
               position: isMobile ? "fixed" : undefined,
             }}
-          >
+         >
             {/* Кнопка крестика для отмены */}
             {isMobile && (
               <button
@@ -2266,7 +2509,8 @@ function App() {
             </div>
           </div>
         )}
-      </div>
+      </main>
+      
       {/* Модальное окно профиля */}
       {showProfile && (
         <div
