@@ -920,31 +920,6 @@ export const responsive = `
   }
 }
 
-/* SEO оптимизация: добавляем семантические классы */
-.govchat-main-header {
-  /* для h1 заголовков */
-}
-
-.govchat-channel-navigation {
-  /* для навигации по каналам */
-}
-
-.govchat-chat-messages {
-  /* для области сообщений */
-}
-
-.govchat-user-message {
-  /* для сообщений пользователя */
-}
-
-.govchat-file-attachment {
-  /* для вложенных файлов */
-}
-
-.govchat-video-call-section {
-  /* для секции видеозвонков */
-}
-
 @media (max-width: 700px) {
   html, body, #root {
     height: 100vh !important;
