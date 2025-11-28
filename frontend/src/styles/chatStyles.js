@@ -738,6 +738,25 @@ export const videoCallControls = {
   justifyContent: "center",
 };
 
+export const videoCallControlBtn = {
+  background: "#35363a",
+  color: "#fff",
+  border: "none",
+  borderRadius: 999,
+  padding: "8px 14px",
+  fontWeight: 600,
+  fontSize: 18,
+  cursor: "pointer",
+  width: "auto",
+  minWidth: 44,
+  height: 44,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  boxShadow: "0 2px 8px #0002",
+  transition: "background 0.2s, color 0.2s, box-shadow 0.2s",
+};
+
 export const videoCallEndBtn = {
   background: "#ff7675",
   color: "#fff",
