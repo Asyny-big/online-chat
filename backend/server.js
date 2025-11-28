@@ -9,6 +9,37 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 // const axios = require('axios'); // ранее использовался для проверки reCAPTCHA, сейчас не нужен
+const localConfig = require('./config.local');
+let admin = null;
+let fcmAvailable = false;
+try {
+  admin = require('firebase-admin');
+  // Инициализация Firebase Admin через локальную конфигурацию
+  if (!admin.apps.length) {
+    const svcObj = localConfig?.FCM?.serviceAccount;
+    const svcBase64 = localConfig?.FCM?.serviceAccountJsonBase64;
+    const svcPath = localConfig?.FCM?.serviceAccountPath;
+    if (svcObj && typeof svcObj === 'object') {
+      admin.initializeApp({ credential: admin.credential.cert(svcObj) });
+      fcmAvailable = true;
+    } else if (svcBase64) {
+      const decoded = Buffer.from(svcBase64, 'base64').toString('utf8');
+      const credentials = JSON.parse(decoded);
+      admin.initializeApp({ credential: admin.credential.cert(credentials) });
+      fcmAvailable = true;
+    } else if (svcPath && fs.existsSync(svcPath)) {
+      const creds = require(svcPath);
+      admin.initializeApp({ credential: admin.credential.cert(creds) });
+      fcmAvailable = true;
+    } else {
+      console.warn('FCM не инициализирован: заполните FCM в backend/config.local.js');
+    }
+  } else {
+    fcmAvailable = true;
+  }
+} catch (e) {
+  console.warn('firebase-admin не установлен или не инициализирован. Пуши будут отключены.');
+}
 
 const app = express();
 const server = http.createServer(app);
@@ -30,6 +61,7 @@ const userSchema = new mongoose.Schema({
   city: { type: String, default: null },
   status: { type: String, default: null },
   avatarUrl: { type: String, default: null },
+  fcmTokens: { type: [String], default: [] },
   theme: {
     pageBg: { type: String, default: "" },
     chatBg: { type: String, default: "" }
@@ -51,6 +83,42 @@ const channelSchema = new mongoose.Schema({
 const User = mongoose.model('User', userSchema);
 const Message = mongoose.model('Message', messageSchema);
 const Channel = mongoose.model('Channel', channelSchema);
+
+// --- Утилита отправки пуш-уведомлений через FCM ---
+async function sendPushToUsers(usernames, notification, data = {}) {
+  if (!fcmAvailable || !admin) return;
+  try {
+    const users = await User.find({ username: { $in: usernames } });
+    const tokens = users.flatMap(u => Array.isArray(u.fcmTokens) ? u.fcmTokens : []).filter(Boolean);
+    if (!tokens.length) return;
+    const message = {
+      notification,
+      data: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, v == null ? '' : String(v)])),
+      android: { priority: 'high' },
+      tokens,
+    };
+    const resp = await admin.messaging().sendEachForMulticast(message);
+    // Очистка недействительных токенов
+    const invalid = new Set();
+    resp.responses.forEach((r, idx) => {
+      if (!r.success) {
+        const t = tokens[idx];
+        if (r.error && (
+          String(r.error.code).includes('messaging/registration-token-not-registered') ||
+          String(r.error.code).includes('messaging/invalid-registration-token')
+        )) invalid.add(t);
+      }
+    });
+    if (invalid.size) {
+      await User.updateMany(
+        { fcmTokens: { $in: Array.from(invalid) } },
+        { $pull: { fcmTokens: { $in: Array.from(invalid) } } }
+      );
+    }
+  } catch (e) {
+    console.warn('Ошибка отправки FCM:', e.message);
+  }
+}
 
 // --- Аутентификация ---
 const SECRET = 'jwt_secret';
@@ -147,6 +215,25 @@ app.get('/api/channels', auth, async (_req, res) => {
 app.get('/api/messages/:channel', auth, async (req, res) => {
   const messages = await Message.find({ channel: req.params.channel });
   res.json(messages);
+});
+
+// --- Регистрация FCM токена устройства ---
+app.post('/api/push/register', auth, async (req, res) => {
+  try {
+    const { token: fcmToken } = req.body || {};
+    if (!fcmToken) return res.status(400).json({ error: 'Не передан токен' });
+    const user = await User.findOne({ username: req.user.username });
+    if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
+    if (!user.fcmTokens.includes(fcmToken)) {
+      user.fcmTokens.push(fcmToken);
+      // Дедупликация и ограничение количества токенов
+      user.fcmTokens = Array.from(new Set(user.fcmTokens)).slice(-10);
+      await user.save();
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: 'Ошибка регистрации токена' });
+  }
 });
 
 // --- Загрузка файлов ---
@@ -386,6 +473,25 @@ io.on('connection', (socket) => {
     });
     await message.save();
     io.to(msg.channel).emit('message', message);
+
+    // Пуш-уведомления участникам канала
+    try {
+      const channel = await Channel.findById(msg.channel);
+      if (channel && Array.isArray(channel.members)) {
+        const recipients = channel.members.filter(u => u !== msg.sender);
+        await sendPushToUsers(recipients, {
+          title: `Новое сообщение в #${channel.name || 'канале'}`,
+          body: `${msg.sender}: ${msg.text ? String(msg.text).slice(0, 80) : (msg.fileType?.startsWith('image/') ? '📷 Изображение' : (msg.fileType?.startsWith('video/') ? '🎥 Видео' : '📎 Файл'))}`
+        }, {
+          type: 'message',
+          channelId: String(msg.channel || ''),
+          channelName: String(channel.name || ''),
+          sender: String(msg.sender || '')
+        });
+      }
+    } catch (e) {
+      // ignore push errors
+    }
   });
   socket.on('typing', (data) => {
     socket.to(data.channel).emit('typing', { user: socket.user.username });
@@ -413,6 +519,25 @@ io.on('connection', (socket) => {
       channel,
       initiatorSocketId: socket.id
     });
+
+    // Пуш-уведомления участникам канала (кроме инициатора)
+    (async () => {
+      try {
+        const ch = await Channel.findById(channel);
+        if (ch && Array.isArray(ch.members)) {
+          const recipients = ch.members.filter(u => u !== socket.user.username);
+          await sendPushToUsers(recipients, {
+            title: `Входящий видеозвонок в #${ch.name || 'канале'}`,
+            body: `${socket.user.username} начал звонок`
+          }, {
+            type: 'call',
+            channelId: String(channel || ''),
+            channelName: String(ch.name || ''),
+            caller: String(socket.user.username || '')
+          });
+        }
+      } catch {}
+    })();
     
     // Уведомить ВСЕХ пользователей о том, что в канале начался звонок
     io.emit('video-call-status', { channel, active: true });
@@ -538,11 +663,11 @@ io.on('connection', (socket) => {
 });
 
 // --- Запуск ---
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://sanya210105:KBu09c0aYFWCdBaU@cluster0.fav8tsg.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0';
+const MONGODB_URI = (localConfig && localConfig.MONGODB_URI) || 'mongodb+srv://sanya210105:KBu09c0aYFWCdBaU@cluster0.fav8tsg.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0';
 
 mongoose.connect(MONGODB_URI)
   .then(() => {
-    const PORT = process.env.PORT || 5000;
+    const PORT = (localConfig && localConfig.PORT) || 5000;
     server.listen(PORT, () => console.log(`Сервер запущен на ${PORT}`));
   })
   .catch(console.error);
