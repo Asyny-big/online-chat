@@ -66,25 +66,11 @@ function auth(req, res, next) {
 
 // --- Регистрация и вход ---
 app.post('/api/register', async (req, res) => {
-  let { username, password, recaptcha } = req.body;
-  // Проверка reCAPTCHA только при регистрации
-  if (!recaptcha) return res.status(400).json({ error: 'reCAPTCHA не пройдена' });
-  try {
-    const verifyRes = await axios.post(
-      `https://www.google.com/recaptcha/api/siteverify`,
-      new URLSearchParams({
-        secret: '6Lddfm0rAAAAAOcsDbF3F-f38QZQGeOUeI2EKGlE',
-        response: recaptcha,
-      })
-    );
-    if (!verifyRes.data.success) {
-      console.log("reCAPTCHA fail:", verifyRes.data);
-      return res.status(400).json({ error: 'Ошибка reCAPTCHA' });
-    }
-  } catch (e) {
-    console.log("reCAPTCHA error:", e?.response?.data || e.message);
-    return res.status(400).json({ error: 'Ошибка проверки reCAPTCHA' });
-  }
+  let { username, password } = req.body;
+  
+  // Капча отключена для работы по IP
+  // if (!recaptcha) return res.status(400).json({ error: 'reCAPTCHA не пройдена' });
+  
   let uname = username;
   let pass = password;
   if (!uname) {
@@ -156,7 +142,11 @@ app.post('/api/channels', auth, async (req, res) => {
   io.emit('new-channel');
 });
 app.get('/api/channels', auth, async (_req, res) => {
+<<<<<<< HEAD
+  // Возвращаем абсолютно все каналы для любого пользователя
+=======
   //  все каналы для любого пользователя
+>>>>>>> 5b7407d9f3b140fb0aa1575f7dee86c338c0ffb3
   const channels = await Channel.find();
   res.json(channels);
 });
@@ -250,7 +240,11 @@ if (fs.existsSync(path.join(pathToFrontendBuild, 'index.html'))) {
     res.sendFile(path.join(pathToFrontendBuild, 'index.html'));
   });
 } else {
+<<<<<<< HEAD
+  // Если build отсутствует, показываем простую заглушку
+=======
   // Если build отсутствует, показываем  заглушку
+>>>>>>> 5b7407d9f3b140fb0aa1575f7dee86c338c0ffb3
   app.get('*', (_req, res) => {
     res.send(`
       <html>
@@ -367,9 +361,15 @@ io.on('connection', (socket) => {
     userChannels[socket.id].add(channel);
     console.log(`User ${socket.user.username} joined channel: ${channel}`);
     
+<<<<<<< HEAD
+    // НОВОЕ: Проверяем есть ли активный звонок в канале и уведомляем пользователя
+    if (activeCalls[channel] && activeCalls[channel].size > 0) {
+      // Находим инициатора звонка (первого участника)
+=======
     //  Проверяем есть ли активный звонок в канале и уведомляем пользователя
     if (activeCalls[channel] && activeCalls[channel].size > 0) {
       // Находим инициатора звонка 
+>>>>>>> 5b7407d9f3b140fb0aa1575f7dee86c338c0ffb3
       const participants = Array.from(activeCalls[channel]);
       const initiatorSocketId = participants[0]; // берем первого как инициатора
       
@@ -424,14 +424,22 @@ io.on('connection', (socket) => {
     if (!activeCalls[channel]) activeCalls[channel] = new Set();
     activeCalls[channel].add(socket.id);
     
+<<<<<<< HEAD
+    // Оповестить всех в канале (кроме инициатора) о входящем звонке
+=======
     // Оповестить всех в канале  о входящем звонке
+>>>>>>> 5b7407d9f3b140fb0aa1575f7dee86c338c0ffb3
     socket.to(channel).emit('video-call-incoming', { 
       from: socket.user.username, 
       channel,
       initiatorSocketId: socket.id
     });
     
+<<<<<<< HEAD
+    // Уведомить ВСЕХ пользователей о том, что в канале начался звонок
+=======
     // Уведомить ВСЕХ пользователей о звонке
+>>>>>>> 5b7407d9f3b140fb0aa1575f7dee86c338c0ffb3
     io.emit('video-call-status', { channel, active: true });
     
     console.log(`Sent incoming call notification to channel ${channel}`);
@@ -470,7 +478,11 @@ io.on('connection', (socket) => {
         channel,
         initiatorSocketId: socket.id
       });
+<<<<<<< HEAD
+      // Уведомить ВСЕХ пользователей о том, что в канале начался звонок
+=======
       // Уведомить ВСЕХ пользователей о звонке
+>>>>>>> 5b7407d9f3b140fb0aa1575f7dee86c338c0ffb3
       io.emit('video-call-status', { channel, active: true });
     }
     
@@ -490,7 +502,11 @@ io.on('connection', (socket) => {
         delete activeCalls[channel];
         // Уведомляем всех в канале о завершении звонка
         io.to(channel).emit('video-call-ended', { by: socket.user.username, channel });
+<<<<<<< HEAD
+        // Уведомить ВСЕХ пользователей о том, что звонок в канале завершился
+=======
         // Уведомить ВСЕХ пользователей о завершении звонка
+>>>>>>> 5b7407d9f3b140fb0aa1575f7dee86c338c0ffb3
         io.emit('video-call-status', { channel, active: false });
         console.log(`Channel ${channel} call ended - no participants left`);
       } else {

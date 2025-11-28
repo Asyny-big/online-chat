@@ -74,14 +74,24 @@ function App() {
   const [recaptchaToken, setRecaptchaToken] = useState("");
   const recaptchaRef = useRef(null); // обычная капча
   const [videoCall, setVideoCall] = useState({ active: false, incoming: false, from: null });
+<<<<<<< HEAD
+  const [videoStreams, setVideoStreams] = useState({ local: null, remotes: {} }); // remotes: {socketId: MediaStream}
+=======
   const [videoStreams, setVideoStreams] = useState({ local: null, remotes: {} });
+>>>>>>> 5b7407d9f3b140fb0aa1575f7dee86c338c0ffb3
   const [, setVideoPeers] = useState({}); // {socketId: RTCPeerConnection}
   const [videoError, setVideoError] = useState("");
   const [videoConnecting, setVideoConnecting] = useState(false);
   const [, setMySocketId] = useState(null);
+<<<<<<< HEAD
+  const [activeCallInChannel, setActiveCallInChannel] = useState(null); // новое состояние для отслеживания активного звонка в канале
+  const [activeCallsInChannels, setActiveCallsInChannels] = useState({}); // новое состояние для отслеживания звонков в каналах
+  // НОВОЕ: состояния для управления микрофоном и камерой
+=======
   const [activeCallInChannel, setActiveCallInChannel] = useState(null); // для отслеживания активного звонка в канале
   const [activeCallsInChannels, setActiveCallsInChannels] = useState({}); //  для отслеживания звонков в каналах
   //  для управления микрофоном и камерой
+>>>>>>> 5b7407d9f3b140fb0aa1575f7dee86c338c0ffb3
   const [micEnabled, setMicEnabled] = useState(true);
   const [cameraEnabled, setCameraEnabled] = useState(true);
 
@@ -90,7 +100,11 @@ function App() {
   const remoteVideosRef = useRef({}); // {socketId: ref}
   const videoPeersRef = useRef({}); // Добавляем ref для синхронного доступа к peers
 
+<<<<<<< HEAD
+  // НОВОЕ: функция переключения микрофона
+=======
   // функция переключения микрофона
+>>>>>>> 5b7407d9f3b140fb0aa1575f7dee86c338c0ffb3
   const toggleMicrophone = () => {
     if (videoStreams.local) {
       const audioTrack = videoStreams.local.getAudioTracks()[0];
@@ -102,7 +116,11 @@ function App() {
     }
   };
 
+<<<<<<< HEAD
+  // НОВОЕ: функция переключения камеры
+=======
   //  функция переключения камеры
+>>>>>>> 5b7407d9f3b140fb0aa1575f7dee86c338c0ffb3
   const toggleCamera = () => {
     if (videoStreams.local) {
       const videoTrack = videoStreams.local.getVideoTracks()[0];
@@ -135,7 +153,11 @@ function App() {
       setVideoStreams(s => ({ ...s, local: stream }));
       setVideoCall({ active: true, incoming: false, from: null, channel: selectedChannel });
       setActiveCallInChannel(null); // убираем уведомление о входящем звонке
+<<<<<<< HEAD
+      // НОВОЕ: сбрасываем состояния микрофона и камеры
+=======
       // сбрасываем состояния микрофона и камеры
+>>>>>>> 5b7407d9f3b140fb0aa1575f7dee86c338c0ffb3
       setMicEnabled(true);
       setCameraEnabled(true);
       
@@ -178,7 +200,11 @@ function App() {
         channel: activeCallInChannel?.channel 
       });
       setActiveCallInChannel(null); // убираем уведомление
+<<<<<<< HEAD
+      // НОВОЕ: сбрасываем состояния микрофона и камеры
+=======
       // сбрасываем состояния микрофона и камеры
+>>>>>>> 5b7407d9f3b140fb0aa1575f7dee86c338c0ffb3
       setMicEnabled(true);
       setCameraEnabled(true);
       
@@ -389,7 +415,11 @@ function App() {
     setVideoCall({ active: false, incoming: false, from: null });
     setVideoConnecting(false);
     setVideoError("");
+<<<<<<< HEAD
+    // НОВОЕ: сбрасываем состояния микрофона и камеры
+=======
     // сбрасываем состояния микрофона и камеры
+>>>>>>> 5b7407d9f3b140fb0aa1575f7dee86c338c0ffb3
     setMicEnabled(true);
     setCameraEnabled(true);
   };
@@ -548,7 +578,11 @@ function App() {
       typingTimeoutRef.current = setTimeout(() => setTyping(""), 2000);
     });
 
+<<<<<<< HEAD
+    // Новые обработчики для отслеживания активных звонков
+=======
     // для отслеживания активных звонков
+>>>>>>> 5b7407d9f3b140fb0aa1575f7dee86c338c0ffb3
     socketRef.current.on("video-call-status", ({ channel, active }) => {
       setActiveCallsInChannels(prev => {
         if (active) {
@@ -587,7 +621,11 @@ function App() {
         })
         .then((res) => setMessages(res.data));
       socketRef.current && socketRef.current.emit("join", selectedChannel);
+<<<<<<< HEAD
+      // НОВОЕ: Сбрасываем уведомление о звонке при смене канала
+=======
       // Сбрасываем уведомление о звонке при смене канала
+>>>>>>> 5b7407d9f3b140fb0aa1575f7dee86c338c0ffb3
       setActiveCallInChannel(null);
     }
   }, [token, selectedChannel]);
@@ -656,16 +694,17 @@ function App() {
     e.preventDefault();
     setError("");
     setRegistering(true);
-    if (!recaptchaToken) {
-      setError("Пожалуйста, подтвердите, что вы не робот");
-      setRegistering(false);
-      return;
-    }
+    // Капча отключена
+    // if (!recaptchaToken) {
+    //   setError("Пожалуйста, подтвердите, что вы не робот");
+    //   setRegistering(false);
+    //   return;
+    // }
     try {
       await axios.post(`${API_URL}/register`, {
         username,
         password,
-        recaptcha: recaptchaToken,
+        // recaptcha: recaptchaToken,
       });
       // После успешной регистрации сразу логинимся 
       const res = await axios.post(`${API_URL}/login`, {
@@ -732,7 +771,11 @@ function App() {
   };
 
   const handleProfilePopupBgClick = () => {
+<<<<<<< HEAD
+    // Если клик по фону (а не по самому popup), закрываем
+=======
     // Если клик по фону, закрываем
+>>>>>>> 5b7407d9f3b140fb0aa1575f7dee86c338c0ffb3
     setShowProfile(false);
   };
 
@@ -974,6 +1017,13 @@ function App() {
         const { [channel]: removed, ...rest } = prev;
         return rest;
       });
+<<<<<<< HEAD
+    };
+
+    const onActiveCallsUpdate = ({ activeCalls }) => {
+      setActiveCallsInChannels(activeCalls);
+=======
+>>>>>>> 5b7407d9f3b140fb0aa1575f7dee86c338c0ffb3
     };
 
     const onActiveCallsUpdate = ({ activeCalls }) => {
@@ -1145,7 +1195,11 @@ function App() {
           flexWrap: "wrap",
           justifyContent: "center",
         }}>
+<<<<<<< HEAD
+          {/* Кнопка микрофона */}
+=======
           {/* микрофон */}
+>>>>>>> 5b7407d9f3b140fb0aa1575f7dee86c338c0ffb3
           <button
             style={{
               ...chatStyles.videoCallControlBtn,
@@ -1158,7 +1212,11 @@ function App() {
             {micEnabled ? "🎤" : "🔇"}
           </button>
           
+<<<<<<< HEAD
+          {/* Кнопка камеры */}
+=======
           {/* камера */}
+>>>>>>> 5b7407d9f3b140fb0aa1575f7dee86c338c0ffb3
           <button
             style={{
               ...chatStyles.videoCallControlBtn,
@@ -1254,8 +1312,13 @@ function App() {
               required
               autoComplete="current-password"
             />
+<<<<<<< HEAD
+            {/* Обычная reCAPTCHA только для регистрации */}
+            {/* <div style={{ margin: "12px 0", display: "flex", justifyContent: "center" }}>
+=======
             {/* reCAPTCHA только для регистрации */}
             <div style={{ margin: "12px 0", display: "flex", justifyContent: "center" }}>
+>>>>>>> 5b7407d9f3b140fb0aa1575f7dee86c338c0ffb3
               {authMode === "register" && (
                 <ReCAPTCHA
                   ref={recaptchaRef}
@@ -1266,11 +1329,11 @@ function App() {
                   size="normal"
                 />
               )}
-            </div>
+            </div> */}
             <button
               style={chatStyles.authBtn}
               type="submit"
-              disabled={registering || (authMode === "register" && !recaptchaToken)}
+              disabled={registering}
             >
               {authMode === "register" ? "Зарегистрироваться" : "Войти"}
             </button>
@@ -1583,6 +1646,11 @@ function App() {
       {isMobile && mobileMenuOpen && mobileMenu}
       {/* Сайдбар только на десктопе */}
       {!isMobile && desktopMenu}
+<<<<<<< HEAD
+      
+      {/* Чат всегда на экране, но с отступом сверху на мобиле */}
+=======
+>>>>>>> 5b7407d9f3b140fb0aa1575f7dee86c338c0ffb3
       <div
         style={{
           ...chatStyles.chatContainer,

@@ -753,7 +753,11 @@ export const videoCallEndBtn = {
   marginLeft: 0,
 };
 
+<<<<<<< HEAD
+// НОВОЕ: стили для кнопок управления видеозвонком
+=======
 // стили для кнопок управления видеозвонком
+>>>>>>> 5b7407d9f3b140fb0aa1575f7dee86c338c0ffb3
 export const videoCallControlBtn = {
   background: "#35363a",
   color: "#fff",
