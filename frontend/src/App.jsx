@@ -2,8 +2,12 @@ import React, { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import * as chatStyles from "./styles/chatStyles";
 import io from "socket.io-client";
+import { LocalNotifications } from "@capacitor/local-notifications";
 
-const API_URL = "/api";
+// Базовый URL API — сразу укажи IP своего сервера и порт
+// пример: http://192.168.0.10:5000
+const API_BASE = "http://95.81.119.128:5000";
+const API_URL = `${API_BASE}/api`;
 
 function parseToken(token) {
   if (!token) return "";
@@ -86,6 +90,62 @@ function App() {
   const localVideoRef = useRef(null);
   const remoteVideosRef = useRef({}); // {socketId: ref}
   const videoPeersRef = useRef({}); // Добавляем ref для синхронного доступа к peers
+
+  // --- Уведомления браузера / WebView / Capacitor ---
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    // Capacitor Local Notifications (Android-приложение)
+    (async () => {
+      try {
+        await LocalNotifications.requestPermissions();
+      } catch {
+        // ignore
+      }
+    })();
+
+    // Обычные браузерные уведомления (если открыто в браузере)
+    if ("Notification" in window) {
+      try {
+        Notification.requestPermission().catch(() => {});
+      } catch {
+        // ignore
+      }
+    }
+  }, []);
+
+  const showNotification = async (title, body) => {
+    if (typeof window === "undefined") return;
+
+    // 1) Если работаем внутри Capacitor WebView — пробуем локальные уведомления
+    try {
+      if (window.Capacitor && LocalNotifications) {
+        await LocalNotifications.schedule({
+          notifications: [
+            {
+              id: Date.now() % 2147483647,
+              title,
+              body,
+              schedule: { at: new Date(Date.now() + 50) },
+            },
+          ],
+        });
+        return;
+      }
+    } catch {
+      // ignore и пробуем браузерный вариант
+    }
+
+    // 2) Фолбэк на обычные браузерные уведомления
+    if (!("Notification" in window)) return;
+    if (document.visibilityState === "visible") return;
+    if (Notification.permission !== "granted") return;
+    try {
+      new Notification(title, { body });
+    } catch {
+      // ignore
+    }
+  };
 
   // НОВОЕ: функция переключения микрофона
   const toggleMicrophone = () => {
@@ -530,6 +590,10 @@ function App() {
       setMessages((prev) =>
         msg.channel === selectedChannel ? [...prev, msg] : prev
       );
+
+      if (msg.channel !== selectedChannel || document.visibilityState !== "visible") {
+        showNotification("ГоВЧат", `Новое сообщение от ${msg.sender}`);
+      }
     });
 
     socketRef.current.on("typing", (e) => {
@@ -822,6 +886,9 @@ function App() {
       }
       // Обновляем статус активного звонка в канале
       setActiveCallsInChannels(prev => ({ ...prev, [channel]: true }));
+
+      // Системное уведомление о видеозвонке
+      showNotification("ГоВЧат", `${from} начал видеозвонок`);
     };
 
     const onParticipants = async ({ participants }) => {

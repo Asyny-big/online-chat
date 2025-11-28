@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">ГоВЧат</string>
+    <string name="title_activity_main">ГоВЧат</string>
+    <string name="package_name">me.frutin.govchat</string>
+    <string name="custom_url_scheme">me.frutin.govchat</string>
+</resources>
