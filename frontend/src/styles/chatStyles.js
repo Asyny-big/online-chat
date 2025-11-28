@@ -753,31 +753,6 @@ export const videoCallEndBtn = {
   marginLeft: 0,
 };
 
-<<<<<<< HEAD
-// НОВОЕ: стили для кнопок управления видеозвонком
-=======
-// стили для кнопок управления видеозвонком
->>>>>>> 5b7407d9f3b140fb0aa1575f7dee86c338c0ffb3
-export const videoCallControlBtn = {
-  background: "#35363a",
-  color: "#fff",
-  border: "none",
-  borderRadius: 8,
-  padding: "8px 12px",
-  fontWeight: 600,
-  fontSize: 18,
-  cursor: "pointer",
-  width: "auto",
-  minWidth: 44,
-  height: 36,
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  transition: "background 0.2s, color 0.2s",
-  boxShadow: "0 2px 8px #0002",
-  marginLeft: 0,
-};
-
 export const videoCallIncomingBox = {
   background: "#232526",
   color: "#fff",
