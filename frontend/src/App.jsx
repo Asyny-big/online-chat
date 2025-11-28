@@ -1312,13 +1312,8 @@ function App() {
               required
               autoComplete="current-password"
             />
-<<<<<<< HEAD
             {/* Обычная reCAPTCHA только для регистрации */}
             {/* <div style={{ margin: "12px 0", display: "flex", justifyContent: "center" }}>
-=======
-            {/* reCAPTCHA только для регистрации */}
-            <div style={{ margin: "12px 0", display: "flex", justifyContent: "center" }}>
->>>>>>> 5b7407d9f3b140fb0aa1575f7dee86c338c0ffb3
               {authMode === "register" && (
                 <ReCAPTCHA
                   ref={recaptchaRef}
