@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useRef } from "react";
+import { createPortal } from 'react-dom';
 import axios from "axios";
 import * as chatStyles from "./styles/chatStyles";
 import io from "socket.io-client";
 import { API_URL, SOCKET_URL } from "./config";
 import { PushNotifications } from '@capacitor/push-notifications';
+import { LocalNotifications } from '@capacitor/local-notifications';
+import { Capacitor } from '@capacitor/core';
 
 function parseToken(token) {
   if (!token) return "";
@@ -81,11 +84,79 @@ function App() {
   // НОВОЕ: состояния для управления микрофоном и камерой
   const [micEnabled, setMicEnabled] = useState(true);
   const [cameraEnabled, setCameraEnabled] = useState(true);
+  const pushInitRef = useRef(false);
+  const pushListenersRef = useRef([]);
+  const channelsRef = useRef([]);
+  const activeCallRef = useRef(null);
+  const authTokenRef = useRef(token);
+  const devicePushTokenRef = useRef(null);
+  const pendingServerRegistrationRef = useRef(false);
 
   // --- WebRTC helpers ---
   const localVideoRef = useRef(null);
   const remoteVideosRef = useRef({}); // {socketId: ref}
   const videoPeersRef = useRef({}); // Добавляем ref для синхронного доступа к peers
+
+  const isNativeApp = () => {
+    try {
+      if (typeof Capacitor?.isNativePlatform === 'function') {
+        return Capacitor.isNativePlatform();
+      }
+      return Capacitor?.getPlatform && Capacitor.getPlatform() !== 'web';
+    } catch {
+      return false;
+    }
+  };
+
+  const cleanupPushListeners = () => {
+    pushListenersRef.current.forEach((handle) => {
+      try {
+        handle?.remove?.();
+      } catch {
+        /* noop */
+      }
+    });
+    pushListenersRef.current = [];
+  };
+
+  const registerPushTokenWithServer = async (pushToken) => {
+    if (!pushToken || !authTokenRef.current) return;
+    try {
+      await axios.post(`${API_URL}/push/register`, { token: pushToken }, {
+        headers: { Authorization: `Bearer ${authTokenRef.current}` },
+      });
+      pendingServerRegistrationRef.current = false;
+    } catch (err) {
+      console.warn('Не удалось зарегистрировать токен FCM', err?.message || err);
+      pendingServerRegistrationRef.current = true;
+    }
+  };
+
+  const focusChannelFromNotification = (channelId) => {
+    if (!channelId) return;
+    setSelectedChannel((prev) => (prev === channelId ? prev : channelId));
+  };
+
+  const scheduleNativeNotification = async ({ title, body, extra = {}, isCall = false }) => {
+    if (!isNativeApp()) return;
+    try {
+      await LocalNotifications.schedule({
+        notifications: [
+          {
+            id: Number(String(Date.now()).slice(-9)),
+            title,
+            body,
+            extra,
+            channelId: isCall ? 'govchat-calls' : 'govchat-messages',
+            actionTypeId: isCall ? 'call-actions' : undefined,
+            sound: 'default',
+          },
+        ],
+      });
+    } catch (err) {
+      console.warn('Local notification error', err?.message || err);
+    }
+  };
 
   // НОВОЕ: функция переключения микрофона
   const toggleMicrophone = () => {
@@ -113,6 +184,7 @@ function App() {
 
   // --- Видеозвонок: инициация ---
   const startVideoCall = async () => {
+    requestMediaPermissions();
     if (!selectedChannel) {
       alert("Выберите канал для начала видеозвонка");
       return;
@@ -155,8 +227,15 @@ function App() {
   };
 
   // --- Видеозвонок: принять входящий ---
-  const acceptVideoCall = async () => {
-    console.log("Accepting video call from:", activeCallInChannel?.from, "in channel:", activeCallInChannel?.channel);
+  const acceptVideoCall = async (override) => {
+    requestMediaPermissions();
+    const targetChannel = override?.channel || activeCallRef.current?.channel || activeCallInChannel?.channel;
+    if (!targetChannel) {
+      setVideoError("Не удалось определить канал звонка");
+      return;
+    }
+    const fromUser = override?.from || activeCallRef.current?.from || activeCallInChannel?.from;
+    console.log("Accepting video call from:", fromUser, "in channel:", targetChannel);
     setVideoError("");
     setVideoConnecting(true);
     
@@ -172,7 +251,7 @@ function App() {
         active: true, 
         incoming: false, 
         from: null, 
-        channel: activeCallInChannel?.channel 
+        channel: targetChannel 
       });
       setActiveCallInChannel(null); // убираем уведомление
       // НОВОЕ: сбрасываем состояния микрофона и камеры
@@ -180,7 +259,7 @@ function App() {
       setCameraEnabled(true);
       
       // Присоединяемся к звонку
-      socketRef.current.emit("video-call-join", { channel: activeCallInChannel?.channel });
+      socketRef.current.emit("video-call-join", { channel: targetChannel });
       
       setTimeout(() => {
         setVideoConnecting(false);
@@ -484,9 +563,61 @@ function App() {
     setAudioUrl(null);
   };
 
+  function requestMediaPermissions() {
+    // Если приложение запущено как нативное (Capacitor)
+    if (window.Capacitor && window.Capacitor.isNativePlatform) {
+      // Используем require, чтобы не попадал в веб-сборку
+      const { Camera } = require('@capacitor/camera');
+      Camera.requestPermissions()
+        .then(res => {
+          console.log('Capacitor camera permissions:', res);
+        })
+        .catch(err => {
+          alert('Не удалось получить разрешения на камеру/микрофон: ' + err.message);
+        });
+    } else {
+      // Для браузера — getUserMedia сам покажет запрос
+      navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+        .then(stream => {
+          stream.getTracks().forEach(track => track.stop()); // сразу останавливаем, только для запроса
+          console.log('Browser permissions granted');
+        })
+        .catch(err => {
+          alert('Для звонка требуется доступ к камере и микрофону: ' + err.message);
+        });
+    }
+  }
+
   useEffect(() => {
     setUsername(parseToken(token));
   }, [token]);
+
+  // Преобразуем относительный путь вида "/uploads/..." в абсолютный URL,
+  // пригодный и для веба, и для нативного приложения (Capacitor).
+  const resolveFileUrl = (url) => {
+    if (!url) return url;
+    if (/^https?:\/\//i.test(url)) return url;
+    // url like /uploads/...
+    // Определяем базу: если API_URL содержит http(s), используем его (без /api),
+    // иначе пробуем SOCKET_URL, иначе window.location.origin.
+    try {
+      let base = '';
+      if (API_URL && API_URL.startsWith('http')) {
+        base = API_URL.replace(/\/api\/?$/, '');
+      } else if (SOCKET_URL && SOCKET_URL.startsWith('http')) {
+        base = SOCKET_URL.replace(/\/$/, '');
+      } else if (typeof window !== 'undefined' && window.location && window.location.origin && !window.location.origin.startsWith('file:')) {
+        base = window.location.origin;
+      } else if (typeof window !== 'undefined' && window.location) {
+        // Capacitor WebView может возвращать file:// — в этом случае подставим HTTP сервер из конфигурации
+        // Попытаемся достать host из API_URL если он задан как абсолютный путь внутри config
+        base = '';
+      }
+      return (base ? base.replace(/\/$/, '') : '') + url;
+    } catch (e) {
+      return url;
+    }
+  };
 
   useEffect(() => {
     if (!token) return;
@@ -569,39 +700,151 @@ function App() {
     };
   }, [token]);
 
-  // Регистрация FCM токена устройства через Capacitor PushNotifications
+  // Хранение актуальных ссылок на данные для пушей
   useEffect(() => {
-    if (!token) return;
-    let unsubRegistration, unsubReceive;
-    (async () => {
+    channelsRef.current = channels;
+  }, [channels]);
+
+  useEffect(() => {
+    activeCallRef.current = activeCallInChannel;
+  }, [activeCallInChannel]);
+
+  useEffect(() => {
+    authTokenRef.current = token;
+  }, [token]);
+
+  // Единая инициализация пуш-уведомлений и локальных уведомлений Android
+  useEffect(() => {
+    if (!isNativeApp()) {
+      cleanupPushListeners();
+      pushInitRef.current = false;
+      return;
+    }
+
+    const initPush = async () => {
       try {
         const perm = await PushNotifications.checkPermissions();
         if (perm.receive !== 'granted') {
           const req = await PushNotifications.requestPermissions();
-          if (req.receive !== 'granted') return; // пользователь отклонил
+          if (req.receive !== 'granted') {
+            return;
+          }
         }
-        await PushNotifications.register();
-        unsubRegistration = PushNotifications.addListener('registration', async (data) => {
-          try {
-            await axios.post(`${API_URL}/push/register`, { token: data.value }, {
-              headers: { Authorization: `Bearer ${token}` }
-            });
-          } catch (e) {
-            // ignore
+
+        await LocalNotifications.requestPermissions();
+        await LocalNotifications.registerActionTypes([
+          {
+            id: 'call-actions',
+            actions: [
+              { id: 'accept-call', title: 'Принять' },
+              { id: 'decline-call', title: 'Отклонить', destructive: true },
+            ],
+          },
+        ]);
+
+        if (Capacitor?.getPlatform && Capacitor.getPlatform() === 'android') {
+          await LocalNotifications.createChannel({
+            id: 'govchat-messages',
+            name: 'Сообщения ГоВЧат',
+            importance: 5,
+            sound: 'default',
+          });
+          await LocalNotifications.createChannel({
+            id: 'govchat-calls',
+            name: 'Звонки ГоВЧат',
+            importance: 5,
+            sound: 'default',
+            vibration: true,
+          });
+        }
+
+        const registrationHandle = await PushNotifications.addListener('registration', async ({ value }) => {
+          if (!value) return;
+          if (devicePushTokenRef.current === value) {
+            if (!authTokenRef.current) {
+              pendingServerRegistrationRef.current = true;
+            }
+            return;
+          }
+          devicePushTokenRef.current = value;
+          if (authTokenRef.current) {
+            await registerPushTokenWithServer(value);
+          } else {
+            pendingServerRegistrationRef.current = true;
           }
         });
-        unsubReceive = PushNotifications.addListener('pushNotificationReceived', (notification) => {
-          // Можно обновить UI, показать тост и т.п.
-          // Если пришло уведомление о сообщении текущего канала — можно перезагрузить сообщения
+        pushListenersRef.current.push(registrationHandle);
+
+        const regErrorHandle = await PushNotifications.addListener('registrationError', (err) => {
+          console.warn('FCM registration error', err?.error ?? err);
         });
-      } catch {
-        // плагин недоступен в вебе
+        pushListenersRef.current.push(regErrorHandle);
+
+        const receiveHandle = await PushNotifications.addListener('pushNotificationReceived', async (notification) => {
+          const data = notification.data || {};
+          const channelId = data.channelId || data.channel;
+          const channelName = data.channelName || channelsRef.current.find((c) => c._id === channelId)?.name || 'канал';
+          const senderName = data.caller || data.sender || 'Пользователь';
+          const isCall = data.type === 'call';
+          const title = notification.title || (isCall ? `Входящий звонок` : `Новое сообщение в #${channelName}`);
+          const body = notification.body || (isCall
+            ? `${senderName} звонит в #${channelName}`
+            : `${senderName}: ${data.preview || data.messageText || ''}`);
+          if (isCall) {
+            setActiveCallInChannel((prev) => {
+              if (prev && prev.channel === channelId) return prev;
+              return { from: senderName, channel: channelId };
+            });
+          }
+          await scheduleNativeNotification({
+            title,
+            body,
+            extra: { ...data, channelId, channelName, caller: senderName },
+            isCall,
+          });
+        });
+        pushListenersRef.current.push(receiveHandle);
+
+        const actionHandle = await PushNotifications.addListener('pushNotificationActionPerformed', (event) => {
+          const payload = event.notification?.data || {};
+          const channelId = payload.channelId || payload.channel;
+          if (channelId) focusChannelFromNotification(channelId);
+        });
+        pushListenersRef.current.push(actionHandle);
+
+        const localActionHandle = await LocalNotifications.addListener('localNotificationActionPerformed', (event) => {
+          const payload = event.notification?.extra || {};
+          const channelId = payload.channelId || payload.channel;
+          if (channelId) focusChannelFromNotification(channelId);
+          if (event.actionId === 'accept-call') {
+            setActiveCallInChannel({ from: payload.caller || payload.sender || 'Пользователь', channel: channelId });
+            acceptVideoCall({ channel: channelId, from: payload.caller || payload.sender });
+          } else if (event.actionId === 'decline-call') {
+            setActiveCallInChannel(null);
+          }
+        });
+        pushListenersRef.current.push(localActionHandle);
+
+        await PushNotifications.register();
+        pushInitRef.current = true;
+      } catch (err) {
+        console.warn('Push init failed', err?.message || err);
       }
-    })();
-    return () => {
-      try { unsubRegistration && unsubRegistration.remove(); } catch {}
-      try { unsubReceive && unsubReceive.remove(); } catch {}
     };
+
+    initPush();
+
+    return () => {
+      cleanupPushListeners();
+      pushInitRef.current = false;
+    };
+  }, [token]);
+
+  // Регистрируем сохранённый push-токен на сервере, когда появляется auth token
+  useEffect(() => {
+    if (!token || !devicePushTokenRef.current || !isNativeApp()) return;
+    if (!pendingServerRegistrationRef.current) return;
+    registerPushTokenWithServer(devicePushTokenRef.current);
   }, [token]);
 
   useEffect(() => {
@@ -1020,67 +1263,72 @@ function App() {
       <div
         style={{
           ...chatStyles.videoCallBox,
-          width: isMobile ? "96vw" : 520,
-          minHeight: isMobile ? 280 : 360,
-          padding: isMobile ? "12px 8px 12px 8px" : "20px 20px 16px 20px",
-          position: "relative"
+          width: isMobile ? "100vw" : 520,
+          height: isMobile ? "100vh" : undefined,
+          minHeight: isMobile ? "100vh" : (isMobile ? 280 : 360),
+          padding: isMobile ? 0 : (isMobile ? "12px 8px 12px 8px" : "20px 20px 16px 20px"),
+          position: "relative",
+          borderRadius: isMobile ? 0 : chatStyles.videoCallBox.borderRadius,
+          overflow: "hidden",
         }}
         onClick={e => e.stopPropagation()}
       >
-        <div
-          style={{
-            fontWeight: 700,
-            fontSize: 18,
-            color: "#00c3ff",
-            marginBottom: 16,
-            textAlign: "center",
-          }}
-        >
-          📹 Видеозвонок: {channels.find((ch) => ch._id === selectedChannel)?.name || ""}
-        </div>
-        
+        {/* Заголовок поверх видео (на десктопе) */}
+        {!isMobile && (
+          <div
+            style={{
+              fontWeight: 700,
+              fontSize: 18,
+              color: "#00c3ff",
+              marginBottom: 16,
+              textAlign: "center",
+            }}
+          >
+            📹 Видеозвонок: {channels.find((ch) => ch._id === selectedChannel)?.name || ""}
+          </div>
+        )}
+
         <div
           style={{
             position: "relative",
             display: "flex",
             flexDirection: "column",
-            alignItems: "center",
+            alignItems: "stretch",
             justifyContent: "center",
-            minHeight: isMobile ? 180 : 240,
+            height: isMobile ? "100%" : (isMobile ? 180 : 240),
             background: "#000",
-            borderRadius: 12,
+            borderRadius: isMobile ? 0 : 12,
             overflow: "hidden",
-            marginBottom: 16,
+            marginBottom: isMobile ? 0 : 16,
           }}
         >
           {/* Удаленные видео */}
           {Object.entries(videoStreams.remotes || {}).length > 0 ? (
-            <div style={{
-              display: "grid",
-              gridTemplateColumns: Object.keys(videoStreams.remotes || {}).length === 1 ? "1fr" : "1fr 1fr",
-              gap: 8,
-              width: "100%",
-              height: "100%",
-              minHeight: isMobile ? 180 : 240,
-            }}>
-              {Object.entries(videoStreams.remotes || {}).map(([peerId]) => (
-                <video
-                  key={peerId}
-                  ref={el => {
-                    if (el) remoteVideosRef.current[peerId] = el;
-                  }}
-                  autoPlay
-                  playsInline
-                  style={{
-                    width: "100%",
-                    height: "100%",
-                    objectFit: "cover",
-                    background: "#000",
-                    borderRadius: 8,
-                  }}
-                />
-              ))}
-            </div>
+            (() => {
+              const remotes = Object.entries(videoStreams.remotes || {});
+              const first = remotes[0];
+              const firstId = first ? first[0] : null;
+              return (
+                <div style={{ position: "relative", width: "100%", height: "100%" }}>
+                  {firstId ? (
+                    <video
+                      key={firstId}
+                      ref={el => {
+                        if (el) remoteVideosRef.current[firstId] = el;
+                      }}
+                      autoPlay
+                      playsInline
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "cover",
+                        background: "#000",
+                      }}
+                    />
+                  ) : null}
+                </div>
+              );
+            })()
           ) : (
             <div style={{
               color: "#b2bec3",
@@ -1096,10 +1344,10 @@ function App() {
           {videoStreams.local && (
             <div style={{
               position: "absolute",
-              bottom: 12,
+              top: isMobile ? "calc(env(safe-area-inset-top) + 12px)" : 12,
               right: 12,
-              width: isMobile ? 80 : 120,
-              height: isMobile ? 60 : 90,
+              width: isMobile ? 120 : 160,
+              height: isMobile ? 80 : 120,
               borderRadius: 8,
               border: "2px solid #00c3ff",
               background: "#000",
@@ -1194,8 +1442,8 @@ function App() {
   );
 
   //  Уведомление о входящем звонке
-  const videoCallBanner = activeCallInChannel && selectedChannel === activeCallInChannel.channel && !videoCall.active && (
-    <div style={chatStyles.videoCallBanner}>
+  const _videoCallBannerElement = activeCallInChannel && selectedChannel === activeCallInChannel.channel && !videoCall.active && (
+    <div style={chatStyles.videoCallBanner} role="status" aria-live="polite">
       <div style={chatStyles.videoCallBannerText}>
         <span style={chatStyles.videoCallBannerIcon}>📹</span>
         {isMobile ? (
@@ -1221,6 +1469,8 @@ function App() {
       </div>
     </div>
   );
+
+  const videoCallBanner = _videoCallBannerElement ? createPortal(_videoCallBannerElement, document.body) : null;
 
   if (!token) {
     return (
@@ -1563,6 +1813,12 @@ function App() {
     <div style={themedPageStyle} className="govchat-page">
       {/* Мобильный header */}
       {isMobile && mobileHeader}
+      {/* На мобильном — показываем кнопку видеозвонка справа сверху поверх header */}
+      {isMobile && videoCallButton && (
+        <div style={{ position: 'fixed', top: 'calc(env(safe-area-inset-top) + 8px)', right: 12, zIndex: 150 }}>
+          {videoCallButton}
+        </div>
+      )}
       {/* Мобильное меню */}
       {isMobile && mobileMenuOpen && mobileMenu}
       {/* Сайдбар только на десктопе */}
@@ -1574,9 +1830,9 @@ function App() {
           ...chatStyles.chatContainer,
           ...(isMobile
             ? {
-                paddingTop: 40, // уменьшено с 64 до 40
-                height: "calc(100vh - 40px)", // уменьшить высоту чата на мобильном
-                maxHeight: "calc(100vh - 40px)",
+                paddingTop: `calc(56px + env(safe-area-inset-top))`, // учитываем высоту header + safe-area
+                height: `calc(100vh - (56px + env(safe-area-inset-top)))`, // уменьшить высоту чата на мобильном
+                maxHeight: `calc(100vh - (56px + env(safe-area-inset-top)))`,
               }
             : {}),
         }}
@@ -1594,7 +1850,7 @@ function App() {
           <div style={chatStyles.chatTitle}>Чат</div>
           {/* Кнопка видеозвонка справа от "Чат" */}
           <div style={{ marginLeft: "auto", marginRight: 8 }}>
-            {videoCallButton}
+            {!isMobile && videoCallButton}
           </div>
         </div>
         
@@ -1623,20 +1879,23 @@ function App() {
                   {msg.fileUrl && msg.fileType && (
                     <span style={{ display: "block", marginTop: 8 }}>
                       {msg.fileType.startsWith("audio/") ? (
-                        <audio src={msg.fileUrl} controls style={{ maxWidth: 220, borderRadius: 8, background: "#232526" }} />
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <audio src={resolveFileUrl(msg.fileUrl)} controls style={{ maxWidth: 220, borderRadius: 8, background: "#232526" }} />
+                          <a href={resolveFileUrl(msg.fileUrl)} download style={{ color: '#00c3ff', fontSize: 13 }}>Скачать</a>
+                        </div>
                       ) : msg.fileType.startsWith("image/") ? (
                         <img
-                          src={msg.fileUrl}
+                          src={resolveFileUrl(msg.fileUrl)}
                           alt={msg.originalName || "image"}
                           style={{ maxWidth: 120, maxHeight: 120, borderRadius: 8, cursor: "pointer", boxShadow: "0 2px 8px #00c3ff33" }}
-                          onClick={() => setModalMedia({ type: "image", url: msg.fileUrl, name: msg.originalName })}
+                          onClick={() => setModalMedia({ type: "image", url: resolveFileUrl(msg.fileUrl), name: msg.originalName })}
                         />
                       ) : msg.fileType.startsWith("video/") ? (
                         <video
-                          src={msg.fileUrl}
-                          controls={false}
+                          src={resolveFileUrl(msg.fileUrl)}
+                          controls={true}
                           style={{ maxWidth: 120, maxHeight: 120, borderRadius: 8, cursor: "pointer", boxShadow: "0 2px 8px #00c3ff33" }}
-                          onClick={() => setModalMedia({ type: "video", url: msg.fileUrl, name: msg.originalName })}
+                          onClick={() => setModalMedia({ type: "video", url: resolveFileUrl(msg.fileUrl), name: msg.originalName })}
                         >
                           Ваш браузер не поддерживает видео.
                         </video>
@@ -1660,9 +1919,9 @@ function App() {
                             // Определяем тип документа для предпросмотра
                             const ext = (msg.originalName || "").split('.').pop().toLowerCase();
                             if (msg.fileType === "application/pdf") {
-                              setModalMedia({ type: "pdf", url: msg.fileUrl, name: msg.originalName });
+                              setModalMedia({ type: "pdf", url: resolveFileUrl(msg.fileUrl), name: msg.originalName });
                             } else {
-                              setModalMedia({ type: "doc", url: msg.fileUrl, name: msg.originalName, ext });
+                              setModalMedia({ type: "doc", url: resolveFileUrl(msg.fileUrl), name: msg.originalName, ext });
                             }
                           }}
                           title={msg.originalName}

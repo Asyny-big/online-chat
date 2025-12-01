@@ -85,18 +85,26 @@ const Message = mongoose.model('Message', messageSchema);
 const Channel = mongoose.model('Channel', channelSchema);
 
 // --- Утилита отправки пуш-уведомлений через FCM ---
-async function sendPushToUsers(usernames, notification, data = {}) {
+async function sendPushToUsers(usernames, notification, data = {}, androidNotification = {}) {
   if (!fcmAvailable || !admin) return;
   try {
     const users = await User.find({ username: { $in: usernames } });
     const tokens = users.flatMap(u => Array.isArray(u.fcmTokens) ? u.fcmTokens : []).filter(Boolean);
     if (!tokens.length) return;
+    const messageData = Object.fromEntries(
+      Object.entries(data).map(([k, v]) => [k, v == null ? '' : String(v)])
+    );
+    const androidConfig = { priority: 'high' };
+    if (androidNotification && Object.keys(androidNotification).length) {
+      androidConfig.notification = androidNotification;
+    }
     const message = {
       notification,
-      data: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, v == null ? '' : String(v)])),
-      android: { priority: 'high' },
+      data: messageData,
+      android: androidConfig,
       tokens,
     };
+    if (!androidConfig.notification) delete androidConfig.notification;
     const resp = await admin.messaging().sendEachForMulticast(message);
     // Очистка недействительных токенов
     const invalid = new Set();
@@ -479,14 +487,21 @@ io.on('connection', (socket) => {
       const channel = await Channel.findById(msg.channel);
       if (channel && Array.isArray(channel.members)) {
         const recipients = channel.members.filter(u => u !== msg.sender);
+        const preview = msg.text ? String(msg.text).slice(0, 80) : (msg.fileType?.startsWith('image/') ? '📷 Изображение' : (msg.fileType?.startsWith('video/') ? '🎥 Видео' : '📎 Файл'));
         await sendPushToUsers(recipients, {
           title: `Новое сообщение в #${channel.name || 'канале'}`,
-          body: `${msg.sender}: ${msg.text ? String(msg.text).slice(0, 80) : (msg.fileType?.startsWith('image/') ? '📷 Изображение' : (msg.fileType?.startsWith('video/') ? '🎥 Видео' : '📎 Файл'))}`
+          body: `${msg.sender}: ${preview}`
         }, {
           type: 'message',
           channelId: String(msg.channel || ''),
           channelName: String(channel.name || ''),
-          sender: String(msg.sender || '')
+          sender: String(msg.sender || ''),
+          messageText: String(msg.text || ''),
+          fileType: String(msg.fileType || ''),
+          preview
+        }, {
+          channelId: 'govchat_messages',
+          sound: 'default'
         });
       }
     } catch (e) {
@@ -533,7 +548,13 @@ io.on('connection', (socket) => {
             type: 'call',
             channelId: String(channel || ''),
             channelName: String(ch.name || ''),
-            caller: String(socket.user.username || '')
+            caller: String(socket.user.username || ''),
+            autoAccept: 'false'
+          }, {
+            channelId: 'govchat_calls',
+            sound: 'default',
+            sticky: true,
+            visibility: 'public'
           });
         }
       } catch {}

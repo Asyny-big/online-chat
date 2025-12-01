@@ -373,10 +373,11 @@ export const profileAvatar = {
 
 export const profileTitle = {
   fontWeight: 700,
-  fontSize: 19, 
-  color: "#fff",
-  margin: "0 auto 4px auto",
-  textAlign: "center",
+  left: 0,
+  right: 0,
+  top: "calc(env(safe-area-inset-top) + 12px)",
+  width: "100%",
+  borderRadius: 0,
   letterSpacing: 0.5,
 };
 
@@ -527,7 +528,8 @@ export const mobileHeader = {
   top: 0,
   left: 0,
   width: "100vw",
-  height: 56,
+  height: "calc(56px + env(safe-area-inset-top))",
+  paddingTop: "env(safe-area-inset-top)",
   background: "rgba(30,32,34,0.98)",
   display: "flex",
   alignItems: "center",
@@ -539,7 +541,7 @@ export const mobileHeader = {
 export const mobileMenuBtn = {
   position: "absolute",
   left: 12,
-  top: 8,
+  top: "calc(env(safe-area-inset-top) + 8px)",
   width: 40,
   height: 40,
   background: "none",
@@ -576,7 +578,7 @@ export const mobileMenu = {
   height: "100vh",
   boxShadow: "2px 0 16px #0004",
   borderRadius: "0 18px 18px 0",
-  padding: "18px 0 18px 0",
+  padding: "calc(18px + env(safe-area-inset-top)) 0 18px 0",
   display: "flex",
   flexDirection: "column",
   zIndex: 201,
@@ -586,7 +588,7 @@ export const mobileMenu = {
 
 export const mobileMenuCloseBtn = {
   position: "absolute",
-  top: 12,
+  top: "calc(env(safe-area-inset-top) + 12px)",
   right: 18,
   background: "none",
   border: "none",
@@ -621,6 +623,7 @@ export const mobileMenuTitle = {
   fontWeight: 700,
   fontSize: 22,
   marginBottom: 18,
+  marginTop: "env(safe-area-inset-top)",
   letterSpacing: 1,
   color: "#00c3ff",
   textShadow: "0 2px 8px #0002",
@@ -783,8 +786,11 @@ export const videoCallIncomingBox = {
   display: "flex",
   flexDirection: "column",
   alignItems: "center",
-  zIndex: 2100,
-  position: "relative", //  для корректного позиционирования
+  zIndex: 100050,
+  position: "fixed", // фиксируем поверх других элементов
+  left: "50%",
+  transform: "translateX(-50%)",
+  top: "calc(env(safe-area-inset-top) + 12px)",
 };
 
 export const videoCallIncomingBtn = {
@@ -806,15 +812,22 @@ export const videoCallBanner = {
   border: "1px solid #00c3ff",
   borderRadius: 8,
   padding: "12px 16px",
-  marginBottom: 12,
+  margin: 0,
   display: "flex",
   alignItems: "center",
   justifyContent: "space-between",
   color: "#fff",
   fontSize: 15,
   fontWeight: 500,
-  boxShadow: "0 2px 8px #00c3ff33",
+  boxShadow: "0 6px 30px rgba(0,195,255,0.18)",
   animation: "pulse 2s infinite",
+  position: "fixed",
+  left: 0,
+  right: 0,
+  top: "calc(env(safe-area-inset-top) + 56px)",
+  zIndex: 90,
+  width: "100vw",
+  borderRadius: 0,
 };
 
 export const videoCallBannerIcon = {

@@ -1,0 +1,30 @@
+# Node & package managers
+node_modules/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build outputs
+frontend/build/
+android/app/build/
+android/build/
+backend/build/
+dist/
+coverage/
+
+# App uploads/runtime artifacts
+backend/uploads/
+
+# IDE/editor
+.vscode/
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env & secrets (do NOT commit service accounts)
+.env
+.env.*
+backend/**/firebase-service-account*.json
