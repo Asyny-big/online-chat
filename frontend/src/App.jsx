@@ -33,7 +33,9 @@ function App() {
   const [typing, setTyping] = useState("");
   const typingTimeoutRef = useRef(null);
   const [showCreate, setShowCreate] = useState(false);
-  const [newChannel, setNewChannel] = useState("");
+  const [createType, setCreateType] = useState("private"); // 'private' | 'group'
+  const [newChannel, setNewChannel] = useState(""); // Название группы
+  const [targetPhone, setTargetPhone] = useState(""); // Телефон собеседника
   const [authMode, setAuthMode] = useState("login");
   const [phone, setPhone] = useState("");
   const [name, setName] = useState("");
@@ -49,12 +51,6 @@ function App() {
     age: "",
   });
   const [showProfile, setShowProfile] = useState(false);
-  const [] = useState(false);
-  const [] = useState({
-    city: "",
-    status: "",
-    age: "",
-  });
   const [registering, setRegistering] = useState(false);
   const socketRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -76,10 +72,10 @@ function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [videoCall, setVideoCall] = useState({ active: false, incoming: false, from: null });
   const [videoStreams, setVideoStreams] = useState({ local: null, remotes: {} }); // remotes: {socketId: MediaStream}
-  const [, setVideoPeers] = useState({}); // {socketId: RTCPeerConnection}
+  const [videoPeers, setVideoPeers] = useState({}); // {socketId: RTCPeerConnection}
   const [videoError, setVideoError] = useState("");
   const [videoConnecting, setVideoConnecting] = useState(false);
-  const [, setMySocketId] = useState(null);
+  const [mySocketId, setMySocketId] = useState(null);
   const [activeCallInChannel, setActiveCallInChannel] = useState(null); // новое состояние для отслеживания активного звонка в канале
   const [activeCallsInChannels, setActiveCallsInChannels] = useState({}); // новое состояние для отслеживания звонков в каналах
   // НОВОЕ: состояния для управления микрофоном и камерой
@@ -490,8 +486,12 @@ function App() {
     
     setVideoStreams({ local: null, remotes: {} });
     setVideoCall({ active: false, incoming: false, from: null });
-    setVideoConnecting(falsevideoCall.callId) {
-      socketRef.current.emit("call:leave", { callId: videoCall.callId
+    setVideoConnecting(false);
+    
+    if (videoCall.callId) {
+      socketRef.current.emit("call:leave", { callId: videoCall.callId });
+    }
+    
     // НОВОЕ: сбрасываем состояния микрофона и камеры
     setMicEnabled(true);
     setCameraEnabled(true);
@@ -622,21 +622,11 @@ function App() {
     }
   }
 
-  useEffect(() => {
-    setUsername(parseToken(token));
-  }, [token]);
+  const resolveFileUrl = (url) => {
+    if (!url) return url;
+    if (/^https?:\/\//i.test(url)) return url;
+    // url like /uploads/...
 
-  // Преобразуем относительный путь вида "/uploads/..." в абсолютный URL,
-  // пригодный и для веба, и для нативного приложения (Capacitor).
-  const resolveFileUrl = (url) => {
-    if (!url) return url;
-    if (/^https?:\/\//i.test(url)) return url;
-    // url like /uploads/...
-  const resolveFileUrl = (url) => {
-    if (!url) return url;
-    if (/^https?:\/\//i.test(url)) return url;
-    // url like /uploads/...
-    
     try {
       let base = '';
       if (API_URL && API_URL.startsWith('http')) {
@@ -651,6 +641,10 @@ function App() {
       return url;
     }
   };
+
+  useEffect(() => {
+    setUsername(parseToken(token));
+  }, [token]);
 
   useEffect(() => {
     if (!token) return;
@@ -688,7 +682,15 @@ function App() {
       .get(`${API_URL}/chats`, {
         headers: { Authorization: `Bearer ${token}` },
       })
-      .then((res) => setChannels(res.data))
+      .then((res) => {
+        // Сортировка чатов: сначала с новыми сообщениями
+        const sorted = res.data.sort((a, b) => {
+           const dateA = a.lastMessage ? new Date(a.lastMessage.createdAt) : new Date(a.createdAt);
+           const dateB = b.lastMessage ? new Date(b.lastMessage.createdAt) : new Date(b.createdAt);
+           return dateB - dateA;
+        });
+        setChannels(sorted);
+      })
       .catch((err) => {
           console.error("Chats fetch error", err);
           setChannels([]);
@@ -700,9 +702,21 @@ function App() {
     });
 
     socketRef.current.on("message:new", ({ chatId, message }) => {
-      setMessages((prev) =>
-        chatId === selectedChannel ? [...prev, message] : prev
-      );
+      // Обновляем список сообщений если открыт этот чат
+      if (chatId === selectedChannel) {
+        setMessages((prev) => [...prev, message]);
+      }
+      
+      // Обновляем channel list, чтобы поднять чат вверх и обновить lastMessage
+      setChannels(prev => {
+          const chatIndex = prev.findIndex(c => c._id === chatId);
+          if (chatIndex === -1) return prev; // Если чат новый, он придет через chat:new
+          const updatedChat = { ...prev[chatIndex], lastMessage: message };
+          const newChannels = [...prev];
+          newChannels.splice(chatIndex, 1);
+          newChannels.unshift(updatedChat);
+          return newChannels;
+      });
     });
 
     socketRef.current.on("typing:update", ({ chatId, userId, userName, isTyping }) => {
@@ -719,6 +733,7 @@ function App() {
 
     socketRef.current.on("chat:new", (chat) => {
         setChannels(prev => [chat, ...prev]);
+        // Если мы создали чат, можно сразу в него перейти (опционально)
     });
 
     // Новые обработчики для отслеживания активных звонков
@@ -734,7 +749,7 @@ function App() {
       socketRef.current && socketRef.current.disconnect();
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     };
-  }, [token]);
+  }, [token, selectedChannel]); // Добавлен selectedChannel в зависимости для update
 
   // Хранение актуальных ссылок на данные для пушей
   useEffect(() => {
@@ -907,936 +922,42 @@ function App() {
     // Handled in main useEffect
   }, [selectedChannel]);
 
-  const handleCreateChannel = async () => {
-    if (!newChannel.trim()) return;
-    try {
-      const res = await axios.post(
-        `${API_URL}/chats`,
-        { name: newChannel, participantPhones: [] },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      setShowCreate(false);
-      setNewChannel("");
-      // Add new channel locally
-      setChannels(prev => [res.data, ...prev]);
-      setSelectedChannel(res.data._id);
-      socketRef.current && socketRef.current.emit("chat:join", { chatId: res.data._id });
-    } catch (err) {
-      console.error(err);
-      alert("Ошибка создания канала");
-    }
-  };
-
-  const handleSend = async () => {
-    if ((!input.trim() && !fileToSend) || !selectedChannel) return;
+  // Вспомогательная функция для получения названия чата
+  const getChatDisplayName = (chat) => {
+    if (!chat) return "";
+    // Если есть явное имя (группа) - возвращаем его
+    if (chat.name) return chat.name;
     
-    let attachment = null;
-    let type = "text";
-
-    if (fileToSend) {
-      const formData = new FormData();
-      formData.append("file", fileToSend);
-      try {
-        const uploadRes = await axios.post(
-          `${API_URL}/upload`,
-          formData,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        attachment = {
-             url: uploadRes.data.url,
-             originalName: uploadRes.data.originalName,
-             mimeType: uploadRes.data.mimetype || fileToSend.type,
-             size: uploadRes.data.size || fileToSend.size
-        };
-        type = fileToSend.type.startsWith('image/') ? 'image' : 
-               fileToSend.type.startsWith('video/') ? 'video' : 'file';
-        
-      } catch (err) {
-          console.error("Upload error", err);
-          alert("Ошибка загрузки файла");
-          return;
-      }
+    // Если это приватный чат, ищем собеседника
+    if (chat.participants && userProfile) {
+      const other = chat.participants.find(p => p._id !== userProfile._id && p.id !== userProfile._id);
+      if (other) return other.name || other.phone || "Неизвестный";
     }
-    
-    socketRef.current.emit("message:send", {
-        chatId: selectedChannel,
-        text: input,
-        type,
-        attachment
-    }, (response) => {
-        if (response && response.error) {
-            console.error(response.error);
-        }
-    });
-
-    setInput("");
-    setFileToSend(null);
-    setFilePreviewUrl(null);
-    if (fileInputRefChat.current) fileInputRefChat.current.value = "";
+    return "Чат";
   };
 
-  // Обработчик регистрации
-  const handleRegister = async (e) => {
-    e.preventDefault();
-    setError("");
-    setRegistering(true);
-    try {
-      await axios.post(`${API_URL}/auth/register`, {
-        phone,
-        name,
-        password,
-      });
-      // После успешной регистрации сразу логинимся
-      const res = await axios.post(`${API_URL}/auth/login`, {
-        phone,
-        password,
-      });
-      localStorage.setItem("token", res.data.token);
-      setToken(res.data.token);
-    } catch (e) {
-      let msg = "Ошибка регистрации или входа";
-      if (e?.response?.data?.error) msg = e.response.data.error;
-      else if (typeof e?.message === "string" && e.message) msg = e.message;
-      setError(msg);
-    }
-    setRegistering(false);
+  // Вспомогательная функция для получения ID отправителя из сообщения
+  const getSenderId = (msg) => {
+     if (typeof msg.sender === 'object' && msg.sender !== null) {
+         return msg.sender._id || msg.sender.id;
+     }
+     return msg.sender; // Если это string ID
   };
 
-  // Обработчик входа
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    setError("");
-    setRegistering(true);
-    try {
-      const res = await axios.post(`${API_URL}/auth/login`, {
-        phone,
-        password,
-      });
-      localStorage.setItem("token", res.data.token);
-      setToken(res.data.token);
-    } catch (e) {
-      let msg = "Неверный логин или пароль";
-      if (e?.response?.data?.error) msg = e.response.data.error;
-      else if (typeof e?.message === "string" && e.message) msg = e.message;
-      setError(msg);
-    }
-    setRegistering(false);
+  const getSenderName = (msg) => {
+      if (typeof msg.sender === 'object' && msg.sender !== null) {
+          return msg.sender.name || msg.sender.phone;
+      }
+      // Если это просто ID и у нас нет объекта, пытаемся найти в participant'ах текущего канала
+      if (channels) {
+          const currentChat = channels.find(c => c._id === selectedChannel);
+          if (currentChat && currentChat.participants) {
+               const p = currentChat.participants.find(part => (part._id || part.id) === msg.sender);
+               if (p) return p.name;
+          }
+      }
+      return msg.sender; 
   };
-
-  // Функция для отправки изменений профиля
-  const handleProfileSave = async () => {
-    try {
-      const payload = {
-        username: editData.username,
-        password: editData.password,
-        city: editData.city,
-        status: editData.status,
-        age: editData.age,
-      };
-      Object.keys(payload).forEach(k => {
-        if (payload[k] === "" || payload[k] === null) delete payload[k];
-      });
-      const res = await axios.patch(`${API_URL}/profile`, payload, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setUserProfile(res.data);
-      setEditMode(false);
-      if (payload.username && payload.username !== userProfile.username && res.data.token) {
-        localStorage.setItem("token", res.data.token);
-        setToken(res.data.token);
-      }
-    } catch (e) {
-      alert(e?.response?.data?.error || e?.message || "Ошибка обновления профиля");
-    }
-  };
-
-  const handleProfilePopupBgClick = () => {
-    // Если клик по фону (а не по самому popup), закрываем
-    setShowProfile(false);
-  };
-
-  useEffect(() => {
-    if (userProfile) {
-      setEditData(d => ({
-        ...d,
-      }));
-    }
-  }, [userProfile]);
-
-  useEffect(() => {
-    document.title = "ГоВЧат 2.1 Beta";
-    // Добавляем/заменяем favicon
-    const faviconId = "govchat-favicon";
-    let link = document.querySelector(`link[rel="icon"]#${faviconId}`);
-    if (!link) {
-      link = document.createElement("link");
-      link.rel = "icon";
-      link.id = faviconId;
-      document.head.appendChild(link);
-    }
-    link.type = "image/svg+xml";
-    link.href =
-      'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><text y="52" font-size="52">🦆</text></svg>';
-    return () => {
-      // Не удаляем favicon при размонтировании
-    };
-  }, []);
-
-  // Показывать превью выбранного файла
-  useEffect(() => {
-    if (fileToSend) {
-      if (fileToSend.type.startsWith("image/") || fileToSend.type.startsWith("video/")) {
-        const url = URL.createObjectURL(fileToSend);
-        setFilePreviewUrl(url);
-        return () => URL.revokeObjectURL(url);
-      } else {
-        setFilePreviewUrl(null);
-      }
-    } else {
-      setFilePreviewUrl(null);
-    }
-  }, [fileToSend]);
-
-  // Сохранение выбранной темы в профиль
-  const handleThemeSelect = async (t) => {
-    setTheme(t);
-    setShowCustomizer(false);
-    try {
-      await axios.patch(`${API_URL}/profile`, { theme: { pageBg: t.pageBg, chatBg: t.chatBg } }, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      setUserProfile((u) => u ? { ...u, theme: { pageBg: t.pageBg, chatBg: t.chatBg } } : u);
-    } catch {
-      // ignore
-    }
-  };
-
-  // Применяем тему к стилям
-  const themedPageStyle = { ...chatStyles.page, background: theme.pageBg };
-  const themedChatBoxStyle = { ...chatStyles.chatBox, background: theme.chatBg };
-
-  // Вставляем адаптивные стили в <head>
-  useEffect(() => {
-    const styleId = "govchat-responsive-style";
-    if (!document.getElementById(styleId)) {
-      const style = document.createElement("style");
-      style.id = styleId;
-      style.innerHTML = chatStyles.responsive;
-      document.head.appendChild(style);
-    }
-    
-    // Убираем лишние overflow стили с body и html
-    document.documentElement.style.overflow = '';
-    document.body.style.overflow = '';
-  }, []);
-
-  // Для определения мобильного режима
-  const [isMobile, setIsMobile] = useState(window.innerWidth <= 700);
-  useEffect(() => {
-    const onResize = () => setIsMobile(window.innerWidth <= 700);
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, []);
-
-  // --- Видеозвонок: обработка сигналов и событий ---
-  useEffect(() => {
-    if (!socketRef.current) return;
-
-    const onConnect = () => {
-      setMySocketId(socketRef.current.id);
-      console.log("Connected with socket ID:", socketRef.current.id);
-      // Запросить текущий статус звонков при подключении
-      socketRef.current.emit("get-active-calls");
-    };
-
-    const onIncoming = ({ callId, chatId, initiator }) => {
-      const from = initiator.name;
-      const channel = chatId;
-      console.log("Incoming call from:", from, "in channel:", channel, "my channel:", selectedChannel);
-      if (channel === selectedChannel && !videoCall.active) {
-        console.log("Showing incoming call notification");
-        setActiveCallInChannel({ from, channel, callId, initiator });
-      }
-      // Обновляем статус активного звонка в канале
-      setActiveCallsInChannels(prev => ({ ...prev, [channel]: true }));
-    };
-
-    const onParticipants = async ({ callId, odst: userId, userName }) => {
-      // This maps to 'call:participant_joined'
-      console.log("Participant joined:", userName, userId);
-      setVideoConnecting(false);
-      
-      const waitForLocalStream = () => {
-        return new Promise((resolve) => {
-          const checkStream = () => {
-             if (videoStreams.local) resolve(videoStreams.local);
-             else setTimeout(checkStream, 100);
-          };
-          checkStream();
-        });
-      };
-      
-      await waitForLocalStream();
-      if (videoStreams.local && userId !== userProfile?._id) {
-           await createPeer(userId, true);
-      }
-    };
-
-    const onJoined = async (evt) => {
-        // Mapped from video-call-joined. Backend emits call:participant_joined which we handle above.
-        // If this is for 'chat:join', it's different.
-        // If this logic is needed, we should rely on onParticipants (call:participant_joined).
-        // Leaving empty/merged.
-    };
-
-    const onLeft = ({ userId }) => {
-      console.log("User left call:", userId);
-      removePeer(userId);
-    };
-
-    const onSignal = async ({ fromUserId, signal }) => {
-      console.log("Received signal from:", fromUserId);
-      const peerId = fromUserId;
-      
-      let pc = videoPeersRef.current[peerId];
-      
-      if (!pc && (signal.type === "offer")) {
-        console.log("Creating peer for signal from:", peerId);
-        pc = await createPeer(peerId, false);
-      }
-      
-      if (!pc) return;
-      
-      try {
-        if (signal.type === "offer") {
-          await pc.setRemoteDescription(new RTCSessionDescription(signal));
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          
-          socketRef.current.emit("call:signal", { 
-            callId: videoCall.callId || activeCallInChannel?.callId, 
-            targetUserId: peerId, 
-            signal: answer 
-          });
-        } else if (signal.type === "answer") {
-          await pc.setRemoteDescription(new RTCSessionDescription(signal));
-        } else if (signal.candidate) {
-          try {
-            await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
-          } catch (e) { console.warn(e); }
-        }
-      } catch (error) {
-        console.error("Signal error", error);
-      }
-    };
-
-    const onEnded = ({ callId }) => {
-      console.log("Call ended:", callId);
-      endVideoCall();
-      setActiveCallInChannel(null);
-      setActiveCallsInChannels(prev => {
-         const newState = { ...prev };
-         // We don't have channelId here easily without looking up.
-         // Just clearing state if matches current.
-         return newState; 
-      });
-    };
-
-    socketRef.current.on("connect", onConnect);
-    socketRef.current.on("call:incoming", onIncoming);
-    socketRef.current.on("call:participant_joined", onParticipantJoined);
-    socketRef.current.on("call:participant_left", onParticipantLeft);
-    socketRef.current.on("call:signal", onSignal);
-    socketRef.current.on("call:ended", onEnded);
-
-    return () => {
-      socketRef.current?.off("connect", onConnect);
-      socketRef.current?.off("call:incoming", onIncoming);
-      socketRef.current?.off("call:participant_joined", onParticipantJoined);
-      socketRef.current?.off("call:participant_left", onParticipantLeft);
-      socketRef.current?.off("call:signal", onSignal);
-      socketRef.current?.off("call:ended", onEnded);
-    };
-  }, [selectedChannel, videoStreams.local, videoCall.active, userProfile]);
-
-  // --- Видеозвонок: отображение видео ---
-  useEffect(() => {
-    // Локальное видео
-    if (localVideoRef.current && videoStreams.local) {
-      localVideoRef.current.srcObject = videoStreams.local;
-      console.log("Set local video stream");
-    }
-    
-    // Удаленные видео
-    Object.entries(videoStreams.remotes || {}).forEach(([peerId, stream]) => {
-      if (remoteVideosRef.current[peerId] && stream) {
-        remoteVideosRef.current[peerId].srcObject = stream;
-        console.log("Set remote video stream for:", peerId);
-      }
-    });
-  }, [videoStreams, videoCall.active]);
-
-  // --- Модальное окно видеозвонка ---
-  const videoCallModal = videoCall.active && (
-    <div style={chatStyles.videoCallModal} onClick={(e) => e.stopPropagation()}>
-      <div
-        style={{
-          ...chatStyles.videoCallBox,
-          width: isMobile ? "100vw" : 520,
-          height: isMobile ? "100vh" : undefined,
-          minHeight: isMobile ? "100vh" : (isMobile ? 280 : 360),
-          padding: isMobile ? 0 : (isMobile ? "12px 8px 12px 8px" : "20px 20px 16px 20px"),
-          position: "relative",
-          borderRadius: isMobile ? 0 : chatStyles.videoCallBox.borderRadius,
-          overflow: "hidden",
-        }}
-        onClick={e => e.stopPropagation()}
-      >
-        {/* Заголовок поверх видео (на десктопе) */}
-        {!isMobile && (
-          <div
-            style={{
-              fontWeight: 700,
-              fontSize: 18,
-              color: "#00c3ff",
-              marginBottom: 16,
-              textAlign: "center",
-            }}
-          >
-            📹 Видеозвонок: {channels.find((ch) => ch._id === selectedChannel)?.name || ""}
-          </div>
-        )}
-
-        <div
-          style={{
-            position: "relative",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "stretch",
-            justifyContent: "center",
-            height: isMobile ? "100%" : (isMobile ? 180 : 240),
-            background: "#000",
-            borderRadius: isMobile ? 0 : 12,
-            overflow: "hidden",
-            marginBottom: isMobile ? 0 : 16,
-          }}
-        >
-          {/* Удаленные видео */}
-          {Object.entries(videoStreams.remotes || {}).length > 0 ? (
-            (() => {
-              const remotes = Object.entries(videoStreams.remotes || {});
-              const first = remotes[0];
-              const firstId = first ? first[0] : null;
-              return (
-                <div style={{ position: "relative", width: "100%", height: "100%" }}>
-                  {firstId ? (
-                    <video
-                      key={firstId}
-                      ref={el => {
-                        if (el) remoteVideosRef.current[firstId] = el;
-                      }}
-                      autoPlay
-                      playsInline
-                      style={{
-                        width: "100%",
-                        height: "100%",
-                        objectFit: "cover",
-                        background: "#000",
-                      }}
-                    />
-                  ) : null}
-                </div>
-              );
-            })()
-          ) : (
-            <div style={{
-              color: "#b2bec3",
-              fontSize: 16,
-              textAlign: "center",
-              padding: 20,
-            }}>
-              {videoConnecting ? "Подключение..." : "Ожидание других участников..."}
-            </div>
-          )}
-          
-          {/* Мое видео - маленькое в углу */}
-          {videoStreams.local && (
-            <div style={{
-              position: "absolute",
-              top: isMobile ? "calc(env(safe-area-inset-top) + 12px)" : 12,
-              right: 12,
-              width: isMobile ? 120 : 160,
-              height: isMobile ? 80 : 120,
-              borderRadius: 8,
-              border: "2px solid #00c3ff",
-              background: "#000",
-              zIndex: 10,
-              overflow: "hidden",
-            }}>
-              {cameraEnabled ? (
-                <video
-                  ref={localVideoRef}
-                  autoPlay
-                  muted
-                  playsInline
-                  style={{
-                    width: "100%",
-                    height: "100%",
-                    objectFit: "cover",
-                  }}
-                />
-              ) : (
-                <div style={{
-                  width: "100%",
-                  height: "100%",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  background: "#333",
-                  color: "#fff",
-                  fontSize: isMobile ? 20 : 24,
-                }}>
-                  📷
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-        
-        <div style={{
-          ...chatStyles.videoCallControls,
-          gap: 12,
-          flexWrap: "wrap",
-          justifyContent: "center",
-        }}>
-          {/* Кнопка микрофона */}
-          <button
-            style={{
-              ...chatStyles.videoCallControlBtn,
-              background: micEnabled ? "#35363a" : "#ff7675",
-              color: "#fff",
-            }}
-            onClick={toggleMicrophone}
-            title={micEnabled ? "Выключить микрофон" : "Включить микрофон"}
-          >
-            {micEnabled ? "🎤" : "🔇"}
-          </button>
-          
-          {/* Кнопка камеры */}
-          <button
-            style={{
-              ...chatStyles.videoCallControlBtn,
-              background: cameraEnabled ? "#35363a" : "#ff7675",
-              color: "#fff",
-            }}
-            onClick={toggleCamera}
-            title={cameraEnabled ? "Выключить камеру" : "Включить камеру"}
-          >
-            {cameraEnabled ? "📹" : "📷"}
-          </button>
-          
-          {/* Кнопка завершения */}
-          <button
-            style={chatStyles.videoCallEndBtn}
-            onClick={leaveVideoCall}
-          >
-            Завершить
-          </button>
-        </div>
-        
-        {videoError && (
-          <div
-            style={{
-              color: "#ff7675",
-              marginTop: 12,
-              fontWeight: 500,
-              textAlign: "center",
-            }}
-          >
-            {videoError}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-
-  //  Уведомление о входящем звонке
-  const _videoCallBannerElement = activeCallInChannel && selectedChannel === activeCallInChannel.channel && !videoCall.active && (
-    <div style={chatStyles.videoCallBanner} role="status" aria-live="polite">
-      <div style={chatStyles.videoCallBannerText}>
-        <span style={chatStyles.videoCallBannerIcon}>📹</span>
-        {isMobile ? (
-          <span><strong>{activeCallInChannel.from}</strong> начал видеозвонок</span>
-        ) : (
-          <span><strong>{activeCallInChannel.from}</strong> начал видеозвонок в этом канале</span>
-        )}
-      </div>
-      <div>
-        <button
-          style={chatStyles.videoCallBannerBtn}
-          onClick={acceptVideoCall}
-          disabled={videoConnecting}
-        >
-          {videoConnecting ? "Подключение..." : "Присоединиться"}
-        </button>
-        <button
-          style={chatStyles.videoCallBannerDeclineBtn}
-          onClick={declineVideoCall}
-        >
-          Скрыть
-        </button>
-      </div>
-    </div>
-  );
-
-  const videoCallBanner = _videoCallBannerElement ? createPortal(_videoCallBannerElement, document.body) : null;
-
-  if (!token) {
-    return (
-      <div style={chatStyles.page}>
-        <div style={chatStyles.authContainer}>
-          <div style={chatStyles.authTitle}>
-            {authMode === "register" ? "Регистрация" : "Вход"}
-          </div>
-          {error && <div style={chatStyles.error}>{error}</div>}
-          <form
-            onSubmit={authMode === "register" ? handleRegister : handleLogin}
-            style={{ width: "100%" }}
-          >
-            <input
-              style={chatStyles.authInput}
-              placeholder="Телефон (напр. +79001234567)"
-              value={phone}
-              onChange={e => setPhone(e.target.value)}
-              required
-              autoComplete="tel"
-            />
-            {authMode === "register" && (
-                <input
-                style={chatStyles.authInput}
-                placeholder="Ваше Имя"
-                value={name}
-                onChange={e => setName(e.target.value)}
-                required
-                autoComplete="name"
-                />
-            )}
-            <input
-              style={chatStyles.authInput}
-              placeholder="Пароль"
-              type="password"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              required
-              autoComplete="current-password"
-            />
-            <button
-              style={chatStyles.authBtn}
-              type="submit"
-              disabled={registering}
-            >
-              {authMode === "register" ? "Зарегистрироваться" : "Войти"}
-            </button>
-          </form>
-          <button
-            style={chatStyles.switchBtn}
-            type="button"
-            onClick={() => {
-              setAuthMode(authMode === "register" ? "login" : "register");
-              setError("");
-              setUsername("");
-              setPassword("");
-            }}
-          >
-            {authMode === "register" ? "Войти" : "Регистрация"}
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // --- Мобильный header ---
-  const mobileHeader = (
-    <div style={chatStyles.mobileHeader} className="govchat-mobile-header">
-      <button
-        style={chatStyles.mobileMenuBtn}
-        onClick={() => setMobileMenuOpen(true)}
-        aria-label="Меню"
-      >
-        <span style={{ fontSize: 28 }}>☰</span>
-      </button>
-      <div style={{
-        fontWeight: 700,
-        fontSize: 20,
-        color: "#00c3ff",
-        letterSpacing: 1,
-        textShadow: "0 2px 8px #0002",
-        margin: "0 auto",
-      }}>
-        ГоВЧат 2.1 Beta
-      </div>
-    </div>
-  );
-
-  // --- Мобильное меню ---
-  const mobileMenu = (
-    <div style={chatStyles.mobileMenuOverlay} onClick={() => setMobileMenuOpen(false)}>
-      <div
-        style={chatStyles.mobileMenu}
-        onClick={e => e.stopPropagation()}
-      >
-        <button
-          style={chatStyles.mobileMenuCloseBtn}
-          onClick={() => setMobileMenuOpen(false)}
-          aria-label="Закрыть"
-        >✕</button>
-        <div style={chatStyles.mobileMenuTitle}>Каналы</div>
-        <div style={chatStyles.mobileMenuChannels}>
-          {channels.length === 0 ? (
-            <div style={{ color: "#b2bec3", marginBottom: 8 }}>
-              Нет доступных каналов
-            </div>
-          ) : (
-            channels.map((ch) => (
-              <div
-                key={ch._id}
-                style={{
-                  ...chatStyles.channelItem(selectedChannel === ch._id),
-                  position: "relative", // для позиционирования индикатора
-                }}
-                onClick={() => {
-                  setSelectedChannel(ch._id);
-                  setMobileMenuOpen(false);
-                }}
-              >
-                {ch.name}
-                {/* Красная точка для активного звонка */}
-                {activeCallsInChannels[ch._id] && (
-                  <div
-                    style={{
-                      position: "absolute",
-                      top: 8,
-                      right: 8,
-                      width: 8,
-                      height: 8,
-                      borderRadius: "50%",
-                      background: "#ff4757",
-                      border: "2px solid #fff",
-                      boxShadow: "0 0 6px #ff4757",
-                      animation: "pulse 2s infinite",
-                    }}
-                    title="Активный видеозвонок"
-                  />
-                )}
-              </div>
-            ))
-          )}
-          <button
-            style={chatStyles.createBtn}
-            onClick={() => setShowCreate((v) => !v)}
-          >
-            {showCreate ? "Скрыть создание" : "Создать канал"}
-          </button>
-          {showCreate && (
-            <div style={{ marginTop: 10 }}>
-              <input
-                style={chatStyles.input}
-                placeholder="Название канала"
-                value={newChannel}
-                onChange={e => setNewChannel(e.target.value)}
-              />
-              <button style={chatStyles.createBtn} onClick={handleCreateChannel}>
-                Создать
-              </button>
-            </div>
-          )}
-        </div>
-        {/* Кнопки профиля и кастомизации теперь после списка каналов */}
-        <div
-          className="govchat-mobile-profile-actions"
-          style={{
-            display: "flex",
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 18,
-            margin: "18px 0 16px 0",
-          }}
-        >
-          {/* Профиль */}
-          <button
-            style={{
-              ...chatStyles.profileBtn,
-              width: 48,
-              height: 48,
-              fontSize: 24,
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center"
-            }}
-            onClick={() => {
-              setShowProfile(true);
-              setMobileMenuOpen(false);
-              setEditMode(false);
-            }}
-            title="Профиль"
-          >
-            <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
-              <circle cx="13" cy="13" r="13" fill="#00c3ff" />
-              <circle cx="13" cy="10" r="4" fill="#fff" />
-              <ellipse cx="13" cy="19" rx="7" ry="4" fill="#fff" />
-            </svg>
-          </button>
-          {/* Кастомизация */}
-          <button
-            style={{
-              ...chatStyles.profileBtn,
-              width: 48,
-              height: 48,
-              fontSize: 24,
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center",
-              background: "none",
-              border: "none",
-              marginRight: 0,
-              marginLeft: 0,
-              boxShadow: "0 2px 8px #00c3ff33"
-            }}
-            onClick={() => {
-              setShowCustomizer(true);
-              setMobileMenuOpen(false);
-            }}
-            title="Кастомизация"
-          >
-            <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
-              <circle cx="13" cy="13" r="13" fill="#ffb347" />
-              <path d="M7 19c0-2 2-4 4-4s4 2 4 4" stroke="#fff" strokeWidth="2" />
-              <rect x="10" y="6" width="6" height="8" rx="2" fill="#fff" stroke="#ffb347" strokeWidth="1.5"/>
-              <rect x="8" y="14" width="10" height="4" rx="2" fill="#ffb347" stroke="#fff" strokeWidth="1.5"/>
-            </svg>
-          </button>
-        </div>
-        <div style={chatStyles.mobileMenuFooter}>
-          {/* Кнопка "Выйти" убрана из мобильного меню */}
-        </div>
-      </div>
-    </div>
-  );
-
-  // --- Десктопное меню ---
-  const desktopMenu = (
-    <div style={chatStyles.sidebar} className="govchat-sidebar">
-      <div style={chatStyles.sidebarTitle}>ГоВЧат 2.1 Beta</div>
-      <div style={chatStyles.channelList} className="govchat-channel-list">
-        <div style={{ fontWeight: 600, color: "#fff", marginBottom: 10 }}>Каналы</div>
-        {channels.length === 0 ? (
-          <div style={{ color: "#b2bec3", marginBottom: 8 }}>
-            Нет доступных каналов
-          </div>
-        ) : (
-          channels.map((ch) => (
-            <div
-              key={ch._id}
-              style={{
-                ...chatStyles.channelItem(selectedChannel === ch._id),
-                position: "relative", // для позиционирования индикатора
-              }}
-              onClick={() => setSelectedChannel(ch._id)}
-            >
-              {ch.name}
-              {/* Красная точка для активного звонка */}
-              {activeCallsInChannels[ch._id] && (
-                <div
-                  style={{
-                    position: "absolute",
-                    top: "50%",
-                    right: 12,
-                    transform: "translateY(-50%)",
-                    width: 8,
-                    height: 8,
-                    borderRadius: "50%",
-                    background: "#ff4757",
-                    border: "2px solid #fff",
-                    boxShadow: "0 0 6px #ff4757",
-                    animation: "pulse 2s infinite",
-                  }}
-                  title="Активный видеозвонок"
-                />
-              )}
-            </div>
-          ))
-        )}
-        <button
-          style={chatStyles.createBtn}
-          onClick={() => setShowCreate((v) => !v)}
-        >
-          {showCreate ? "Скрыть создание" : "Создать канал"}
-        </button>
-        {showCreate && (
-          <div style={{ marginTop: 10 }}>
-            <input
-              style={chatStyles.input}
-              placeholder="Название канала"
-              value={newChannel}
-              onChange={e => setNewChannel(e.target.value)}
-            />
-            <button style={chatStyles.createBtn} onClick={handleCreateChannel}>
-              Создать
-            </button>
-          </div>
-        )}
-      </div>
-      {/* --- Кнопки профиля и кастомизации для десктопа --- */}
-      <div style={{
-        ...chatStyles.profileBtnBox,
-        left: "auto",
-        right: 178,
-        bottom: 70,
-        display: "flex",
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 10,
-        zIndex: 10
-      }}>
-        {/* Кнопка профиля */}
-        <button
-          style={chatStyles.profileBtn}
-          onClick={() => {
-            setShowProfile(v => !v);
-            setEditMode(false);
-          }}
-          title="Профиль"
-        >
-          <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
-            <circle cx="13" cy="13" r="13" fill="#00c3ff" />
-            <circle cx="13" cy="10" r="4" fill="#fff" />
-            <ellipse cx="13" cy="19" rx="7" ry="4" fill="#fff" />
-          </svg>
-        </button>
-        {/* Кнопка кастомизации */}
-        <button
-          style={{
-            ...chatStyles.profileBtn,
-            background: "none",
-            border: "none",
-            marginRight: 0,
-            marginLeft: 0,
-            boxShadow: "0 2px 8px #00c3ff33"
-          }}
-          onClick={() => setShowCustomizer(v => !v)}
-          title="Кастомизация"
-        >
-          <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
-            <circle cx="13" cy="13" r="13" fill="#ffb347" />
-            <path d="M7 19c0-2 2-4 4-4s4 2 4 4" stroke="#fff" strokeWidth="2" />
-            <rect x="10" y="6" width="6" height="8" rx="2" fill="#fff" stroke="#ffb347" strokeWidth="1.5"/>
-            <rect x="8" y="14" width="10" height="4" rx="2" fill="#ffb347" stroke="#fff" strokeWidth="1.5"/>
-          </svg>
-        </button>
-      </div>
-    </div>
-  );
 
   return (
     <div style={themedPageStyle} className="govchat-page">
@@ -1876,7 +997,9 @@ function App() {
           minHeight: 32,
           marginTop: isMobile ? 18 : 0 // добавлено для мобильных
         }}>
-          <div style={chatStyles.chatTitle}>Чат</div>
+          <div style={chatStyles.chatTitle}>
+             {selectedChannel ? getChatDisplayName(channels.find(c => c._id === selectedChannel)) : "Чат"}
+          </div>
           {/* Кнопка видеозвонка справа от "Чат" */}
           <div style={{ marginLeft: "auto", marginRight: 8 }}>
             {!isMobile && videoCallButton}
@@ -1891,16 +1014,19 @@ function App() {
           style={themedChatBoxStyle}
         >
           {messages.map((msg) => {
-            const isMine = msg.sender === username;
+            // Исправленная проверка "мое сообщение"
+            const senderId = getSenderId(msg);
+            const isMine = userProfile && (senderId === userProfile._id || senderId === userProfile.id);
+            const senderName = getSenderName(msg); // Получаем имя для отображения
+
             // Формат времени
             const time = msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
             return (
-              <div key={msg._id} style={chatStyles.messageRow(isMine)}>
+              <div key={msg._id || Math.random()} style={chatStyles.messageRow(isMine)}>
                 <div style={chatStyles.message(isMine)}>
-                  {/* Только для чужих сообщений показываем имя */}
                   {!isMine && (
                     <span style={chatStyles.messageSender}>
-                      {msg.sender}:
+                      {senderName}:
                     </span>
                   )}
                   {msg.text}
