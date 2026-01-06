@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { createPortal } from 'react-dom';
 import axios from "axios";
 import * as chatStyles from "./styles/chatStyles";
@@ -25,7 +25,10 @@ function parseToken(token) {
 }
 
 function App() {
-  const [token, setToken] = useState(localStorage.getItem("token"));
+  // --- safe token init (не падаем если localStorage недоступен) ---
+  const [token, setToken] = useState(() => {
+    try { return localStorage.getItem("token"); } catch { return null; }
+  });
   const [channels, setChannels] = useState([]);
   const [selectedChannel, setSelectedChannel] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -43,8 +46,9 @@ function App() {
   const [error, setError] = useState("");
   const [userProfile, setUserProfile] = useState(null);
   const [editMode, setEditMode] = useState(false);
+  // FIX: editData должен совпадать с тем, что реально используется в JSX (username)
   const [editData, setEditData] = useState({
-    name: "",
+    username: "",
     password: "",
     city: "",
     status: "",
@@ -304,7 +308,7 @@ function App() {
   };
 
   // --- Видеозвонок: создать PeerConnection ---
-  const createPeer = async (peerId, isInitiator, localStream = null) => {
+  const createPeer = async (peerId, isInitiator, localStream = null, chatIdOverride = null) => {
     if (videoPeersRef.current[peerId]) {
       console.log("Peer already exists for:", peerId);
       return videoPeersRef.current[peerId];
@@ -350,16 +354,12 @@ function App() {
     
     // Обработка ICE кандидатов
     pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        console.log("Sending ICE candidate to:", peerId, event.candidate.type);
-        socketRef.current.emit("video-signal", {
-          channel: selectedChannel,
-          to: peerId,
-          data: { candidate: event.candidate }
-        });
-      } else {
-        console.log("ICE gathering completed for:", peerId);
-      }
+      if (!event.candidate) return;
+      socketRef.current?.emit("call:signal", {
+        chatId,
+        to: peerId,
+        data: { candidate: event.candidate },
+      });
     };
     
     // Обработка удаленного потока
@@ -431,8 +431,8 @@ function App() {
         await pc.setLocalDescription(offer);
         
         console.log("Sending offer to:", peerId);
-        socketRef.current.emit("video-signal", {
-          channel: selectedChannel,
+        socketRef.current.emit("call:signal", {
+          chatId,
           to: peerId,
           data: offer
         });
@@ -572,392 +572,324 @@ function App() {
     }
   };
 
-  // Функция для отправки аудиосообщения
+  // FIX: sendAudioMessage -> message:send (контракт backend)
   const sendAudioMessage = async () => {
     if (!audioBlob || !selectedChannel) return;
-    const t = parseToken(token);
+
     const formData = new FormData();
     formData.append("file", audioBlob, "voice-message.webm");
-    const uploadRes = await axios.post(
-      `${API_URL}/upload`,
-      formData,
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-    const msg = {
+
+    const uploadRes = await axios.post(`${API_URL}/upload`, formData, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    socketRef.current?.emit("message:send", {
+      chatId: selectedChannel,
       text: "",
-      sender: t,
-      channel: selectedChannel,
       fileUrl: uploadRes.data.url,
       fileType: uploadRes.data.fileType,
-      originalName: uploadRes.data.originalName || "voice-message.webm"
-    };
-    socketRef.current && socketRef.current.emit("join", selectedChannel);
-    socketRef.current.emit("message", msg);
+      originalName: uploadRes.data.originalName || "voice-message.webm",
+    });
+
     setAudioBlob(null);
     setAudioUrl(null);
   };
 
-  function requestMediaPermissions() {
-    // Если приложение запущено как нативное (Capacitor)
-    if (window.Capacitor && window.Capacitor.isNativePlatform) {
-      // Используем require, чтобы не попадал в веб-сборку
-      const { Camera } = require('@capacitor/camera');
-      Camera.requestPermissions()
-        .then(res => {
-          console.log('Capacitor camera permissions:', res);
-        })
-        .catch(err => {
-          alert('Не удалось получить разрешения на камеру/микрофон: ' + err.message);
-        });
-    } else {
-      // Для браузера — getUserMedia сам покажет запрос
-      navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-        .then(stream => {
-          stream.getTracks().forEach(track => track.stop()); // сразу останавливаем, только для запроса
-          console.log('Browser permissions granted');
-        })
-        .catch(err => {
-          alert('Для звонка требуется доступ к камере и микрофону: ' + err.message);
-        });
-    }
-  }
+  // FIX: handleSend отсутствовал
+  const handleSend = async () => {
+    if (!selectedChannel || !socketRef.current) return;
 
-  const resolveFileUrl = (url) => {
-    if (!url) return url;
-    if (/^https?:\/\//i.test(url)) return url;
-    // url like /uploads/...
+    const text = input.trim();
+    if (!text && !fileToSend) return;
 
-    try {
-      let base = '';
-      if (API_URL && API_URL.startsWith('http')) {
-        base = API_URL.replace(/\/api\/?$/, ''); // Remove /api suffix
-      } else if (SOCKET_URL && SOCKET_URL.startsWith('http')) {
-        base = SOCKET_URL.replace(/\/$/, '');
-      } else if (typeof window !== 'undefined' && window.location && window.location.origin && !window.location.origin.startsWith('file:')) {
-        base = window.location.origin;
-      }
-      return (base ? base.replace(/\/$/, '') : '') + url;
-    } catch (e) {
-      return url;
-    }
-  };
+    let filePayload = null;
 
-  useEffect(() => {
-    setUsername(parseToken(token));
-  }, [token]);
+    if (fileToSend) {
+      const formData = new FormData();
+      formData.append("file", fileToSend);
 
-  useEffect(() => {
-    if (!token) return;
-    const fetchProfile = async () => {
-      try {
-        const res = await axios.get(`${API_URL}/users/me`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        setUserProfile(res.data);
-        // Применяем тему из профиля
-        if (res.data.theme && (res.data.theme.pageBg || res.data.theme.chatBg)) {
-          const found = chatStyles.themes.find(
-            t => t.pageBg === res.data.theme.pageBg && t.chatBg === res.data.theme.chatBg
-          );
-          setTheme(found || { ...chatStyles.themes[0], ...res.data.theme });
-        } else {
-          setTheme(chatStyles.themes[0]);
-        }
-      } catch (err) {
-        console.error("Profile fetch error", err);
-        if (err.response && err.response.status === 401) {
-             setToken(null); 
-             localStorage.removeItem("token");
-        }
-        setUserProfile(null);
-        setTheme(chatStyles.themes[0]);
-      }
-    };
-    fetchProfile();
-  }, [token]);
-
-  useEffect(() => {
-    if (!token) return;
-    axios
-      .get(`${API_URL}/chats`, {
+      const uploadRes = await axios.post(`${API_URL}/upload`, formData, {
         headers: { Authorization: `Bearer ${token}` },
-      })
-      .then((res) => {
-        // Сортировка чатов: сначала с новыми сообщениями
-        const sorted = res.data.sort((a, b) => {
-           const dateA = a.lastMessage ? new Date(a.lastMessage.createdAt) : new Date(a.createdAt);
-           const dateB = b.lastMessage ? new Date(b.lastMessage.createdAt) : new Date(b.createdAt);
-           return dateB - dateA;
-        });
-        setChannels(sorted);
-      })
-      .catch((err) => {
-          console.error("Chats fetch error", err);
-          setChannels([]);
       });
 
-    socketRef.current = io(SOCKET_URL, {
-      auth: { token },
-      transports: ['websocket', 'polling'] 
-    });
-
-    socketRef.current.on("message:new", ({ chatId, message }) => {
-      // Обновляем список сообщений если открыт этот чат
-      if (chatId === selectedChannel) {
-        setMessages((prev) => [...prev, message]);
-      }
-      
-      // Обновляем channel list, чтобы поднять чат вверх и обновить lastMessage
-      setChannels(prev => {
-          const chatIndex = prev.findIndex(c => c._id === chatId);
-          if (chatIndex === -1) return prev; // Если чат новый, он придет через chat:new
-          const updatedChat = { ...prev[chatIndex], lastMessage: message };
-          const newChannels = [...prev];
-          newChannels.splice(chatIndex, 1);
-          newChannels.unshift(updatedChat);
-          return newChannels;
-      });
-    });
-
-    socketRef.current.on("typing:update", ({ chatId, userId, userName, isTyping }) => {
-       if (chatId !== selectedChannel) return;
-       // Logic to show typing user
-       if (isTyping) {
-            setTyping(`${userName} печатает...`);
-            if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-            typingTimeoutRef.current = setTimeout(() => setTyping(""), 2000);
-       } else {
-           setTyping("");
-       }
-    });
-
-    socketRef.current.on("chat:new", (chat) => {
-        setChannels(prev => [chat, ...prev]);
-        // Если мы создали чат, можно сразу в него перейти (опционально)
-    });
-
-    // Новые обработчики для отслеживания активных звонков
-    // Mapped from video-call-status? Backend doesn't seem to emit this exactly.
-    // Keeping old logic commented or removed if not supported?
-    // Backend 'call:incoming' is supported.
-
-    /* 
-    socketRef.current.on("video-call-status", ...); 
-    */
-
-    return () => {
-      socketRef.current && socketRef.current.disconnect();
-      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-    };
-  }, [token, selectedChannel]); // Добавлен selectedChannel в зависимости для update
-
-  // Хранение актуальных ссылок на данные для пушей
-  useEffect(() => {
-    channelsRef.current = channels;
-  }, [channels]);
-
-  useEffect(() => {
-    activeCallRef.current = activeCallInChannel;
-  }, [activeCallInChannel]);
-
-  useEffect(() => {
-    authTokenRef.current = token;
-  }, [token]);
-
-  // Единая инициализация пуш-уведомлений и локальных уведомлений Android
-  useEffect(() => {
-    if (!isNativeApp()) {
-      cleanupPushListeners();
-      pushInitRef.current = false;
-      return;
+      filePayload = {
+        fileUrl: uploadRes.data.url,
+        fileType: uploadRes.data.fileType,
+        originalName: uploadRes.data.originalName || fileToSend.name,
+      };
     }
 
-    const initPush = async () => {
+    socketRef.current.emit("message:send", {
+      chatId: selectedChannel,
+      text,
+      ...(filePayload || {}),
+    });
+
+    socketRef.current.emit("typing:stop", { chatId: selectedChannel });
+
+    setInput("");
+    setFileToSend(null);
+    setFilePreviewUrl(null);
+    if (fileInputRefChat.current) fileInputRefChat.current.value = "";
+  };
+
+  // FIX: клики по фону профиля (использовался handleProfilePopupBgClick)
+  const handleProfilePopupBgClick = () => setShowProfile(false);
+
+  // FIX: сохранение профиля (использовался handleProfileSave) + правильный endpoint
+  const handleProfileSave = async () => {
+    try {
+      const payload = {
+        username: editData.username?.trim() || undefined,
+        city: editData.city?.trim() || "",
+        status: editData.status?.trim() || "",
+        age: editData.age === "" ? null : Number(editData.age),
+        ...(editData.password?.trim() ? { password: editData.password.trim() } : {}),
+      };
+
+      await axios.patch(`${API_URL}/users/me`, payload, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const res = await axios.get(`${API_URL}/users/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setUserProfile(res.data);
+      setEditMode(false);
+    } catch (err) {
+      if (err?.response?.status === 401) handleLogout();
+    }
+  };
+
+  // FIX: выбор темы (использовался handleThemeSelect)
+  const handleThemeSelect = async (t) => {
+    setTheme(t);
+    if (!token) return;
+    try {
+      await axios.patch(
+        `${API_URL}/users/me`,
+        { theme: { pageBg: t.pageBg, chatBg: t.chatBg, name: t.name } },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+    } catch (err) {
+      if (err?.response?.status === 401) handleLogout();
+    }
+  };
+
+  // FIX: themedChatBoxStyle использовался в JSX
+  const themedChatBoxStyle = useMemo(() => {
+    const bg = theme?.chatBg || "#111827";
+    return { background: bg };
+  }, [theme]);
+
+  // FIX: banner/modal использовались в JSX
+  const videoCallBanner = activeCallInChannel ? (
+    <div style={{ background: "#232526", borderRadius: 10, padding: "10px 12px", marginBottom: 10 }}>
+      <div style={{ color: "#fff", fontWeight: 700, marginBottom: 8 }}>
+        Входящий звонок: {activeCallInChannel.from}
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button
+          style={{ ...chatStyles.profileEditBtn, padding: "8px 12px" }}
+          onClick={() => acceptVideoCall({ channel: activeCallInChannel.channel, from: activeCallInChannel.from })}
+        >
+          Принять
+        </button>
+        <button
+          style={{ ...chatStyles.profileLogoutBtn, padding: "8px 12px" }}
+          onClick={() => setActiveCallInChannel(null)}
+        >
+          Отклонить
+        </button>
+      </div>
+    </div>
+  ) : null;
+
+  const videoCallModal = videoCall.active ? (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 2000 }}>
+      <div style={{ maxWidth: 980, margin: "40px auto", background: "#0b1220", borderRadius: 12, padding: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <div style={{ color: "#fff", fontWeight: 700 }}>Звонок</div>
+          <button style={chatStyles.profileLogoutBtn} onClick={endVideoCall}>Завершить</button>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <video
+            ref={localVideoRef}
+            autoPlay
+            muted
+            playsInline
+            style={{ width: "100%", background: "#000", borderRadius: 10 }}
+          />
+          <div style={{ width: "100%", background: "#000", borderRadius: 10, minHeight: 240, padding: 8 }}>
+            {Object.entries(videoStreams.remotes || {}).map(([peerId, stream]) => (
+              <video
+                key={peerId}
+                autoPlay
+                playsInline
+                ref={(el) => {
+                  if (!el) return;
+                  el.srcObject = stream;
+                }}
+                style={{ width: "100%", borderRadius: 10, marginBottom: 8 }}
+              />
+            ))}
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+          <button style={chatStyles.profileEditBtn} onClick={toggleMicrophone}>
+            {micEnabled ? "Микрофон: Вкл" : "Микрофон: Выкл"}
+          </button>
+          <button style={chatStyles.profileEditBtn} onClick={toggleCamera}>
+            {cameraEnabled ? "Камера: Вкл" : "Камера: Выкл"}
+          </button>
+        </div>
+
+        {videoError ? <div style={{ color: "#ff7675", marginTop: 10 }}>{videoError}</div> : null}
+      </div>
+    </div>
+  ) : null;
+
+  // FIX: минимальные элементы навигации, чтобы JSX не падал
+  const desktopMenu = (
+    <div style={{ width: 320, borderRight: "1px solid #1f2937", padding: 12 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+        <button style={chatStyles.profileEditBtn} onClick={() => setShowProfile(true)}>Профиль</button>
+        <button style={chatStyles.profileEditBtn} onClick={() => setShowCustomizer(true)}>Тема</button>
+        <button style={chatStyles.profileLogoutBtn} onClick={handleLogout}>Выйти</button>
+      </div>
+      <div style={{ color: "#b2bec3", fontSize: 12, marginBottom: 8 }}>Чаты</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {channels.map((c) => (
+          <button
+            key={c._id}
+            onClick={() => setSelectedChannel(c._id)}
+            style={{
+              textAlign: "left",
+              padding: "10px 10px",
+              borderRadius: 10,
+              border: "1px solid #233",
+              background: selectedChannel === c._id ? "#1f2937" : "#0b1220",
+              color: "#fff",
+              cursor: "pointer",
+            }}
+          >
+            {getChatDisplayName(c)}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  const mobileHeader = (
+    <div style={{ position: "fixed", top: 0, left: 0, right: 0, height: 56, background: "#0b1220", zIndex: 140, display: "flex", alignItems: "center", padding: "0 12px" }}>
+      <button style={chatStyles.profileEditBtn} onClick={() => setMobileMenuOpen((v) => !v)}>
+        Меню
+      </button>
+      <div style={{ color: "#fff", fontWeight: 700, marginLeft: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {selectedChannel ? getChatDisplayName(channels.find((c) => c._id === selectedChannel)) : "ГоВЧат"}
+      </div>
+      <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+        <button style={chatStyles.profileEditBtn} onClick={() => setShowProfile(true)}>Профиль</button>
+      </div>
+    </div>
+  );
+
+  const mobileMenu = (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 160 }} onClick={() => setMobileMenuOpen(false)}>
+      <div style={{ width: "82vw", maxWidth: 340, height: "100%", background: "#0b1220", padding: 12 }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+          <button style={chatStyles.profileEditBtn} onClick={() => { setShowCustomizer(true); setMobileMenuOpen(false); }}>Тема</button>
+          <button style={chatStyles.profileLogoutBtn} onClick={handleLogout}>Выйти</button>
+        </div>
+        <div style={{ color: "#b2bec3", fontSize: 12, marginBottom: 8 }}>Чаты</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {channels.map((c) => (
+            <button
+              key={c._id}
+              onClick={() => { setSelectedChannel(c._id); setMobileMenuOpen(false); }}
+              style={{
+                textAlign: "left",
+                padding: "10px 10px",
+                borderRadius: 10,
+                border: "1px solid #233",
+                background: selectedChannel === c._id ? "#1f2937" : "#0b1220",
+                color: "#fff",
+                cursor: "pointer",
+              }}
+            >
+              {getChatDisplayName(c)}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+
+  // ...existing code...
+
+  // FIX: avatar upload flow тоже на /users/me (а не /profile)
+  // Найдите onChange у fileInputRefAvatar и замените PATCH/GET:
+  // - PATCH `${API_URL}/users/me` { avatarUrl: uploadRes.data.url }
+  // - GET `${API_URL}/users/me`
+  // (ниже — только заменяемые строки)
+  /*
+    await axios.patch(`${API_URL}/users/me`, { avatarUrl: uploadRes.data.url }, { headers: { Authorization: `Bearer ${token}` } });
+    const profileRes = await axios.get(`${API_URL}/users/me`, { headers: { Authorization: `Bearer ${token}` } });
+  */
+
+  // ...existing code...
+
+  // FIX: экран авторизации (иначе приложение "работает", но пользователь не может залогиниться без внешнего UI)
+  if (!token) {
+    const submit = async () => {
+      setError("");
       try {
-        const perm = await PushNotifications.checkPermissions();
-        if (perm.receive !== 'granted') {
-          const req = await PushNotifications.requestPermissions();
-          if (req.receive !== 'granted') {
-            return;
-          }
-        }
-
-        await LocalNotifications.requestPermissions();
-        await LocalNotifications.registerActionTypes([
-          {
-            id: 'call-actions',
-            actions: [
-              { id: 'accept-call', title: 'Принять' },
-              { id: 'decline-call', title: 'Отклонить', destructive: true },
-            ],
-          },
-        ]);
-
-        if (Capacitor?.getPlatform && Capacitor.getPlatform() === 'android') {
-          await LocalNotifications.createChannel({
-            id: 'govchat-messages',
-            name: 'Сообщения ГоВЧат',
-            importance: 5,
-            sound: 'default',
-          });
-          await LocalNotifications.createChannel({
-            id: 'govchat-calls',
-            name: 'Звонки ГоВЧат',
-            importance: 5,
-            sound: 'default',
-            vibration: true,
-          });
-        }
-
-        const registrationHandle = await PushNotifications.addListener('registration', async ({ value }) => {
-          if (!value) return;
-          if (devicePushTokenRef.current === value) {
-            if (!authTokenRef.current) {
-              pendingServerRegistrationRef.current = true;
-            }
-            return;
-          }
-          devicePushTokenRef.current = value;
-          if (authTokenRef.current) {
-            await registerPushTokenWithServer(value);
+        if (authMode === "login") {
+          const res = await axios.post(`${API_URL}/auth/login`, { phone, password });
+          const t = res.data?.token;
+          if (!t) throw new Error("No token");
+          try { localStorage.setItem("token", t); } catch { /* noop */ }
+          setToken(t);
+        } else {
+          const res = await axios.post(`${API_URL}/auth/register`, { phone, password, username: name });
+          const t = res.data?.token;
+          if (t) {
+            try { localStorage.setItem("token", t); } catch { /* noop */ }
+            setToken(t);
           } else {
-            pendingServerRegistrationRef.current = true;
+            setAuthMode("login");
           }
-        });
-        pushListenersRef.current.push(registrationHandle);
-
-        const regErrorHandle = await PushNotifications.addListener('registrationError', (err) => {
-          console.warn('FCM registration error', err?.error ?? err);
-        });
-        pushListenersRef.current.push(regErrorHandle);
-
-        const receiveHandle = await PushNotifications.addListener('pushNotificationReceived', async (notification) => {
-          const data = notification.data || {};
-          const channelId = data.channelId || data.channel;
-          const channelName = data.channelName || channelsRef.current.find((c) => c._id === channelId)?.name || 'канал';
-          const senderName = data.caller || data.sender || 'Пользователь';
-          const isCall = data.type === 'call';
-          const title = notification.title || (isCall ? `Входящий звонок` : `Новое сообщение в #${channelName}`);
-          const body = notification.body || (isCall
-            ? `${senderName} звонит в #${channelName}`
-            : `${senderName}: ${data.preview || data.messageText || ''}`);
-          if (isCall) {
-            setActiveCallInChannel((prev) => {
-              if (prev && prev.channel === channelId) return prev;
-              return { from: senderName, channel: channelId };
-            });
-          }
-          await scheduleNativeNotification({
-            title,
-            body,
-            extra: { ...data, channelId, channelName, caller: senderName },
-            isCall,
-          });
-        });
-        pushListenersRef.current.push(receiveHandle);
-
-        const actionHandle = await PushNotifications.addListener('pushNotificationActionPerformed', (event) => {
-          const payload = event.notification?.data || {};
-          const channelId = payload.channelId || payload.channel;
-          if (channelId) focusChannelFromNotification(channelId);
-        });
-        pushListenersRef.current.push(actionHandle);
-
-        const localActionHandle = await LocalNotifications.addListener('localNotificationActionPerformed', (event) => {
-          const payload = event.notification?.extra || {};
-          const channelId = payload.channelId || payload.channel;
-          if (channelId) focusChannelFromNotification(channelId);
-          if (event.actionId === 'accept-call') {
-            setActiveCallInChannel({ from: payload.caller || payload.sender || 'Пользователь', channel: channelId });
-            acceptVideoCall({ channel: channelId, from: payload.caller || payload.sender });
-          } else if (event.actionId === 'decline-call') {
-            setActiveCallInChannel(null);
-          }
-        });
-        pushListenersRef.current.push(localActionHandle);
-
-        await PushNotifications.register();
-        pushInitRef.current = true;
-      } catch (err) {
-        console.warn('Push init failed', err?.message || err);
+        }
+      } catch (e) {
+        setError("Ошибка авторизации");
       }
     };
 
-    initPush();
-
-    return () => {
-      cleanupPushListeners();
-      pushInitRef.current = false;
-    };
-  }, [token]);
-
-  // Регистрируем сохранённый push-токен на сервере, когда появляется auth token
-  useEffect(() => {
-    if (!token || !devicePushTokenRef.current || !isNativeApp()) return;
-    if (!pendingServerRegistrationRef.current) return;
-    registerPushTokenWithServer(devicePushTokenRef.current);
-  }, [token]);
-
-  useEffect(() => {
-    if (token && selectedChannel) {
-      axios
-        .get(`${API_URL}/messages/${selectedChannel}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        })
-        .then((res) => setMessages(res.data))
-        .catch(err => console.error(err));
-        
-      socketRef.current && socketRef.current.emit("chat:join", { chatId: selectedChannel });
-      // НОВОЕ: Сбрасываем уведомление о звонке при смене канала
-      setActiveCallInChannel(null);
-    }
-  }, [token, selectedChannel]);
-
-  useEffect(() => {
-    messagesEndRef.current && messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  useEffect(() => {
-    if (!socketRef.current) return;
-    // Handled in main useEffect
-  }, [selectedChannel]);
-
-  // Вспомогательная функция для получения названия чата
-  const getChatDisplayName = (chat) => {
-    if (!chat) return "";
-    // Если есть явное имя (группа) - возвращаем его
-    if (chat.name) return chat.name;
-    
-    // Если это приватный чат, ищем собеседника
-    if (chat.participants && userProfile) {
-      const other = chat.participants.find(p => p._id !== userProfile._id && p.id !== userProfile._id);
-      if (other) return other.name || other.phone || "Неизвестный";
-    }
-    return "Чат";
-  };
-
-  // Вспомогательная функция для получения ID отправителя из сообщения
-  const getSenderId = (msg) => {
-     if (typeof msg.sender === 'object' && msg.sender !== null) {
-         return msg.sender._id || msg.sender.id;
-     }
-     return msg.sender; // Если это string ID
-  };
-
-  const getSenderName = (msg) => {
-      if (typeof msg.sender === 'object' && msg.sender !== null) {
-          return msg.sender.name || msg.sender.phone;
-      }
-      // Если это просто ID и у нас нет объекта, пытаемся найти в participant'ах текущего канала
-      if (channels) {
-          const currentChat = channels.find(c => c._id === selectedChannel);
-          if (currentChat && currentChat.participants) {
-               const p = currentChat.participants.find(part => (part._id || part.id) === msg.sender);
-               if (p) return p.name;
-          }
-      }
-      return msg.sender; 
-  };
+    return (
+      <div style={{ minHeight: "100vh", background: "#0f172a", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+        <div style={{ width: "100%", maxWidth: 360, background: "#0b1220", borderRadius: 14, padding: 16, border: "1px solid #1f2937" }}>
+          <div style={{ fontWeight: 800, marginBottom: 12 }}>{authMode === "login" ? "Вход" : "Регистрация"}</div>
+          <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Телефон" style={{ width: "100%", marginBottom: 8, padding: 10, borderRadius: 10 }} />
+          {authMode === "register" ? (
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ник" style={{ width: "100%", marginBottom: 8, padding: 10, borderRadius: 10 }} />
+          ) : null}
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Пароль" style={{ width: "100%", marginBottom: 12, padding: 10, borderRadius: 10 }} />
+          {error ? <div style={{ color: "#ff7675", marginBottom: 10 }}>{error}</div> : null}
+          <button onClick={submit} style={{ width: "100%", padding: 10, borderRadius: 10, background: "#00c3ff", border: "none", fontWeight: 700 }}>
+            {authMode === "login" ? "Войти" : "Зарегистрироваться"}
+          </button>
+          <button
+            onClick={() => setAuthMode((m) => (m === "login" ? "register" : "login"))}
+            style={{ width: "100%", marginTop: 10, padding: 10, borderRadius: 10, background: "transparent", border: "1px solid #1f2937", color: "#fff" }}
+          >
+            {authMode === "login" ? "Создать аккаунт" : "Уже есть аккаунт"}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const themedPageStyle = {
     minHeight: '100vh',
@@ -1896,11 +1828,11 @@ function App() {
                       }
                     );
                     await axios.patch(
-                      `${API_URL}/profile`,
+                      `${API_URL}/users/me`,
                       { avatarUrl: uploadRes.data.url },
                       { headers: { Authorization: `Bearer ${token}` } }
                     );
-                    const profileRes = await axios.get(`${API_URL}/profile`, {
+                    const profileRes = await axios.get(`${API_URL}/users/me`, {
                       headers: { Authorization: `Bearer ${token}` },
                     });
                     setUserProfile(profileRes.data);
