@@ -9,6 +9,16 @@ module.exports = {
   // Строка подключения к MongoDB (можно указать локальный или Atlas)
   MONGODB_URI: 'mongodb+srv://sanya210105:KBu09c0aYFWCdBaU@cluster0.fav8tsg.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0',
 
+  // ОБЯЗАТЕЛЬНО: секрет для JWT токенов
+  JWT_SECRET: 'your-super-secret-jwt-key-change-in-production',
+
+  // Разрешённые origins для CORS
+  CORS_ORIGINS: [
+    'http://localhost:3000',
+    'https://frutin.me',
+    'https://govchat.ru'
+  ],
+
   // Настройки Firebase Cloud Messaging (любой один из способов ниже)
   FCM: {
     // 1) Вставьте объект сервис-аккаунта прямо здесь:
