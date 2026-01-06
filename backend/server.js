@@ -22,7 +22,7 @@ const server = http.createServer(app);
 
 // CORS
 app.use(cors({
-  origin: config.CORS_ORIGINS || ['http://localhost:3000'],
+  origin: config.CORS_ORIGINS || ['http://localhost:3000', 'https://govchat.ru', 'https://frutin.me'],
   credentials: true
 }));
 

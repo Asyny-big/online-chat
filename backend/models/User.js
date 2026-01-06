@@ -33,33 +33,36 @@ const userSchema = new mongoose.Schema({
   },
   avatarUrl: {
     type: String,
-    default: null
+    default: '/uploads/avatar-default.png'
+  },
+  // FIX: добавляем профильные поля
+  city: {
+    type: String,
+    default: ''
   },
   status: {
     type: String,
-    enum: ['online', 'offline'],
-    default: 'offline'
+    default: ''
+  },
+  age: {
+    type: Number,
+    default: null
+  },
+  theme: {
+    type: Object,
+    default: null
   },
   lastSeen: {
     type: Date,
     default: Date.now
   },
-  // Дополнительные поля профиля
-  profile: {
-    city: { type: String, default: '' },
-    about: { type: String, default: '', maxlength: 500 },
-    age: { type: Number, min: 0, max: 150 }
-  },
-  // FCM токены для push-уведомлений (несколько устройств)
-  pushTokens: [{
-    token: String,
-    platform: { type: String, enum: ['android', 'ios', 'web'] },
-    createdAt: { type: Date, default: Date.now }
-  }],
-  createdAt: {
-    type: Date,
-    default: Date.now
+  // FIX: добавляем поле для FCM токена
+  fcmToken: {
+    type: String,
+    default: null
   }
+}, {
+  timestamps: true
 });
 
 // Нормализация номера телефона перед сохранением
@@ -70,26 +73,32 @@ userSchema.pre('save', function(next) {
   next();
 });
 
-// Хеширование пароля
-userSchema.methods.setPassword = async function(password) {
-  this.passwordHash = await bcrypt.hash(password, 12);
-};
-
-userSchema.methods.checkPassword = async function(password) {
-  return bcrypt.compare(password, this.passwordHash);
-};
-
-// Публичный профиль (без пароля и приватных данных)
+// Метод для публичного JSON
 userSchema.methods.toPublicJSON = function() {
   return {
     _id: this._id,
+    id: this._id,
     phone: this.phone,
     name: this.name,
+    username: this.name, // Для обратной совместимости
     avatarUrl: this.avatarUrl,
+    city: this.city,
     status: this.status,
+    age: this.age,
+    theme: this.theme,
     lastSeen: this.lastSeen,
-    profile: this.profile
+    createdAt: this.createdAt
   };
+};
+
+// Метод для установки пароля
+userSchema.methods.setPassword = async function(password) {
+  this.passwordHash = await bcrypt.hash(password, 10);
+};
+
+// Метод для проверки пароля
+userSchema.methods.checkPassword = async function(password) {
+  return await bcrypt.compare(password, this.passwordHash);
 };
 
 // Индексы

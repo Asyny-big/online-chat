@@ -45,18 +45,36 @@ router.get('/me', async (req, res) => {
 // Обновление профиля
 router.patch('/me', async (req, res) => {
   try {
-    const { name, avatarUrl, profile } = req.body;
+    const { username, name, avatarUrl, city, status, age, theme, password } = req.body;
     const updates = {};
 
+    // Поддерживаем и name, и username для обратной совместимости
+    if (username) updates.name = username.trim();
     if (name) updates.name = name.trim();
     if (avatarUrl !== undefined) updates.avatarUrl = avatarUrl;
-    if (profile) updates.profile = profile;
+    
+    // Профильные поля
+    if (city !== undefined) updates.city = city?.trim() || '';
+    if (status !== undefined) updates.status = status?.trim() || '';
+    if (age !== undefined) updates.age = age === '' ? null : Number(age);
+    if (theme !== undefined) updates.theme = theme;
 
-    const user = await User.findByIdAndUpdate(
-      req.userId,
-      { $set: updates },
-      { new: true }
-    );
+    const user = await User.findById(req.userId);
+    if (!user) {
+      return res.status(404).json({ error: 'Пользователь не найден' });
+    }
+
+    // Если передан пароль — обновляем отдельно
+    if (password && password.trim()) {
+      if (password.length < 6) {
+        return res.status(400).json({ error: 'Пароль должен быть не менее 6 символов' });
+      }
+      await user.setPassword(password.trim());
+    }
+
+    // Применяем остальные обновления
+    Object.assign(user, updates);
+    await user.save();
 
     res.json(user.toPublicJSON());
   } catch (error) {

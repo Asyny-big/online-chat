@@ -14,15 +14,20 @@ router.post('/register', async (req, res) => {
   try {
     const { phone, name, password } = req.body;
 
-    if (!phone || !name || !password) {
-      return res.status(400).json({ error: 'Все поля обязательны' });
+    // FIX: более детальная валидация
+    if (!phone || typeof phone !== 'string' || !phone.trim()) {
+      return res.status(400).json({ error: 'Укажите номер телефона' });
     }
 
-    if (password.length < 6) {
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'Укажите имя' });
+    }
+
+    if (!password || typeof password !== 'string' || password.length < 6) {
       return res.status(400).json({ error: 'Пароль должен быть не менее 6 символов' });
     }
 
-    const phoneNormalized = normalizePhone(phone);
+    const phoneNormalized = normalizePhone(phone.trim());
 
     // Проверка существующего пользователя
     const existing = await User.findOne({ phoneNormalized });
@@ -32,7 +37,7 @@ router.post('/register', async (req, res) => {
 
     // Создание пользователя
     const user = new User({
-      phone,
+      phone: phone.trim(),
       phoneNormalized,
       name: name.trim()
     });
@@ -52,7 +57,7 @@ router.post('/register', async (req, res) => {
     });
   } catch (error) {
     console.error('Register error:', error);
-    res.status(500).json({ error: 'Ошибка регистрации' });
+    res.status(500).json({ error: 'Ошибка регистрации: ' + (error.message || 'неизвестная ошибка') });
   }
 });
 
@@ -61,11 +66,16 @@ router.post('/login', async (req, res) => {
   try {
     const { phone, password } = req.body;
 
-    if (!phone || !password) {
-      return res.status(400).json({ error: 'Укажите номер телефона и пароль' });
+    // FIX: валидация
+    if (!phone || typeof phone !== 'string' || !phone.trim()) {
+      return res.status(400).json({ error: 'Укажите номер телефона' });
     }
 
-    const phoneNormalized = normalizePhone(phone);
+    if (!password || typeof password !== 'string') {
+      return res.status(400).json({ error: 'Укажите пароль' });
+    }
+
+    const phoneNormalized = normalizePhone(phone.trim());
     const user = await User.findOne({ phoneNormalized });
 
     if (!user) {
@@ -89,7 +99,7 @@ router.post('/login', async (req, res) => {
     });
   } catch (error) {
     console.error('Login error:', error);
-    res.status(500).json({ error: 'Ошибка входа' });
+    res.status(500).json({ error: 'Ошибка входа: ' + (error.message || 'неизвестная ошибка') });
   }
 });
 

@@ -710,6 +710,7 @@ function App() {
   // 12. ЭКРАН АВТОРИЗАЦИИ
   // ═══════════════════════════════════════════════════════════════
 
+  // FIX: экран авторизации (иначе приложение "работает", но пользователь не может залогиниться без внешнего UI)
   if (!token) {
     const submit = async () => {
       setError("");
@@ -721,7 +722,8 @@ function App() {
           try { localStorage.setItem("token", t); } catch { /* noop */ }
           setToken(t);
         } else {
-          const res = await axios.post(`${API_URL}/auth/register`, { phone, password, username: name });
+          // FIX: отправляем name вместо username
+          const res = await axios.post(`${API_URL}/auth/register`, { phone, password, name });
           const t = res.data?.token;
           if (t) {
             try { localStorage.setItem("token", t); } catch { /* noop */ }
@@ -731,7 +733,10 @@ function App() {
           }
         }
       } catch (e) {
-        setError("Ошибка авторизации");
+        // FIX: показываем сообщение об ошибке с сервера
+        const errorMsg = e.response?.data?.error || "Ошибка авторизации";
+        setError(errorMsg);
+        console.error("Auth error:", errorMsg, e);
       }
     };
 
@@ -741,16 +746,16 @@ function App() {
           <div style={{ fontWeight: 800, marginBottom: 12 }}>{authMode === "login" ? "Вход" : "Регистрация"}</div>
           <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Телефон" style={{ width: "100%", marginBottom: 8, padding: 10, borderRadius: 10 }} />
           {authMode === "register" ? (
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ник" style={{ width: "100%", marginBottom: 8, padding: 10, borderRadius: 10 }} />
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Имя" style={{ width: "100%", marginBottom: 8, padding: 10, borderRadius: 10 }} />
           ) : null}
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Пароль" style={{ width: "100%", marginBottom: 12, padding: 10, borderRadius: 10 }} />
-          {error ? <div style={{ color: "#ff7675", marginBottom: 10 }}>{error}</div> : null}
-          <button onClick={submit} style={{ width: "100%", padding: 10, borderRadius: 10, background: "#00c3ff", border: "none", fontWeight: 700 }}>
+          {error ? <div style={{ color: "#ff7675", marginBottom: 10, fontSize: 14 }}>{error}</div> : null}
+          <button onClick={submit} style={{ width: "100%", padding: 10, borderRadius: 10, background: "#00c3ff", border: "none", fontWeight: 700, cursor: "pointer" }}>
             {authMode === "login" ? "Войти" : "Зарегистрироваться"}
           </button>
           <button
             onClick={() => setAuthMode((m) => (m === "login" ? "register" : "login"))}
-            style={{ width: "100%", marginTop: 10, padding: 10, borderRadius: 10, background: "transparent", border: "1px solid #1f2937", color: "#fff" }}
+            style={{ width: "100%", marginTop: 10, padding: 10, borderRadius: 10, background: "transparent", border: "1px solid #1f2937", color: "#fff", cursor: "pointer" }}
           >
             {authMode === "login" ? "Создать аккаунт" : "Уже есть аккаунт"}
           </button>
