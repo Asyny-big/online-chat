@@ -35,13 +35,14 @@ function App() {
   const [showCreate, setShowCreate] = useState(false);
   const [newChannel, setNewChannel] = useState("");
   const [authMode, setAuthMode] = useState("login");
-  const [username, setUsername] = useState("");
+  const [phone, setPhone] = useState("");
+  const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [userProfile, setUserProfile] = useState(null);
   const [editMode, setEditMode] = useState(false);
   const [editData, setEditData] = useState({
-    username: "",
+    name: "",
     password: "",
     city: "",
     status: "",
@@ -92,6 +93,21 @@ function App() {
   const devicePushTokenRef = useRef(null);
   const pendingServerRegistrationRef = useRef(false);
 
+  useEffect(() => {
+    const interceptor = axios.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        if (error.response && error.response.status === 401) {
+          setToken(null);
+          localStorage.removeItem("token");
+          setAuthMode("login");
+        }
+        return Promise.reject(error);
+      }
+    );
+    return () => axios.interceptors.response.eject(interceptor);
+  }, []);
+
   // --- WebRTC helpers ---
   const localVideoRef = useRef(null);
   const remoteVideosRef = useRef({}); // {socketId: ref}
@@ -120,6 +136,9 @@ function App() {
   };
 
   const registerPushTokenWithServer = async (pushToken) => {
+    // Backend endpoint likely removed. Disabling push registration.
+    return;
+    /*
     if (!pushToken || !authTokenRef.current) return;
     try {
       await axios.post(`${API_URL}/push/register`, { token: pushToken }, {
@@ -130,6 +149,7 @@ function App() {
       console.warn('Не удалось зарегистрировать токен FCM', err?.message || err);
       pendingServerRegistrationRef.current = true;
     }
+    */
   };
 
   const focusChannelFromNotification = (channelId) => {
@@ -209,14 +229,19 @@ function App() {
       setCameraEnabled(true);
       
       // Сначала присоединяемся к звонку
-      socketRef.current.emit("video-call-join", { channel: selectedChannel });
+      // socketRef.current.emit("video-call-join", { channel: selectedChannel });
       
       // Затем инициируем звонок для других
-      setTimeout(() => {
-        console.log("Sending initiate signal to channel:", selectedChannel);
-        socketRef.current.emit("video-call-initiate", { channel: selectedChannel });
-        setVideoConnecting(false);
-      }, 500);
+      console.log("Sending initiate signal to channel:", selectedChannel);
+      socketRef.current.emit("call:start", { chatId: selectedChannel }, (res) => {
+          if (res && res.error) {
+              setVideoError(res.error);
+              endVideoCall();
+          } else if (res && res.callId) {
+             setVideoCall(prev => ({ ...prev, callId: res.callId }));
+          }
+      });
+      setVideoConnecting(false);
       
     } catch (error) {
       console.error("Error starting video call:", error);
@@ -259,11 +284,20 @@ function App() {
       setCameraEnabled(true);
       
       // Присоединяемся к звонку
-      socketRef.current.emit("video-call-join", { channel: targetChannel });
+      const callId = override?.callId || activeCallInChannel?.callId;
+      if (callId) {
+          socketRef.current.emit("call:accept", { callId }, (res) => {
+             if (res && res.call) {
+                  // handle success, set callId in state
+                  setVideoCall(prev => ({ ...prev, callId }));
+                  // Process participants if needed
+             }
+          });
+      } else {
+          console.error("No callId to accept");
+      }
       
-      setTimeout(() => {
-        setVideoConnecting(false);
-      }, 1000);
+      setVideoConnecting(false);
       
     } catch (error) {
       console.error("Error accepting video call:", error);
@@ -456,8 +490,8 @@ function App() {
     
     setVideoStreams({ local: null, remotes: {} });
     setVideoCall({ active: false, incoming: false, from: null });
-    setVideoConnecting(false);
-    setVideoError("");
+    setVideoConnecting(falsevideoCall.callId) {
+      socketRef.current.emit("call:leave", { callId: videoCall.callId
     // НОВОЕ: сбрасываем состояния микрофона и камеры
     setMicEnabled(true);
     setCameraEnabled(true);
@@ -598,20 +632,19 @@ function App() {
     if (!url) return url;
     if (/^https?:\/\//i.test(url)) return url;
     // url like /uploads/...
-    // Определяем базу: если API_URL содержит http(s), используем его (без /api),
-    // иначе пробуем SOCKET_URL, иначе window.location.origin.
+  const resolveFileUrl = (url) => {
+    if (!url) return url;
+    if (/^https?:\/\//i.test(url)) return url;
+    // url like /uploads/...
+    
     try {
       let base = '';
       if (API_URL && API_URL.startsWith('http')) {
-        base = API_URL.replace(/\/api\/?$/, '');
+        base = API_URL.replace(/\/api\/?$/, ''); // Remove /api suffix
       } else if (SOCKET_URL && SOCKET_URL.startsWith('http')) {
         base = SOCKET_URL.replace(/\/$/, '');
       } else if (typeof window !== 'undefined' && window.location && window.location.origin && !window.location.origin.startsWith('file:')) {
         base = window.location.origin;
-      } else if (typeof window !== 'undefined' && window.location) {
-        // Capacitor WebView может возвращать file:// — в этом случае подставим HTTP сервер из конфигурации
-        // Попытаемся достать host из API_URL если он задан как абсолютный путь внутри config
-        base = '';
       }
       return (base ? base.replace(/\/$/, '') : '') + url;
     } catch (e) {
@@ -623,7 +656,7 @@ function App() {
     if (!token) return;
     const fetchProfile = async () => {
       try {
-        const res = await axios.get(`${API_URL}/profile`, {
+        const res = await axios.get(`${API_URL}/users/me`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         setUserProfile(res.data);
@@ -636,7 +669,12 @@ function App() {
         } else {
           setTheme(chatStyles.themes[0]);
         }
-      } catch {
+      } catch (err) {
+        console.error("Profile fetch error", err);
+        if (err.response && err.response.status === 401) {
+             setToken(null); 
+             localStorage.removeItem("token");
+        }
         setUserProfile(null);
         setTheme(chatStyles.themes[0]);
       }
@@ -647,55 +685,53 @@ function App() {
   useEffect(() => {
     if (!token) return;
     axios
-      .get(`${API_URL}/channels`, {
+      .get(`${API_URL}/chats`, {
         headers: { Authorization: `Bearer ${token}` },
       })
       .then((res) => setChannels(res.data))
-      .catch(() => setChannels([]));
+      .catch((err) => {
+          console.error("Chats fetch error", err);
+          setChannels([]);
+      });
 
     socketRef.current = io(SOCKET_URL, {
       auth: { token },
+      transports: ['websocket', 'polling'] 
     });
 
-    socketRef.current.on("message", (msg) => {
+    socketRef.current.on("message:new", ({ chatId, message }) => {
       setMessages((prev) =>
-        msg.channel === selectedChannel ? [...prev, msg] : prev
+        chatId === selectedChannel ? [...prev, message] : prev
       );
     });
 
-    socketRef.current.on("typing", (e) => {
-      setTyping(`${e.user} печатает...`);
-      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-      typingTimeoutRef.current = setTimeout(() => setTyping(""), 2000);
+    socketRef.current.on("typing:update", ({ chatId, userId, userName, isTyping }) => {
+       if (chatId !== selectedChannel) return;
+       // Logic to show typing user
+       if (isTyping) {
+            setTyping(`${userName} печатает...`);
+            if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+            typingTimeoutRef.current = setTimeout(() => setTyping(""), 2000);
+       } else {
+           setTyping("");
+       }
+    });
+
+    socketRef.current.on("chat:new", (chat) => {
+        setChannels(prev => [chat, ...prev]);
     });
 
     // Новые обработчики для отслеживания активных звонков
-    socketRef.current.on("video-call-status", ({ channel, active }) => {
-      setActiveCallsInChannels(prev => {
-        if (active) {
-          return { ...prev, [channel]: true };
-        } else {
-          const { [channel]: removed, ...rest } = prev;
-          return rest;
-        }
-      });
-    });
+    // Mapped from video-call-status? Backend doesn't seem to emit this exactly.
+    // Keeping old logic commented or removed if not supported?
+    // Backend 'call:incoming' is supported.
 
-    // обновлять список каналов при появлении нового
-    const handleNewChannel = () => {
-      axios
-        .get(`${API_URL}/channels`, {
-          headers: { Authorization: `Bearer ${token}` },
-        })
-        .then((res) => setChannels(res.data))
-        .catch(() => setChannels([]));
-    };
-    socketRef.current.on("new-channel", handleNewChannel);
+    /* 
+    socketRef.current.on("video-call-status", ...); 
+    */
 
     return () => {
       socketRef.current && socketRef.current.disconnect();
-      socketRef.current && socketRef.current.off("new-channel", handleNewChannel);
-      socketRef.current && socketRef.current.off("video-call-status");
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     };
   }, [token]);
@@ -853,8 +889,10 @@ function App() {
         .get(`${API_URL}/messages/${selectedChannel}`, {
           headers: { Authorization: `Bearer ${token}` },
         })
-        .then((res) => setMessages(res.data));
-      socketRef.current && socketRef.current.emit("join", selectedChannel);
+        .then((res) => setMessages(res.data))
+        .catch(err => console.error(err));
+        
+      socketRef.current && socketRef.current.emit("chat:join", { chatId: selectedChannel });
       // НОВОЕ: Сбрасываем уведомление о звонке при смене канала
       setActiveCallInChannel(null);
     }
@@ -866,53 +904,71 @@ function App() {
 
   useEffect(() => {
     if (!socketRef.current) return;
-    const handler = (msg) => {
-      if (msg.channel === selectedChannel) setMessages((prev) => [...prev, msg]);
-    };
-    socketRef.current.on("message", handler);
-    return () => socketRef.current.off("message", handler);
+    // Handled in main useEffect
   }, [selectedChannel]);
 
   const handleCreateChannel = async () => {
     if (!newChannel.trim()) return;
     try {
-      const t = parseToken(token);
       const res = await axios.post(
-        `${API_URL}/channels`,
-        { name: newChannel, members: [t] },
+        `${API_URL}/chats`,
+        { name: newChannel, participantPhones: [] },
         { headers: { Authorization: `Bearer ${token}` } }
       );
       setShowCreate(false);
       setNewChannel("");
-      const chs = await axios.get(`${API_URL}/channels`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setChannels(chs.data);
+      // Add new channel locally
+      setChannels(prev => [res.data, ...prev]);
       setSelectedChannel(res.data._id);
-      socketRef.current && socketRef.current.emit("join", res.data._id);
-    } catch {
+      socketRef.current && socketRef.current.emit("chat:join", { chatId: res.data._id });
+    } catch (err) {
+      console.error(err);
       alert("Ошибка создания канала");
     }
   };
 
   const handleSend = async () => {
     if ((!input.trim() && !fileToSend) || !selectedChannel) return;
-    const t = parseToken(token);
-    let msg = { text: input, sender: t, channel: selectedChannel };
+    
+    let attachment = null;
+    let type = "text";
+
     if (fileToSend) {
       const formData = new FormData();
       formData.append("file", fileToSend);
-      const uploadRes = await axios.post(
-        `${API_URL}/upload`,
-        formData,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      msg.fileUrl = uploadRes.data.url;
-      msg.fileType = uploadRes.data.fileType;
-      msg.originalName = uploadRes.data.originalName;
+      try {
+        const uploadRes = await axios.post(
+          `${API_URL}/upload`,
+          formData,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        attachment = {
+             url: uploadRes.data.url,
+             originalName: uploadRes.data.originalName,
+             mimeType: uploadRes.data.mimetype || fileToSend.type,
+             size: uploadRes.data.size || fileToSend.size
+        };
+        type = fileToSend.type.startsWith('image/') ? 'image' : 
+               fileToSend.type.startsWith('video/') ? 'video' : 'file';
+        
+      } catch (err) {
+          console.error("Upload error", err);
+          alert("Ошибка загрузки файла");
+          return;
+      }
     }
-    socketRef.current && socketRef.current.emit("join", selectedChannel);
-    socketRef.current.emit("message", msg);
+    
+    socketRef.current.emit("message:send", {
+        chatId: selectedChannel,
+        text: input,
+        type,
+        attachment
+    }, (response) => {
+        if (response && response.error) {
+            console.error(response.error);
+        }
+    });
+
     setInput("");
     setFileToSend(null);
     setFilePreviewUrl(null);
@@ -925,13 +981,14 @@ function App() {
     setError("");
     setRegistering(true);
     try {
-      await axios.post(`${API_URL}/register`, {
-        username,
+      await axios.post(`${API_URL}/auth/register`, {
+        phone,
+        name,
         password,
       });
-      // После успешной регистрации сразу логинимся (без капчи)
-      const res = await axios.post(`${API_URL}/login`, {
-        username,
+      // После успешной регистрации сразу логинимся
+      const res = await axios.post(`${API_URL}/auth/login`, {
+        phone,
         password,
       });
       localStorage.setItem("token", res.data.token);
@@ -951,8 +1008,8 @@ function App() {
     setError("");
     setRegistering(true);
     try {
-      const res = await axios.post(`${API_URL}/login`, {
-        username,
+      const res = await axios.post(`${API_URL}/auth/login`, {
+        phone,
         password,
       });
       localStorage.setItem("token", res.data.token);
@@ -1092,153 +1149,115 @@ function App() {
       socketRef.current.emit("get-active-calls");
     };
 
-    const onIncoming = ({ from, channel, initiatorSocketId }) => {
+    const onIncoming = ({ callId, chatId, initiator }) => {
+      const from = initiator.name;
+      const channel = chatId;
       console.log("Incoming call from:", from, "in channel:", channel, "my channel:", selectedChannel);
       if (channel === selectedChannel && !videoCall.active) {
         console.log("Showing incoming call notification");
-        setActiveCallInChannel({ from, channel, initiatorSocketId });
+        setActiveCallInChannel({ from, channel, callId, initiator });
       }
       // Обновляем статус активного звонка в канале
       setActiveCallsInChannels(prev => ({ ...prev, [channel]: true }));
     };
 
-    const onParticipants = async ({ participants }) => {
-      console.log("Participants in call:", participants);
+    const onParticipants = async ({ callId, odst: userId, userName }) => {
+      // This maps to 'call:participant_joined'
+      console.log("Participant joined:", userName, userId);
       setVideoConnecting(false);
       
-      // Ждем пока локальный поток будет доступен
       const waitForLocalStream = () => {
         return new Promise((resolve) => {
           const checkStream = () => {
-            if (videoStreams.local) {
-              resolve(videoStreams.local);
-            } else {
-              setTimeout(checkStream, 100);
-            }
+             if (videoStreams.local) resolve(videoStreams.local);
+             else setTimeout(checkStream, 100);
           };
           checkStream();
         });
       };
       
-      const localStream = await waitForLocalStream();
-      
-      // Создать PeerConnection для каждого участника с небольшой задержкой
-      for (const peerId of participants) {
-        if (peerId !== socketRef.current.id && !videoPeersRef.current[peerId]) {
-          console.log("Creating peer for existing participant:", peerId);
-          // Добавляем задержку между созданием peer connections
-          await new Promise(resolve => setTimeout(resolve, 500));
-          await createPeer(peerId, true, localStream);
-        }
+      await waitForLocalStream();
+      if (videoStreams.local && userId !== userProfile?._id) {
+           await createPeer(userId, true);
       }
     };
 
-    const onJoined = async ({ user, socketId }) => {
-      console.log("User joined call:", user, socketId);
-      if (socketId !== socketRef.current.id && !videoPeersRef.current[socketId]) {
-        console.log("Creating peer for new participant:", socketId);
-        // Используем текущий локальный поток
-        const localStream = videoStreams.local;
-        if (localStream) {
-          // Добавляем небольшую задержку для стабильности
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          await createPeer(socketId, false, localStream);
-        } else {
-          console.warn("No local stream available for new participant");
-        }
-      }
+    const onJoined = async (evt) => {
+        // Mapped from video-call-joined. Backend emits call:participant_joined which we handle above.
+        // If this is for 'chat:join', it's different.
+        // If this logic is needed, we should rely on onParticipants (call:participant_joined).
+        // Leaving empty/merged.
     };
 
-    const onLeft = ({ user, socketId }) => {
-      console.log("User left call:", user, socketId);
-      removePeer(socketId);
+    const onLeft = ({ userId }) => {
+      console.log("User left call:", userId);
+      removePeer(userId);
     };
 
-    const onSignal = async ({ from, data }) => {
-      console.log("Received signal from:", from, "type:", data.type || 'candidate');
+    const onSignal = async ({ fromUserId, signal }) => {
+      console.log("Received signal from:", fromUserId);
+      const peerId = fromUserId;
       
-      // Используем ref для проверки существования peer
-      let pc = videoPeersRef.current[from];
+      let pc = videoPeersRef.current[peerId];
       
-      if (!pc && (data.type === "offer" || data.type === "answer")) {
-        console.log("Creating peer for signal from:", from);
-        pc = await createPeer(from, false);
+      if (!pc && (signal.type === "offer")) {
+        console.log("Creating peer for signal from:", peerId);
+        pc = await createPeer(peerId, false);
       }
       
-      if (!pc) {
-        console.error("No peer connection for:", from);
-        return;
-      }
+      if (!pc) return;
       
       try {
-        if (data.type === "offer") {
-          console.log("Processing offer from:", from);
-          await pc.setRemoteDescription(new RTCSessionDescription(data));
-          const answer = await pc.createAnswer({
-            offerToReceiveAudio: true,
-            offerToReceiveVideo: true,
-            voiceActivityDetection: false
-          });
+        if (signal.type === "offer") {
+          await pc.setRemoteDescription(new RTCSessionDescription(signal));
+          const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           
-          console.log("Sending answer to:", from);
-          socketRef.current.emit("video-signal", { 
-            channel: selectedChannel, 
-            to: from, 
-            data: answer 
+          socketRef.current.emit("call:signal", { 
+            callId: videoCall.callId || activeCallInChannel?.callId, 
+            targetUserId: peerId, 
+            signal: answer 
           });
-        } else if (data.type === "answer") {
-          console.log("Processing answer from:", from);
-          await pc.setRemoteDescription(new RTCSessionDescription(data));
-        } else if (data.candidate) {
-          console.log("Adding ICE candidate from:", from, "type:", data.candidate.type);
+        } else if (signal.type === "answer") {
+          await pc.setRemoteDescription(new RTCSessionDescription(signal));
+        } else if (signal.candidate) {
           try {
-            await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-          } catch (error) {
-            console.warn("Error adding ICE candidate:", error);
-          }
+            await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+          } catch (e) { console.warn(e); }
         }
       } catch (error) {
-        console.error("Error handling signal from", from, ":", error);
-        setVideoError("Ошибка обработки сигнала соединения");
+        console.error("Signal error", error);
       }
     };
 
-    const onEnded = ({ by, channel }) => {
-      console.log("Call ended by server, ended by:", by, "in channel:", channel);
+    const onEnded = ({ callId }) => {
+      console.log("Call ended:", callId);
       endVideoCall();
       setActiveCallInChannel(null);
-      // Убираем индикатор активного звонка в канале
       setActiveCallsInChannels(prev => {
-        const { [channel]: removed, ...rest } = prev;
-        return rest;
+         const newState = { ...prev };
+         // We don't have channelId here easily without looking up.
+         // Just clearing state if matches current.
+         return newState; 
       });
     };
 
-    const onActiveCallsUpdate = ({ activeCalls }) => {
-      setActiveCallsInChannels(activeCalls);
-    };
-
     socketRef.current.on("connect", onConnect);
-    socketRef.current.on("video-call-incoming", onIncoming);
-    socketRef.current.on("video-call-participants", onParticipants);
-    socketRef.current.on("video-call-joined", onJoined);
-    socketRef.current.on("video-call-left", onLeft);
-    socketRef.current.on("video-signal", onSignal);
-    socketRef.current.on("video-call-ended", onEnded);
-    socketRef.current.on("active-calls-update", onActiveCallsUpdate);
+    socketRef.current.on("call:incoming", onIncoming);
+    socketRef.current.on("call:participant_joined", onParticipantJoined);
+    socketRef.current.on("call:participant_left", onParticipantLeft);
+    socketRef.current.on("call:signal", onSignal);
+    socketRef.current.on("call:ended", onEnded);
 
     return () => {
       socketRef.current?.off("connect", onConnect);
-      socketRef.current?.off("video-call-incoming", onIncoming);
-      socketRef.current?.off("video-call-participants", onParticipants);
-      socketRef.current?.off("video-call-joined", onJoined);
-      socketRef.current?.off("video-call-left", onLeft);
-      socketRef.current?.off("video-signal", onSignal);
-      socketRef.current?.off("video-call-ended", onEnded);
-      socketRef.current?.off("active-calls-update", onActiveCallsUpdate);
+      socketRef.current?.off("call:incoming", onIncoming);
+      socketRef.current?.off("call:participant_joined", onParticipantJoined);
+      socketRef.current?.off("call:participant_left", onParticipantLeft);
+      socketRef.current?.off("call:signal", onSignal);
+      socketRef.current?.off("call:ended", onEnded);
     };
-  }, [selectedChannel, username, videoStreams.local, videoCall.active]);
+  }, [selectedChannel, videoStreams.local, videoCall.active, userProfile]);
 
   // --- Видеозвонок: отображение видео ---
   useEffect(() => {
@@ -1486,12 +1505,22 @@ function App() {
           >
             <input
               style={chatStyles.authInput}
-              placeholder="Имя"
-              value={username}
-              onChange={e => setUsername(e.target.value)}
+              placeholder="Телефон (напр. +79001234567)"
+              value={phone}
+              onChange={e => setPhone(e.target.value)}
               required
-              autoComplete="username"
+              autoComplete="tel"
             />
+            {authMode === "register" && (
+                <input
+                style={chatStyles.authInput}
+                placeholder="Ваше Имя"
+                value={name}
+                onChange={e => setName(e.target.value)}
+                required
+                autoComplete="name"
+                />
+            )}
             <input
               style={chatStyles.authInput}
               placeholder="Пароль"
@@ -2337,9 +2366,17 @@ function App() {
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => {
-              if (selectedChannel) {
-                socketRef.current.emit("typing", { channel: selectedChannel });
-                if (e.key === "Enter") handleSend();
+              if (selectedChannel && !e.repeat) {
+                // Emit start typing, backend handles broadcasting
+                socketRef.current.emit("typing:start", { chatId: selectedChannel });
+                // We should probably emit stop after some time or on blur, but keeping it simple
+                // Maybe auto-stop on backend or just let it timeout on client?
+                // For now, valid endpoint.
+                
+                if (e.key === "Enter") {
+                    socketRef.current.emit("typing:stop", { chatId: selectedChannel });
+                    handleSend();
+                }
               }
             }}
             disabled={!selectedChannel}
