@@ -959,6 +959,12 @@ function App() {
       return msg.sender; 
   };
 
+  const themedPageStyle = {
+    minHeight: '100vh',
+    backgroundColor: '#0f172a',
+    color: '#ffffff',
+  };
+
   return (
     <div style={themedPageStyle} className="govchat-page">
       {/* Мобильный header */}
