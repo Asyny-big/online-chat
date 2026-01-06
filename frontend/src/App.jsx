@@ -25,7 +25,9 @@ function parseToken(token) {
 }
 
 function App() {
-  // --- safe token init (не падаем если localStorage недоступен) ---
+  // ═══════════════════════════════════════════════════════════════
+  // 1. ВСЕ СОСТОЯНИЯ (useState)
+  // ═══════════════════════════════════════════════════════════════
   const [token, setToken] = useState(() => {
     try { return localStorage.getItem("token"); } catch { return null; }
   });
@@ -34,9 +36,8 @@ function App() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [typing, setTyping] = useState("");
-  const typingTimeoutRef = useRef(null);
   const [showCreate, setShowCreate] = useState(false);
-  const [createType, setCreateType] = useState("private"); // 'private' | 'group'
+  const [createType, setCreateType] = useState("private");
   const [newChannel, setNewChannel] = useState(""); // Название группы
   const [targetPhone, setTargetPhone] = useState(""); // Телефон собеседника
   const [authMode, setAuthMode] = useState("login");
@@ -56,23 +57,18 @@ function App() {
   });
   const [showProfile, setShowProfile] = useState(false);
   const [registering, setRegistering] = useState(false);
-  const socketRef = useRef(null);
-  const messagesEndRef = useRef(null);
-  const fileInputRefChat = React.useRef(null); // для вложений в чат
-  const fileInputRefAvatar = React.useRef(null); // для аватара профиля
   const [avatarVersion, setAvatarVersion] = useState(Date.now());
   const [fileToSend, setFileToSend] = useState(null);
   const [filePreviewUrl, setFilePreviewUrl] = useState(null);
   const [modalMedia, setModalMedia] = useState(null); // {type, url, name}
   const [attachBtnHover, setAttachBtnHover] = useState(false); // Состояние для ховера кнопки вложений
   const [showCustomizer, setShowCustomizer] = useState(false); // новое состояние
-  const [theme, setTheme] = useState(chatStyles.themes[0]); // выбранная тема
+  const [theme, setTheme] = useState(chatStyles.themes?.[0] || { name: "default", pageBg: "#0f172a", chatBg: "#111827" }); // выбранная тема
   const [recording, setRecording] = useState(false);
   const [recordTime, setRecordTime] = useState(0);
   const [mediaRecorder, setMediaRecorder] = useState(null);
   const [audioBlob, setAudioBlob] = useState(null);
   const [audioUrl, setAudioUrl] = useState(null);
-  const recordTimerRef = useRef(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [videoCall, setVideoCall] = useState({ active: false, incoming: false, from: null });
   const [videoStreams, setVideoStreams] = useState({ local: null, remotes: {} }); // remotes: {socketId: MediaStream}
@@ -85,6 +81,21 @@ function App() {
   // НОВОЕ: состояния для управления микрофоном и камерой
   const [micEnabled, setMicEnabled] = useState(true);
   const [cameraEnabled, setCameraEnabled] = useState(true);
+  const [username, setUsername] = useState(() => parseToken(token));
+  const [isMobile, setIsMobile] = useState(false);
+
+  // ═══════════════════════════════════════════════════════════════
+  // 2. ВСЕ РЕФЫ (useRef)
+  // ═══════════════════════════════════════════════════════════════
+  const typingTimeoutRef = useRef(null);
+  const socketRef = useRef(null);
+  const messagesEndRef = useRef(null);
+  const fileInputRefChat = useRef(null); // для вложений в чат
+  const fileInputRefAvatar = useRef(null); // для аватара профиля
+  const recordTimerRef = useRef(null);
+  const localVideoRef = useRef(null);
+  const remoteVideosRef = useRef({}); // {socketId: ref}
+  const videoPeersRef = useRef({}); // Добавляем ref для синхронного доступа к peers
   const pushInitRef = useRef(false);
   const pushListenersRef = useRef([]);
   const channelsRef = useRef([]);
@@ -93,25 +104,9 @@ function App() {
   const devicePushTokenRef = useRef(null);
   const pendingServerRegistrationRef = useRef(false);
 
-  useEffect(() => {
-    const interceptor = axios.interceptors.response.use(
-      (response) => response,
-      (error) => {
-        if (error.response && error.response.status === 401) {
-          setToken(null);
-          localStorage.removeItem("token");
-          setAuthMode("login");
-        }
-        return Promise.reject(error);
-      }
-    );
-    return () => axios.interceptors.response.eject(interceptor);
-  }, []);
-
-  // --- WebRTC helpers ---
-  const localVideoRef = useRef(null);
-  const remoteVideosRef = useRef({}); // {socketId: ref}
-  const videoPeersRef = useRef({}); // Добавляем ref для синхронного доступа к peers
+  // ═══════════════════════════════════════════════════════════════
+  // 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ (объявляем ДО использования)
+  // ═══════════════════════════════════════════════════════════════
 
   const isNativeApp = () => {
     try {
@@ -124,33 +119,74 @@ function App() {
     }
   };
 
+  const resolveFileUrl = (url) => {
+    if (!url) return url;
+    if (/^https?:\/\//i.test(url)) return url;
+    try {
+      let base = '';
+      if (API_URL && API_URL.startsWith('http')) {
+        base = API_URL.replace(/\/api\/?$/, '');
+      } else if (SOCKET_URL && SOCKET_URL.startsWith('http')) {
+        base = SOCKET_URL.replace(/\/$/, '');
+      } else if (typeof window !== 'undefined' && window.location?.origin && !window.location.origin.startsWith('file:')) {
+        base = window.location.origin;
+      }
+      return (base ? base.replace(/\/$/, '') : '') + url;
+    } catch {
+      return url;
+    }
+  };
+
+  const getChatDisplayName = (chat) => {
+    if (!chat) return "";
+    if (chat.name) return chat.name;
+    if (chat.participants && userProfile) {
+      const other = chat.participants.find(p => (p._id || p.id) !== (userProfile._id || userProfile.id));
+      if (other) return other.name || other.phone || "Неизвестный";
+    }
+    return "Чат";
+  };
+
+  const getSenderId = (msg) => {
+    if (typeof msg.sender === 'object' && msg.sender !== null) {
+      return msg.sender._id || msg.sender.id;
+    }
+    return msg.sender;
+  };
+
+  const getSenderName = (msg) => {
+    if (typeof msg.sender === 'object' && msg.sender !== null) {
+      return msg.sender.name || msg.sender.phone || msg.sender.username;
+    }
+    const currentChat = channels.find(c => c._id === selectedChannel);
+    if (currentChat?.participants) {
+      const p = currentChat.participants.find(part => (part._id || part.id) === msg.sender);
+      if (p) return p.name || p.username;
+    }
+    return msg.sender;
+  };
+
+  const requestMediaPermissions = () => {
+    if (typeof window === 'undefined') return;
+    if (window.Capacitor?.isNativePlatform) {
+      import('@capacitor/camera').then(({ Camera }) => {
+        Camera.requestPermissions().catch(() => {});
+      }).catch(() => {});
+    } else if (navigator.mediaDevices) {
+      navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+        .then(stream => stream.getTracks().forEach(track => track.stop()))
+        .catch(() => {});
+    }
+  };
+
   const cleanupPushListeners = () => {
     pushListenersRef.current.forEach((handle) => {
-      try {
-        handle?.remove?.();
-      } catch {
-        /* noop */
-      }
+      try { handle?.remove?.(); } catch { /* noop */ }
     });
     pushListenersRef.current = [];
   };
 
-  const registerPushTokenWithServer = async (pushToken) => {
-    // Backend endpoint likely removed. Disabling push registration.
-    return;
-    /*
-    if (!pushToken || !authTokenRef.current) return;
-    try {
-      await axios.post(`${API_URL}/push/register`, { token: pushToken }, {
-        headers: { Authorization: `Bearer ${authTokenRef.current}` },
-      });
-      pendingServerRegistrationRef.current = false;
-    } catch (err) {
-      console.warn('Не удалось зарегистрировать токен FCM', err?.message || err);
-      pendingServerRegistrationRef.current = true;
-    }
-    */
-  };
+  const registerPushTokenWithServer = async () => { /* disabled */ };
 
   const focusChannelFromNotification = (channelId) => {
     if (!channelId) return;
@@ -161,371 +197,220 @@ function App() {
     if (!isNativeApp()) return;
     try {
       await LocalNotifications.schedule({
-        notifications: [
-          {
-            id: Number(String(Date.now()).slice(-9)),
-            title,
-            body,
-            extra,
-            channelId: isCall ? 'govchat-calls' : 'govchat-messages',
-            actionTypeId: isCall ? 'call-actions' : undefined,
-            sound: 'default',
-          },
-        ],
+        notifications: [{
+          id: Number(String(Date.now()).slice(-9)),
+          title, body, extra,
+          channelId: isCall ? 'govchat-calls' : 'govchat-messages',
+          actionTypeId: isCall ? 'call-actions' : undefined,
+          sound: 'default',
+        }],
       });
-    } catch (err) {
-      console.warn('Local notification error', err?.message || err);
-    }
+    } catch { /* noop */ }
   };
 
-  // НОВОЕ: функция переключения микрофона
+  // ═══════════════════════════════════════════════════════════════
+  // 4. ФУНКЦИИ УПРАВЛЕНИЯ СОСТОЯНИЕМ (включая handleLogout)
+  // ═══════════════════════════════════════════════════════════════
+
+  const resetAppState = () => {
+    setChannels([]);
+    setSelectedChannel(null);
+    setMessages([]);
+    setInput("");
+    setTyping("");
+    setError("");
+    setUserProfile(null);
+    setShowProfile(false);
+    setEditMode(false);
+    setShowCustomizer(false);
+    setFileToSend(null);
+    setFilePreviewUrl(null);
+    setModalMedia(null);
+    setAudioBlob(null);
+    setAudioUrl(null);
+    setVideoCall({ active: false, incoming: false, from: null });
+    setVideoStreams({ local: null, remotes: {} });
+    setVideoPeers({});
+    videoPeersRef.current = {};
+    setActiveCallInChannel(null);
+    setVideoError("");
+    setVideoConnecting(false);
+    setMicEnabled(true);
+    setCameraEnabled(true);
+    setMobileMenuOpen(false);
+  };
+
+  const hardDisconnectSocket = () => {
+    const s = socketRef.current;
+    if (!s) return;
+    try {
+      s.removeAllListeners();
+      s.disconnect();
+    } catch { /* noop */ }
+    socketRef.current = null;
+  };
+
+  const handleLogout = () => {
+    try { localStorage.removeItem("token"); } catch { /* noop */ }
+    setToken(null);
+    hardDisconnectSocket();
+    resetAppState();
+    setAuthMode("login");
+  };
+
+  // ═══════════════════════════════════════════════════════════════
+  // 5. ВИДЕОЗВОНКИ
+  // ═══════════════════════════════════════════════════════════════
+
   const toggleMicrophone = () => {
     if (videoStreams.local) {
       const audioTrack = videoStreams.local.getAudioTracks()[0];
       if (audioTrack) {
         audioTrack.enabled = !audioTrack.enabled;
         setMicEnabled(audioTrack.enabled);
-        console.log("Microphone", audioTrack.enabled ? "enabled" : "disabled");
       }
     }
   };
 
-  // НОВОЕ: функция переключения камеры
   const toggleCamera = () => {
     if (videoStreams.local) {
       const videoTrack = videoStreams.local.getVideoTracks()[0];
       if (videoTrack) {
         videoTrack.enabled = !videoTrack.enabled;
         setCameraEnabled(videoTrack.enabled);
-        console.log("Camera", videoTrack.enabled ? "enabled" : "disabled");
       }
     }
   };
 
-  // --- Видеозвонок: инициация ---
-  const startVideoCall = async () => {
-    requestMediaPermissions();
-    if (!selectedChannel) {
-      alert("Выберите канал для начала видеозвонка");
-      return;
-    }
-    
-    console.log("Starting video call in channel:", selectedChannel);
-    setVideoError("");
-    setVideoConnecting(true);
-    
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: true, 
-        audio: true 
-      });
-      
-      console.log("Got local stream");
-      setVideoStreams(s => ({ ...s, local: stream }));
-      setVideoCall({ active: true, incoming: false, from: null, channel: selectedChannel });
-      setActiveCallInChannel(null); // убираем уведомление о входящем звонке
-      // НОВОЕ: сбрасываем состояния микрофона и камеры
-      setMicEnabled(true);
-      setCameraEnabled(true);
-      
-      // Сначала присоединяемся к звонку
-      // socketRef.current.emit("video-call-join", { channel: selectedChannel });
-      
-      // Затем инициируем звонок для других
-      console.log("Sending initiate signal to channel:", selectedChannel);
-      socketRef.current.emit("call:start", { chatId: selectedChannel }, (res) => {
-          if (res && res.error) {
-              setVideoError(res.error);
-              endVideoCall();
-          } else if (res && res.callId) {
-             setVideoCall(prev => ({ ...prev, callId: res.callId }));
-          }
-      });
-      setVideoConnecting(false);
-      
-    } catch (error) {
-      console.error("Error starting video call:", error);
-      setVideoError("Ошибка доступа к камере/микрофону: " + error.message);
-      setVideoConnecting(false);
-      setVideoCall({ active: false, incoming: false, from: null });
-    }
-  };
-
-  // --- Видеозвонок: принять входящий ---
-  const acceptVideoCall = async (override) => {
-    requestMediaPermissions();
-    const targetChannel = override?.channel || activeCallRef.current?.channel || activeCallInChannel?.channel;
-    if (!targetChannel) {
-      setVideoError("Не удалось определить канал звонка");
-      return;
-    }
-    const fromUser = override?.from || activeCallRef.current?.from || activeCallInChannel?.from;
-    console.log("Accepting video call from:", fromUser, "in channel:", targetChannel);
-    setVideoError("");
-    setVideoConnecting(true);
-    
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: true, 
-        audio: true 
-      });
-      
-      console.log("Got local stream for incoming call");
-      setVideoStreams(s => ({ ...s, local: stream }));
-      setVideoCall({ 
-        active: true, 
-        incoming: false, 
-        from: null, 
-        channel: targetChannel 
-      });
-      setActiveCallInChannel(null); // убираем уведомление
-      // НОВОЕ: сбрасываем состояния микрофона и камеры
-      setMicEnabled(true);
-      setCameraEnabled(true);
-      
-      // Присоединяемся к звонку
-      const callId = override?.callId || activeCallInChannel?.callId;
-      if (callId) {
-          socketRef.current.emit("call:accept", { callId }, (res) => {
-             if (res && res.call) {
-                  // handle success, set callId in state
-                  setVideoCall(prev => ({ ...prev, callId }));
-                  // Process participants if needed
-             }
-          });
-      } else {
-          console.error("No callId to accept");
-      }
-      
-      setVideoConnecting(false);
-      
-    } catch (error) {
-      console.error("Error accepting video call:", error);
-      setVideoError("Ошибка доступа к камере/микрофону: " + error.message);
-      setVideoConnecting(false);
-      setVideoCall({ active: false, incoming: false, from: null });
-    }
-  };
-
-  // --- Видеозвонок: создать PeerConnection ---
-  const createPeer = async (peerId, isInitiator, localStream = null, chatIdOverride = null) => {
+  const removePeer = (peerId) => {
     if (videoPeersRef.current[peerId]) {
-      console.log("Peer already exists for:", peerId);
-      return videoPeersRef.current[peerId];
+      videoPeersRef.current[peerId].close();
+      delete videoPeersRef.current[peerId];
     }
-    
-    // Используем переданный поток или текущий локальный
+    setVideoPeers(peers => {
+      const { [peerId]: _, ...rest } = peers;
+      return rest;
+    });
+    setVideoStreams(s => {
+      const { [peerId]: _, ...rest } = s.remotes || {};
+      return { ...s, remotes: rest };
+    });
+  };
+
+  const createPeer = async (peerId, isInitiator, localStream = null, chatIdOverride = null) => {
+    if (videoPeersRef.current[peerId]) return videoPeersRef.current[peerId];
     const streamToUse = localStream || videoStreams.local;
-    if (!streamToUse) {
-      console.log("No local stream available for peer:", peerId);
-      return null;
-    }
-    
-    console.log("Creating peer connection for:", peerId, "as initiator:", isInitiator);
-    
+    if (!streamToUse) return null;
+    const chatId = chatIdOverride || videoCall.channel || selectedChannel;
+    if (!chatId) return null;
+
     const pc = new RTCPeerConnection({
       iceServers: [
-        {
-          urls: [
-            "stun:95.81.119.128:3478",
-            "stun:stun.l.google.com:19302"
-          ]
-        },
-        {
-          urls: [
-            "turn:95.81.119.128:3478?transport=udp",
-            "turn:95.81.119.128:3478?transport=tcp"
-          ],
-          username: "govchat",
-          credential: "supersecretpassword"
-        }
+        { urls: ["stun:stun.l.google.com:19302"] },
       ],
       iceCandidatePoolSize: 10
     });
-    
-    // Сразу сохраняем в ref для синхронного доступа
+
     videoPeersRef.current[peerId] = pc;
-    
-    // Добавить локальные треки
-    streamToUse.getTracks().forEach(track => {
-      console.log("Adding track to peer:", peerId, track.kind);
-      pc.addTrack(track, streamToUse);
-    });
-    
-    // Обработка ICE кандидатов
+    streamToUse.getTracks().forEach(track => pc.addTrack(track, streamToUse));
+
     pc.onicecandidate = (event) => {
       if (!event.candidate) return;
-      socketRef.current?.emit("call:signal", {
-        chatId,
-        to: peerId,
-        data: { candidate: event.candidate },
-      });
+      socketRef.current?.emit("call:signal", { chatId, to: peerId, data: { candidate: event.candidate } });
     };
-    
-    // Обработка удаленного потока
+
     pc.ontrack = (event) => {
-      console.log("Received remote stream from:", peerId, "tracks:", event.streams[0].getTracks().length);
       const remoteStream = event.streams[0];
-      
-      // Проверяем что поток содержит треки
-      if (remoteStream.getTracks().length > 0) {
-        setVideoStreams(s => ({
-          ...s,
-          remotes: { ...s.remotes, [peerId]: remoteStream }
-        }));
-      } else {
-        console.warn("Received empty stream from:", peerId);
+      if (remoteStream?.getTracks().length > 0) {
+        setVideoStreams(s => ({ ...s, remotes: { ...s.remotes, [peerId]: remoteStream } }));
       }
     };
-    
-    // Расширенный мониторинг состояния соединения
+
     pc.onconnectionstatechange = () => {
-      console.log(`Connection state with ${peerId}:`, pc.connectionState);
-      
-      if (pc.connectionState === "connected") {
-        console.log("✅ WebRTC connection established with:", peerId);
-        setVideoError(""); // Очищаем ошибки при успешном соединении
-      } else if (pc.connectionState === "connecting") {
-        console.log("🔄 Connecting to:", peerId);
-      } else if (["disconnected", "failed", "closed"].includes(pc.connectionState)) {
-        console.log("❌ Connection failed/closed with:", peerId, "- removing peer");
-        
-        // Показываем ошибку только если это было активное соединение
-        if (pc.connectionState === "failed") {
-          setVideoError("Не удалось установить соединение. Проверьте подключение к интернету.");
-        }
-        
-        // Небольшая задержка перед удалением для возможного восстановления
+      if (pc.connectionState === "connected") setVideoError("");
+      if (["disconnected", "failed", "closed"].includes(pc.connectionState)) {
         setTimeout(() => {
-          if (videoPeersRef.current[peerId] && 
-              ["disconnected", "failed", "closed"].includes(videoPeersRef.current[peerId].connectionState)) {
+          if (videoPeersRef.current[peerId]?.connectionState && ["disconnected", "failed", "closed"].includes(videoPeersRef.current[peerId].connectionState)) {
             removePeer(peerId);
           }
         }, 3000);
       }
     };
-    
-    // Мониторинг ICE состояния
-    pc.oniceconnectionstatechange = () => {
-      console.log(`ICE connection state with ${peerId}:`, pc.iceConnectionState);
-      
-      if (pc.iceConnectionState === "failed") {
-        console.log("ICE connection failed with:", peerId, "- attempting restart");
-        // Попытка перезапуска ICE
-        pc.restartIce();
-      }
-    };
-    
-    // Обновить state
+
     setVideoPeers(peers => ({ ...peers, [peerId]: pc }));
-    
-    // Создать offer если мы инициаторы
+
     if (isInitiator) {
       try {
-        console.log("Creating offer for:", peerId);
-        const offer = await pc.createOffer({
-          offerToReceiveAudio: true,
-          offerToReceiveVideo: true,
-          voiceActivityDetection: false // отключаем VAD для стабильности
-        });
+        const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
         await pc.setLocalDescription(offer);
-        
-        console.log("Sending offer to:", peerId);
-        socketRef.current.emit("call:signal", {
-          chatId,
-          to: peerId,
-          data: offer
-        });
-      } catch (error) {
-        console.error("Error creating offer for", peerId, ":", error);
-        setVideoError("Ошибка создания предложения соединения");
-      }
+        socketRef.current?.emit("call:signal", { chatId, to: peerId, data: offer });
+      } catch { setVideoError("Ошибка создания предложения соединения"); }
     }
-    
     return pc;
   };
 
-  // --- Видеозвонок: удалить PeerConnection ---
-  const removePeer = (peerId) => {
-    console.log("Removing peer:", peerId);
-    
-    // Удаляем из ref
-    if (videoPeersRef.current[peerId]) {
-      videoPeersRef.current[peerId].close();
-      delete videoPeersRef.current[peerId];
-    }
-    
-    setVideoPeers(peers => {
-      const { [peerId]: removed, ...rest } = peers;
-      return rest;
-    });
-    
-    setVideoStreams(s => {
-      const { [peerId]: removed, ...rest } = s.remotes || {};
-      return { ...s, remotes: rest };
-    });
-  };
-
-  // --- Видеозвонок: завершить ---
   const endVideoCall = () => {
-    console.log("Ending video call");
-    
-    // Закрыть все peer connections через ref
-    Object.values(videoPeersRef.current).forEach(pc => {
-      if (pc) pc.close();
-    });
+    Object.values(videoPeersRef.current).forEach(pc => pc?.close());
     videoPeersRef.current = {};
     setVideoPeers({});
-    
-    // Остановить локальный поток
-    if (videoStreams.local) {
-      videoStreams.local.getTracks().forEach(track => {
-        track.stop();
-      });
-    }
-    
+    if (videoStreams.local) videoStreams.local.getTracks().forEach(track => track.stop());
+    const chatId = videoCall?.channel;
+    if (chatId) socketRef.current?.emit("call:signal", { chatId, data: { type: "leave" } });
     setVideoStreams({ local: null, remotes: {} });
     setVideoCall({ active: false, incoming: false, from: null });
     setVideoConnecting(false);
-    
-    if (videoCall.callId) {
-      socketRef.current.emit("call:leave", { callId: videoCall.callId });
-    }
-    
-    // НОВОЕ: сбрасываем состояния микрофона и камеры
     setMicEnabled(true);
     setCameraEnabled(true);
   };
 
-  // --- Видеозвонок: покинуть звонок ---
-  const leaveVideoCall = () => {
-    if (videoCall.active && selectedChannel) {
-      socketRef.current.emit("video-call-leave", { channel: selectedChannel });
+  const startVideoCall = async () => {
+    requestMediaPermissions();
+    if (!selectedChannel) { alert("Выберите канал для начала видеозвонка"); return; }
+    setVideoError("");
+    setVideoConnecting(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      setVideoStreams(s => ({ ...s, local: stream }));
+      setVideoCall({ active: true, incoming: false, from: null, channel: selectedChannel });
+      setActiveCallInChannel(null);
+      setMicEnabled(true);
+      setCameraEnabled(true);
+      socketRef.current?.emit("call:start", { chatId: selectedChannel });
+      socketRef.current?.emit("call:signal", { chatId: selectedChannel, data: { type: "join" } });
+      setVideoConnecting(false);
+    } catch (error) {
+      setVideoError("Ошибка доступа к камере/микрофону: " + (error?.message || "unknown"));
+      setVideoConnecting(false);
+      setVideoCall({ active: false, incoming: false, from: null });
     }
-    endVideoCall();
   };
 
-  // --- Отклонить входящий звонок ---
-  const declineVideoCall = () => {
-    setActiveCallInChannel(null);
+  const acceptVideoCall = async (override) => {
+    requestMediaPermissions();
+    const targetChannel = override?.channel || activeCallInChannel?.channel;
+    if (!targetChannel) { setVideoError("Не удалось определить канал звонка"); return; }
+    setVideoError("");
+    setVideoConnecting(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      setVideoStreams(s => ({ ...s, local: stream }));
+      setVideoCall({ active: true, incoming: false, from: null, channel: targetChannel });
+      setActiveCallInChannel(null);
+      setMicEnabled(true);
+      setCameraEnabled(true);
+      socketRef.current?.emit("call:signal", { chatId: targetChannel, data: { type: "join" } });
+      setVideoConnecting(false);
+    } catch (error) {
+      setVideoError("Ошибка доступа к камере/микрофону: " + (error?.message || "unknown"));
+      setVideoConnecting(false);
+      setVideoCall({ active: false, incoming: false, from: null });
+    }
   };
 
-  // Определяем кнопку видеозвонка
-  const videoCallButton = selectedChannel ? (
-    <button
-      style={{
-        ...chatStyles.videoCallBtn,
-        ...(videoCall.active ? chatStyles.videoCallBtnActive : {}),
-      }}
-      onClick={videoCall.active ? leaveVideoCall : startVideoCall}
-      disabled={videoConnecting}
-      title={videoCall.active ? "Завершить видеозвонок" : "Начать видеозвонок"}
-    >
-      {videoConnecting ? "⏳" : videoCall.active ? "📹" : "📹"}
-    </button>
-  ) : null;
+  // ═══════════════════════════════════════════════════════════════
+  // 6. АУДИОЗАПИСИ
+  // ═══════════════════════════════════════════════════════════════
 
-  // Функция для старта записи аудио
   const startRecording = async () => {
     if (!navigator.mediaDevices || !window.MediaRecorder) {
       alert("Ваш браузер не поддерживает запись аудио");
@@ -559,7 +444,6 @@ function App() {
     }
   };
 
-  // Функция для остановки записи аудио
   const stopRecording = () => {
     if (mediaRecorder) {
       mediaRecorder.stop();
@@ -572,7 +456,6 @@ function App() {
     }
   };
 
-  // FIX: sendAudioMessage -> message:send (контракт backend)
   const sendAudioMessage = async () => {
     if (!audioBlob || !selectedChannel) return;
 
@@ -595,7 +478,10 @@ function App() {
     setAudioUrl(null);
   };
 
-  // FIX: handleSend отсутствовал
+  // ═══════════════════════════════════════════════════════════════
+  // 7. ОТПРАВКА СООБЩЕНИЙ
+  // ═══════════════════════════════════════════════════════════════
+
   const handleSend = async () => {
     if (!selectedChannel || !socketRef.current) return;
 
@@ -633,10 +519,12 @@ function App() {
     if (fileInputRefChat.current) fileInputRefChat.current.value = "";
   };
 
-  // FIX: клики по фону профиля (использовался handleProfilePopupBgClick)
+  // ═══════════════════════════════════════════════════════════════
+  // 8. ПРОФИЛЬ
+  // ═══════════════════════════════════════════════════════════════
+
   const handleProfilePopupBgClick = () => setShowProfile(false);
 
-  // FIX: сохранение профиля (использовался handleProfileSave) + правильный endpoint
   const handleProfileSave = async () => {
     try {
       const payload = {
@@ -661,7 +549,6 @@ function App() {
     }
   };
 
-  // FIX: выбор темы (использовался handleThemeSelect)
   const handleThemeSelect = async (t) => {
     setTheme(t);
     if (!token) return;
@@ -676,31 +563,34 @@ function App() {
     }
   };
 
-  // FIX: themedChatBoxStyle использовался в JSX
-  const themedChatBoxStyle = useMemo(() => {
-    const bg = theme?.chatBg || "#111827";
-    return { background: bg };
-  }, [theme]);
+  // ═══════════════════════════════════════════════════════════════
+  // 9. ВЫЧИСЛЯЕМЫЕ ЗНАЧЕНИЯ (useMemo)
+  // ═══════════════════════════════════════════════════════════════
 
-  // FIX: banner/modal использовались в JSX
+  const themedChatBoxStyle = useMemo(() => ({ background: theme?.chatBg || "#111827" }), [theme]);
+  const themedPageStyle = useMemo(() => ({ minHeight: '100vh', backgroundColor: theme?.pageBg || '#0f172a', color: '#ffffff' }), [theme]);
+
+  // ═══════════════════════════════════════════════════════════════
+  // 10. JSX-ЭЛЕМЕНТЫ (кнопки, меню)
+  // ═══════════════════════════════════════════════════════════════
+
+  const videoCallButton = selectedChannel ? (
+    <button
+      style={{ ...chatStyles.videoCallBtn, ...(videoCall.active ? chatStyles.videoCallBtnActive : {}) }}
+      onClick={videoCall.active ? leaveVideoCall : startVideoCall}
+      disabled={videoConnecting}
+      title={videoCall.active ? "Завершить видеозвонок" : "Начать видеозвонок"}
+    >
+      {videoConnecting ? "⏳" : "📹"}
+    </button>
+  ) : null;
+
   const videoCallBanner = activeCallInChannel ? (
     <div style={{ background: "#232526", borderRadius: 10, padding: "10px 12px", marginBottom: 10 }}>
-      <div style={{ color: "#fff", fontWeight: 700, marginBottom: 8 }}>
-        Входящий звонок: {activeCallInChannel.from}
-      </div>
+      <div style={{ color: "#fff", fontWeight: 700, marginBottom: 8 }}>Входящий звонок: {activeCallInChannel.from}</div>
       <div style={{ display: "flex", gap: 8 }}>
-        <button
-          style={{ ...chatStyles.profileEditBtn, padding: "8px 12px" }}
-          onClick={() => acceptVideoCall({ channel: activeCallInChannel.channel, from: activeCallInChannel.from })}
-        >
-          Принять
-        </button>
-        <button
-          style={{ ...chatStyles.profileLogoutBtn, padding: "8px 12px" }}
-          onClick={() => setActiveCallInChannel(null)}
-        >
-          Отклонить
-        </button>
+        <button style={{ ...chatStyles.profileEditBtn, padding: "8px 12px" }} onClick={() => acceptVideoCall({ channel: activeCallInChannel.channel, from: activeCallInChannel.from })}>Принять</button>
+        <button style={{ ...chatStyles.profileLogoutBtn, padding: "8px 12px" }} onClick={() => setActiveCallInChannel(null)}>Отклонить</button>
       </div>
     </div>
   ) : null;
@@ -727,10 +617,7 @@ function App() {
                 key={peerId}
                 autoPlay
                 playsInline
-                ref={(el) => {
-                  if (!el) return;
-                  el.srcObject = stream;
-                }}
+                ref={(el) => { if (el) el.srcObject = stream; }}
                 style={{ width: "100%", borderRadius: 10, marginBottom: 8 }}
               />
             ))}
@@ -751,9 +638,8 @@ function App() {
     </div>
   ) : null;
 
-  // FIX: минимальные элементы навигации, чтобы JSX не падал
   const desktopMenu = (
-    <div style={{ width: 320, borderRight: "1px solid #1f2937", padding: 12 }}>
+    <div style={{ width: 320, borderRight: "1px solid #1f2937", padding: 12, background: "#0b1220", minHeight: "100vh" }}>
       <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
         <button style={chatStyles.profileEditBtn} onClick={() => setShowProfile(true)}>Профиль</button>
         <button style={chatStyles.profileEditBtn} onClick={() => setShowCustomizer(true)}>Тема</button>
@@ -762,19 +648,7 @@ function App() {
       <div style={{ color: "#b2bec3", fontSize: 12, marginBottom: 8 }}>Чаты</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {channels.map((c) => (
-          <button
-            key={c._id}
-            onClick={() => setSelectedChannel(c._id)}
-            style={{
-              textAlign: "left",
-              padding: "10px 10px",
-              borderRadius: 10,
-              border: "1px solid #233",
-              background: selectedChannel === c._id ? "#1f2937" : "#0b1220",
-              color: "#fff",
-              cursor: "pointer",
-            }}
-          >
+          <button key={c._id} onClick={() => setSelectedChannel(c._id)} style={{ textAlign: "left", padding: "10px 10px", borderRadius: 10, border: "1px solid #233", background: selectedChannel === c._id ? "#1f2937" : "#0b1220", color: "#fff", cursor: "pointer" }}>
             {getChatDisplayName(c)}
           </button>
         ))}
@@ -784,9 +658,7 @@ function App() {
 
   const mobileHeader = (
     <div style={{ position: "fixed", top: 0, left: 0, right: 0, height: 56, background: "#0b1220", zIndex: 140, display: "flex", alignItems: "center", padding: "0 12px" }}>
-      <button style={chatStyles.profileEditBtn} onClick={() => setMobileMenuOpen((v) => !v)}>
-        Меню
-      </button>
+      <button style={chatStyles.profileEditBtn} onClick={() => setMobileMenuOpen((v) => !v)}>Меню</button>
       <div style={{ color: "#fff", fontWeight: 700, marginLeft: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {selectedChannel ? getChatDisplayName(channels.find((c) => c._id === selectedChannel)) : "ГоВЧат"}
       </div>
@@ -806,19 +678,7 @@ function App() {
         <div style={{ color: "#b2bec3", fontSize: 12, marginBottom: 8 }}>Чаты</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {channels.map((c) => (
-            <button
-              key={c._id}
-              onClick={() => { setSelectedChannel(c._id); setMobileMenuOpen(false); }}
-              style={{
-                textAlign: "left",
-                padding: "10px 10px",
-                borderRadius: 10,
-                border: "1px solid #233",
-                background: selectedChannel === c._id ? "#1f2937" : "#0b1220",
-                color: "#fff",
-                cursor: "pointer",
-              }}
-            >
+            <button key={c._id} onClick={() => { setSelectedChannel(c._id); setMobileMenuOpen(false); }} style={{ textAlign: "left", padding: "10px 10px", borderRadius: 10, border: "1px solid #233", background: selectedChannel === c._id ? "#1f2937" : "#0b1220", color: "#fff", cursor: "pointer" }}>
               {getChatDisplayName(c)}
             </button>
           ))}
@@ -827,21 +687,29 @@ function App() {
     </div>
   );
 
-  // ...existing code...
+  // ═══════════════════════════════════════════════════════════════
+  // 11. useEffect ХУКИ
+  // ═══════════════════════════════════════════════════════════════
 
-  // FIX: avatar upload flow тоже на /users/me (а не /profile)
-  // Найдите onChange у fileInputRefAvatar и замените PATCH/GET:
-  // - PATCH `${API_URL}/users/me` { avatarUrl: uploadRes.data.url }
-  // - GET `${API_URL}/users/me`
-  // (ниже — только заменяемые строки)
-  /*
-    await axios.patch(`${API_URL}/users/me`, { avatarUrl: uploadRes.data.url }, { headers: { Authorization: `Bearer ${token}` } });
-    const profileRes = await axios.get(`${API_URL}/users/me`, { headers: { Authorization: `Bearer ${token}` } });
-  */
+  useEffect(() => {
+    const interceptor = axios.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        if (error.response && error.response.status === 401) {
+          setToken(null);
+          localStorage.removeItem("token");
+          setAuthMode("login");
+        }
+        return Promise.reject(error);
+      }
+    );
+    return () => axios.interceptors.response.eject(interceptor);
+  }, []);
 
-  // ...existing code...
+  // ═══════════════════════════════════════════════════════════════
+  // 12. ЭКРАН АВТОРИЗАЦИИ
+  // ═══════════════════════════════════════════════════════════════
 
-  // FIX: экран авторизации (иначе приложение "работает", но пользователь не может залогиниться без внешнего UI)
   if (!token) {
     const submit = async () => {
       setError("");
@@ -891,11 +759,9 @@ function App() {
     );
   }
 
-  const themedPageStyle = {
-    minHeight: '100vh',
-    backgroundColor: '#0f172a',
-    color: '#ffffff',
-  };
+  // ═══════════════════════════════════════════════════════════════
+  // 13. ОСНОВНОЙ РЕНДЕР
+  // ═══════════════════════════════════════════════════════════════
 
   return (
     <div style={themedPageStyle} className="govchat-page">
