@@ -24,6 +24,20 @@ function ChatPage({ token, onLogout }) {
   const [incomingCallData, setIncomingCallData] = useState(null);
   
   const socketRef = useRef(null);
+  
+  // Refs для использования актуальных значений в обработчиках сокета
+  const chatsRef = useRef(chats);
+  const selectedChatRef = useRef(selectedChat);
+  const callStateRef = useRef(callState);
+  const callIdRef = useRef(callId);
+  const currentUserIdRef = useRef(currentUserId);
+  
+  // Обновляем refs при изменении состояния
+  useEffect(() => { chatsRef.current = chats; }, [chats]);
+  useEffect(() => { selectedChatRef.current = selectedChat; }, [selectedChat]);
+  useEffect(() => { callStateRef.current = callState; }, [callState]);
+  useEffect(() => { callIdRef.current = callId; }, [callId]);
+  useEffect(() => { currentUserIdRef.current = currentUserId; }, [currentUserId]);
 
   // Получение текущего пользователя
   useEffect(() => {
@@ -49,13 +63,16 @@ function ChatPage({ token, onLogout }) {
       .catch(() => setChats([]));
   }, [token]);
 
-  // Подключение Socket.IO
+  // Подключение Socket.IO - только один раз при логине
   useEffect(() => {
     if (!token) return;
 
     const socket = io(SOCKET_URL, {
       auth: { token },
       transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 1000,
     });
 
     socketRef.current = socket;
@@ -85,7 +102,7 @@ function ChatPage({ token, onLogout }) {
 
       // Добавление сообщения в текущий чат
       setMessages((prev) => {
-        if (selectedChat?._id === chatId) {
+        if (selectedChatRef.current?._id === chatId) {
           // Проверка на дубликат
           if (prev.some(m => m._id === message._id)) return prev;
           return [...prev, message];
@@ -111,7 +128,7 @@ function ChatPage({ token, onLogout }) {
       console.log('[ChatPage] Incoming call:', { incomingCallId, incomingChatId, initiator, type });
       
       // Ищем чат для отображения
-      const chat = chats.find(c => c._id === incomingChatId);
+      const chat = chatsRef.current.find(c => c._id === incomingChatId);
       
       // Сохраняем данные входящего звонка для UI
       setIncomingCallData({
@@ -135,7 +152,7 @@ function ChatPage({ token, onLogout }) {
       });
       
       // Если мы не в этом чате - переключаемся
-      if (!selectedChat || selectedChat._id !== incomingChatId) {
+      if (!selectedChatRef.current || selectedChatRef.current._id !== incomingChatId) {
         if (chat) {
           setSelectedChat(chat);
         }
@@ -143,22 +160,22 @@ function ChatPage({ token, onLogout }) {
     });
 
     socket.on('call:participant_joined', ({ callId: cId, userId: joinedUserId, userName }) => {
-      console.log('[ChatPage] Participant joined:', { cId, joinedUserId, userName, currentCallId: callId, currentCallState: callState, currentUserId });
+      console.log('[ChatPage] Participant joined:', { cId, joinedUserId, userName, currentCallId: callIdRef.current, currentCallState: callStateRef.current, currentUserId: currentUserIdRef.current });
       
       // Игнорируем если это мы сами
-      if (joinedUserId === currentUserId) {
+      if (joinedUserId === currentUserIdRef.current) {
         console.log('[ChatPage] Ignoring self participant_joined');
         return;
       }
       
       // Если это наш звонок и мы инициатор (outgoing)
-      if (callState === 'outgoing') {
+      if (callStateRef.current === 'outgoing') {
         setCallState('active');
       }
     });
 
     socket.on('call:ended', ({ callId: cId, reason }) => {
-      console.log('[ChatPage] Call ended:', { cId, reason, currentCallId: callId });
+      console.log('[ChatPage] Call ended:', { cId, reason, currentCallId: callIdRef.current });
       resetCallState();
       setIncomingCallData(null);
     });
@@ -178,7 +195,7 @@ function ChatPage({ token, onLogout }) {
     return () => {
       socket.disconnect();
     };
-  }, [token, selectedChat, callId, callState]);
+  }, [token]); // ТОЛЬКО token - сокет создаётся один раз
 
   // Загрузка сообщений при выборе чата
   useEffect(() => {
