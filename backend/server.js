@@ -13,6 +13,7 @@ const authRoutes = require('./routes/auth');
 const chatsRoutes = require('./routes/chats');
 const messagesRoutes = require('./routes/messages');
 const usersRoutes = require('./routes/users');
+const webrtcRoutes = require('./routes/webrtc');
 
 // Socket.IO
 const setupSocket = require('./socket');
@@ -123,6 +124,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/chats', chatsRoutes);
 app.use('/api/messages', messagesRoutes);
 app.use('/api/users', usersRoutes);
+app.use('/api/webrtc', webrtcRoutes);
 
 // Загрузка файлов
 const authMiddleware = require('./middleware/auth');

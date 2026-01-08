@@ -1,59 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-
-const ICE_SERVERS = {
-  iceServers: [
-    // STUN серверы
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
-    { urls: 'stun:stun3.l.google.com:19302' },
-    { urls: 'stun:stun4.l.google.com:19302' },
-    // Дополнительные STUN серверы
-    { urls: 'stun:stun.stunprotocol.org:3478' },
-    { urls: 'stun:stun.voip.blackberry.com:3478' },
-    // Публичные TURN сервера для улучшения NAT traversal
-    // Metered TURN серверы (более надёжные)
-    {
-      urls: 'turn:a.relay.metered.ca:80',
-      username: 'e8dd65c92eb0c42fa69e2e78',
-      credential: 'sK/dJ/qpHRCvzLqx'
-    },
-    {
-      urls: 'turn:a.relay.metered.ca:80?transport=tcp',
-      username: 'e8dd65c92eb0c42fa69e2e78',
-      credential: 'sK/dJ/qpHRCvzLqx'
-    },
-    {
-      urls: 'turn:a.relay.metered.ca:443',
-      username: 'e8dd65c92eb0c42fa69e2e78',
-      credential: 'sK/dJ/qpHRCvzLqx'
-    },
-    {
-      urls: 'turn:a.relay.metered.ca:443?transport=tcp',
-      username: 'e8dd65c92eb0c42fa69e2e78',
-      credential: 'sK/dJ/qpHRCvzLqx'
-    },
-    {
-      urls: 'turns:a.relay.metered.ca:443?transport=tcp',
-      username: 'e8dd65c92eb0c42fa69e2e78',
-      credential: 'sK/dJ/qpHRCvzLqx'
-    },
-    // OpenRelay резервные
-    {
-      urls: 'turn:openrelay.metered.ca:80',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
-    },
-    {
-      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
-    }
-  ],
-  iceCandidatePoolSize: 10,
-  // Принудительно использовать relay если direct connection не работает
-  iceTransportPolicy: 'all' // 'all' или 'relay' для только TURN
-};
+import { API_URL } from '../config';
 
 // Простой рингтон (Web Audio API)
 function createRingtone() {
@@ -122,6 +68,7 @@ function CallModal({
   onClose,
   onCallAccepted, // Колбэк когда звонок принят
   currentUserId,
+  token,          // JWT токен для авторизации запросов
 }) {
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
@@ -130,6 +77,7 @@ function CallModal({
   const [hasLocalStream, setHasLocalStream] = useState(false);
   const [facingMode, setFacingMode] = useState('user'); // 'user' = фронтальная, 'environment' = задняя
   const [hasRemoteStream, setHasRemoteStream] = useState(false);
+  const [iceServers, setIceServers] = useState(null);
 
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
@@ -140,6 +88,39 @@ function CallModal({
   const pendingCandidatesRef = useRef([]);
   const isInitiatorRef = useRef(false);
   const remoteUserIdRef = useRef(null); // ID собеседника для отправки сигналов
+
+  // Загрузка ICE серверов с backend (с временными TURN credentials)
+  const fetchIceServers = useCallback(async () => {
+    try {
+      console.log('[CallModal] Fetching ICE servers from backend...');
+      const response = await fetch(`${API_URL}/webrtc/ice`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      
+      const config = await response.json();
+      console.log('[CallModal] Got ICE config:', config);
+      setIceServers(config);
+      return config;
+    } catch (err) {
+      console.error('[CallModal] Failed to fetch ICE servers:', err);
+      // Fallback на STUN only если не удалось получить TURN
+      const fallback = {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' }
+        ],
+        iceCandidatePoolSize: 10
+      };
+      setIceServers(fallback);
+      return fallback;
+    }
+  }, [token]);
 
   // Cleanup function
   const cleanup = useCallback(() => {
@@ -217,14 +198,14 @@ function CallModal({
   }, [callType]);
 
   // Create PeerConnection
-  const createPeerConnection = useCallback((stream) => {
-    console.log('[CallModal] Creating PeerConnection');
+  const createPeerConnection = useCallback((stream, iceConfig) => {
+    console.log('[CallModal] Creating PeerConnection with ICE config:', iceConfig);
     
     if (peerConnectionRef.current) {
       peerConnectionRef.current.close();
     }
     
-    const pc = new RTCPeerConnection(ICE_SERVERS);
+    const pc = new RTCPeerConnection(iceConfig);
     peerConnectionRef.current = pc;
     
     // Add local tracks
@@ -422,6 +403,9 @@ function CallModal({
       ringtoneRef.current.stop();
     }
     
+    // Fetch ICE servers first
+    const iceConfig = await fetchIceServers();
+    
     // Get media first
     const stream = await initMedia();
     if (!stream) {
@@ -429,8 +413,8 @@ function CallModal({
       return;
     }
     
-    // Create peer connection
-    const pc = createPeerConnection(stream);
+    // Create peer connection with ICE config
+    const pc = createPeerConnection(stream, iceConfig);
     
     // Notify server we accepted - инициатор получит participant_joined и отправит offer
     socket.emit('call:accept', { callId }, (response) => {
@@ -445,7 +429,7 @@ function CallModal({
       }
       // Теперь ждем offer от инициатора через call:signal
     });
-  }, [initMedia, createPeerConnection, socket, callId, cleanup, onClose, onCallAccepted]);
+  }, [initMedia, createPeerConnection, fetchIceServers, socket, callId, cleanup, onClose, onCallAccepted]);
 
   // Decline incoming call
   const handleDecline = useCallback(() => {
@@ -664,10 +648,14 @@ function CallModal({
           console.log('[CallModal] Set remoteUserIdRef to:', remoteUser._id);
         }
         
+        // Fetch ICE servers first
+        const iceConfig = await fetchIceServers();
+        if (!isMounted) return;
+        
         const stream = await initMedia();
         if (!stream || !isMounted) return;
         
-        createPeerConnection(stream);
+        createPeerConnection(stream, iceConfig);
         // Wait for participant_joined to send offer
         
       } else if (callState === 'incoming') {
@@ -691,7 +679,7 @@ function CallModal({
     return () => {
       isMounted = false;
     };
-  }, [callState, initMedia, createPeerConnection, remoteUser]);
+  }, [callState, initMedia, createPeerConnection, fetchIceServers, remoteUser]);
 
   // Update local video ref when stream changes
   useEffect(() => {

@@ -12,6 +12,10 @@ module.exports = {
   // ОБЯЗАТЕЛЬНО: секрет для JWT токенов
   JWT_SECRET: 'your-super-secret-jwt-key-change-in-production',
 
+  // TURN сервер (coturn) - секрет для генерации временных credentials
+  // Должен совпадать с static-auth-secret в turnserver.conf
+  TURN_SECRET: '2df3e9ebdd61adb9a317d33b8fb358d5e04996a3209cc3008940944a0df9421d',
+
   // Разрешённые origins для CORS
   CORS_ORIGINS: [
     'http://localhost:3000',

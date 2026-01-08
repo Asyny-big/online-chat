@@ -428,6 +428,7 @@ function ChatPage({ token, onLogout }) {
           onClose={resetCallState}
           onCallAccepted={handleCallAccepted}
           currentUserId={currentUserId}
+          token={token}
         />
       )}
     </div>
