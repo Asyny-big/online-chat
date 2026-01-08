@@ -1006,11 +1006,39 @@ function CallModal({
     return '';
   };
 
+  const isMobile = isMobileBrowser() || window.innerWidth < 768;
+
+  // Если это web-desktop, мы хотим "модальное" окно, а не full-screen
+  // Если мобилка - full screen
+  
+  const modalStyle = isMobile ? {
+    width: '100%',
+    height: '100%',
+    borderRadius: 0,
+    background: '#0f172a',
+  } : {
+    width: '90%',
+    maxWidth: '1200px',
+    height: '85%',
+    maxHeight: '800px',
+    borderRadius: '24px',
+    background: '#1e293b',
+    boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)',
+    border: '1px solid rgba(255, 255, 255, 0.1)',
+  };
+
   return (
     <div style={styles.overlay}>
-      <div style={styles.modal}>
+      <div style={{
+          ...styles.modal,
+          ...modalStyle
+      }}>
         {/* Video container */}
-        <div style={styles.videoContainer}>
+        <div style={{
+            ...styles.videoContainer,
+            background: isMobile ? '#000' : '#0f172a', // Чуть светлее фон на десктопе для контейнера
+            borderRadius: isMobile ? 0 : '24px', 
+        }}>
           {/* Remote video (full screen) */}
           {callType === 'video' ? (
             <video
@@ -1021,7 +1049,8 @@ function CallModal({
                 ...(localVideoMode === 'screen' ? styles.localVideo : styles.remoteVideo),
                 display: hasRemoteStream ? 'block' : 'none',
                 // Если собеседник шлёт screen — показываем без кропа
-                objectFit: remoteVideoMode === 'screen' ? 'contain' : (localVideoMode === 'screen' ? 'cover' : 'cover')
+                objectFit: remoteVideoMode === 'screen' ? 'contain' : (localVideoMode === 'screen' ? 'cover' : 'contain'),
+                borderRadius: isMobile ? 0 : '20px', 
               }}
             />
           ) : null}
@@ -1053,7 +1082,14 @@ function CallModal({
                 ...(localVideoMode === 'screen' ? styles.remoteVideo : styles.localVideo),
                 opacity: hasLocalStream ? 1 : 0,
                 // Локальная демонстрация экрана тоже без кропа
-                objectFit: localVideoMode === 'screen' ? 'contain' : 'cover'
+                objectFit: localVideoMode === 'screen' ? 'contain' : 'cover',
+                // Уменьшаем для мобилок
+                ...(isMobile && localVideoMode !== 'screen' ? {
+                    width: '100px', // Меньше на мобилке
+                    top: '16px',
+                    right: '16px',
+                    borderRadius: '12px'
+                } : {})
               }}
             />
           )}
@@ -1123,48 +1159,50 @@ function CallModal({
                   onClick={switchCamera}
                   style={styles.controlBtn}
                   title="Сменить камеру"
-                >
-                  <Icons.Switch />
-                </button>
-              )}
-
-              {callType === 'video' && !isMobileBrowser() && (
-                <button
-                  onClick={localVideoMode === 'screen' ? stopScreenShare : startScreenShare}
-                  style={{
-                    ...styles.controlBtn,
-                    ...(localVideoMode === 'screen' ? styles.controlBtnActive : {})
-                  }}
-                  title={localVideoMode === 'screen' ? "Остановить демонстрацию" : "Демонстрация экрана"}
-                >
-                  <Icons.Screen active={localVideoMode === 'screen'} />
-                </button>
-              )}
-              
-              <button onClick={handleEndCall} style={styles.endBtn} title="Завершить">
-                <Icons.Hangup />
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-const styles = {
-  overlay: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    background: 'rgba(0, 0, 0, 0.95)',
+                >75)', // Затемненный фон
+    backdropFilter: 'blur(12px)',      // Размытие фона
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 10000,
+    perspective: '1000px',
   },
+  modal: {
+    // Базовые стили, которые переопределяются логикой
+    position: 'relative',
+    overflow: 'hidden',
+    display: 'flex',
+    flexDirection: 'column',
+    transition: 'all 0.4s cubic-bezier(0.16, 1, 0.3, 1)',
+    animation: 'modal-appear 0.4s ease-out forwards',
+  },
+  videoContainer: {
+    flex: 1,
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    height: '100%',
+    overflow: 'hidden', 
+  },
+  remoteVideo: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'contain', 
+  },
+  localVideo: {
+    position: 'absolute',
+    top: '24px',
+    right: '24px',
+    width: '180px', // Чуть больше на десктопе
+    aspectRatio: '3/4',
+    borderRadius: '16px',
+    objectFit: 'cover',
+    border: '2px solid rgba(255, 255, 255, 0.1)',
+    boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+    background: '#1a1a1a',
+    transition: 'opacity 0.3s, width
   modal: {
     width: '100%',
     height: '100%',
@@ -1272,78 +1310,77 @@ const styles = {
     left: '50%',
     transform: 'translateX(-50%)',
     display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '20px',
-    padding: '16px 32px',
-    borderRadius: '28px',
-    background: 'rgba(20, 20, 20, 0.65)',
-    backdropFilter: 'blur(20px)',
-    border: '1px solid rgba(255, 255, 255, 0.08)',
-    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+    alignI16px', // Чуть плотнее отступы
+    padding: '12px 24px',
+    borderRadius: '24px',
+    background: 'rgba(30, 41, 59, 0.75)', // Темно-синий оттенок (Slate 800)
+    backdropFilter: 'blur(16px) saturate(180%)', // Сильное размытие для стекла
+    border: '1px solid rgba(255, 255, 255, 0.1)',
+    boxShadow: '0 20px 40px rgba(0, 0, 0, 0.4), inset 0 1px 1px rgba(255,255,255,0.1)', // Объем
     zIndex: 50,
-    transition: 'opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
   },
   controlBtn: {
-    width: '56px',
-    height: '56px',
+    width: '52px',
+    height: '52px',
     borderRadius: '50%',
-    border: '1.5px solid rgba(255, 255, 255, 0.3)',
-    background: 'transparent',
-    color: '#fff',
+    border: 'none',
+    background: 'rgba(255, 255, 255, 0.05)', // Легкая подложка
+    color: '#e2e8f0', // Светлый текст
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    transition: 'all 0.2s ease',
+    transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
   },
   controlBtnActive: {
-    background: '#fff',
-    color: '#0f172a',
-    border: '1.5px solid #fff',
-    boxShadow: '0 0 16px rgba(255, 255, 255, 0.3)',
+    background: '#3b82f6', // Яркий синий активный цвет (Tailwind blue-500)
+    color: '#fff',
+    boxShadow: '0 0 20px rgba(59, 130, 246, 0.5)', // Свечение
+    transform: 'scale(1.05)',
   },
   acceptBtn: {
-    width: '72px',
-    height: '72px',
-    borderRadius: '50%',
-    border: 'none',
-    background: '#22c55e',
-    fontSize: '32px',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    animation: 'pulse-btn 1s infinite',
-    boxShadow: '0 8px 24px rgba(34, 197, 94, 0.3)',
-  },
-  declineBtn: {
-    width: '72px',
-    height: '72px',
-    borderRadius: '50%',
-    border: 'none',
-    background: '#ef4444',
-    fontSize: '32px',
-    color: '#fff',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    boxShadow: '0 8px 24px rgba(239, 68, 68, 0.3)',
-  },
-  endBtn: {
     width: '64px',
     height: '64px',
     borderRadius: '50%',
     border: 'none',
-    background: '#ef4444',
+    background: 'linear-gradient(135deg, #22c55e, #16a34a)', // Градиент зеленого
+    color: '#fff',
+    fontSize: '32px',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    animation: 'pulse-btn 1.5s infinite',
+    boxShadow: '0 8px 24px rgba(34, 197, 94, 0.4), inset 0 2px 4px rgba(255,255,255,0.2)',
+  },
+  declineBtn: {
+    width: '64px',
+    height: '64px',
+    borderRadius: '50%',
+    border: 'none',
+    background: 'linear-gradient(135deg, #ef4444, #dc2626)', // Градиент красного
+    fontSize: '32px',
+    color: '#fff',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    boxShadow: '0 8px 24px rgba(239, 68, 68, 0.4), inset 0 2px 4px rgba(255,255,255,0.2)',
+  },
+  endBtn: {
+    width: '52px', // Чуть аккуратнее кнопка сброса
+    height: '52px',
+    borderRadius: '50%',
+    border: 'none',
+    background: 'rgba(239, 68, 68, 0.9)', // Полупрозрачный красный
     color: '#fff',
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     marginLeft: '12px',
-    boxShadow: '0 4px 16px rgba(239, 68, 68, 0.4)',
+    boxShadow: '0 4px 16px rgba(239, 68, 68, 0.3)',
     transition: 'all 0.2s ease',
   },
 };
@@ -1353,19 +1390,27 @@ if (typeof document !== 'undefined') {
   const styleSheet = document.createElement('style');
   styleSheet.textContent = `
     @keyframes pulse-ring {
-      0% { transform: scale(1); opacity: 0.8; }
-      100% { transform: scale(1.5); opacity: 0; }
+      0% { transform: scale(1); opacity: 0.6; }
+      100% { transform: scale(1.6); opacity: 0; }
     }
     
     @keyframes pulse-btn {
-      0%, 100% { transform: scale(1); }
-      50% { transform: scale(1.05); }
+      0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }
+      50% { transform: scale(1.05); box-shadow: 0 0 0 10px rgba(34, 197, 94, 0); }
+    }
+
+    @keyframes modal-appear {
+        from { transform: scale(0.95); opacity: 0; }
+        to { transform: scale(1); opacity: 1; }
     }
 
     button:hover {
-        transform: scale(1.05);
+        transform: translateY(-2px); /* Легкий подъем при наведении */
+        filter: brightness(1.1);
     }
     
+    button:active {
+        transform: translateY(0)
     button:active {
         transform: scale(0.95);
     }
