@@ -110,6 +110,7 @@ function CallModal({
   const ringtoneRef = useRef(null);
   const pendingCandidatesRef = useRef([]);
   const isInitiatorRef = useRef(false);
+  const remoteUserIdRef = useRef(null); // ID собеседника для отправки сигналов
 
   // Cleanup function
   const cleanup = useCallback(() => {
@@ -218,11 +219,12 @@ function CallModal({
     
     // Handle ICE candidates
     pc.onicecandidate = (event) => {
-      if (event.candidate && socket && remoteUser?._id) {
-        console.log('[CallModal] Sending ICE candidate');
+      const targetId = remoteUserIdRef.current || remoteUser?._id;
+      if (event.candidate && socket && targetId) {
+        console.log('[CallModal] Sending ICE candidate to:', targetId);
         socket.emit('call:signal', {
           callId,
-          targetUserId: remoteUser._id,
+          targetUserId: targetId,
           signal: {
             type: 'ice-candidate',
             candidate: event.candidate.toJSON()
@@ -269,36 +271,15 @@ function CallModal({
     }, 1000);
   };
 
-  // Create and send offer (initiator)
-  const createAndSendOffer = useCallback(async (pc) => {
-    try {
-      console.log('[CallModal] Creating offer');
-      const offer = await pc.createOffer({
-        offerToReceiveAudio: true,
-        offerToReceiveVideo: callType === 'video'
-      });
-      
-      console.log('[CallModal] Setting local description (offer)');
-      await pc.setLocalDescription(offer);
-      
-      console.log('[CallModal] Sending offer via socket');
-      socket.emit('call:signal', {
-        callId,
-        targetUserId: remoteUser?._id,
-        signal: {
-          type: 'offer',
-          sdp: offer.sdp
-        }
-      });
-    } catch (err) {
-      console.error('[CallModal] Error creating offer:', err);
-    }
-  }, [socket, callId, remoteUser, callType]);
-
   // Handle incoming offer and send answer
-  const handleOffer = useCallback(async (pc, offerSdp) => {
+  const handleOffer = useCallback(async (pc, offerSdp, fromUserId) => {
     try {
-      console.log('[CallModal] Handling offer');
+      console.log('[CallModal] Handling offer from:', fromUserId);
+      
+      // Сохраняем ID того кто прислал offer
+      if (fromUserId) {
+        remoteUserIdRef.current = fromUserId;
+      }
       
       await pc.setRemoteDescription(new RTCSessionDescription({
         type: 'offer',
@@ -311,10 +292,12 @@ function CallModal({
       console.log('[CallModal] Setting local description (answer)');
       await pc.setLocalDescription(answer);
       
-      console.log('[CallModal] Sending answer via socket');
+      // Отправляем answer тому кто прислал offer
+      const targetId = fromUserId || remoteUserIdRef.current || remoteUser?._id;
+      console.log('[CallModal] Sending answer to:', targetId);
       socket.emit('call:signal', {
         callId,
-        targetUserId: remoteUser?._id,
+        targetUserId: targetId,
         signal: {
           type: 'answer',
           sdp: answer.sdp
@@ -468,7 +451,7 @@ function CallModal({
       
       try {
         if (signal.type === 'offer') {
-          await handleOffer(pc, signal.sdp);
+          await handleOffer(pc, signal.sdp, fromUserId);
         } else if (signal.type === 'answer') {
           await handleAnswer(pc, signal.sdp);
         } else if (signal.type === 'ice-candidate' && signal.candidate) {
@@ -486,12 +469,37 @@ function CallModal({
     };
     
     const handleParticipantJoined = async ({ userId: joinedUserId, userName }) => {
-      console.log('[CallModal] Participant joined:', userName, 'joinedUserId:', joinedUserId, 'isInitiator:', isInitiatorRef.current);
+      console.log('[CallModal] Participant joined:', userName, 'joinedUserId:', joinedUserId, 'isInitiator:', isInitiatorRef.current, 'remoteUser:', remoteUser);
       
-      // If we are the initiator and someone joined, send offer
+      // Сохраняем ID собеседника
+      remoteUserIdRef.current = joinedUserId;
+      
+      // If we are the initiator and someone joined, send offer TO THAT USER
       if (isInitiatorRef.current && peerConnectionRef.current) {
-        console.log('[CallModal] We are initiator, sending offer to joined participant');
-        await createAndSendOffer(peerConnectionRef.current);
+        console.log('[CallModal] We are initiator, sending offer to:', joinedUserId);
+        
+        try {
+          const pc = peerConnectionRef.current;
+          const offer = await pc.createOffer({
+            offerToReceiveAudio: true,
+            offerToReceiveVideo: callType === 'video'
+          });
+          
+          await pc.setLocalDescription(offer);
+          
+          // Отправляем offer именно тому кто присоединился
+          socket.emit('call:signal', {
+            callId,
+            targetUserId: joinedUserId, // Используем ID присоединившегося, не remoteUser
+            signal: {
+              type: 'offer',
+              sdp: offer.sdp
+            }
+          });
+          console.log('[CallModal] Offer sent to:', joinedUserId);
+        } catch (err) {
+          console.error('[CallModal] Error sending offer:', err);
+        }
       }
     };
     
@@ -514,7 +522,7 @@ function CallModal({
       socket.off('call:participant_joined', handleParticipantJoined);
       socket.off('call:participant_left', handleParticipantLeft);
     };
-  }, [socket, callId, handleOffer, handleAnswer, handleIceCandidate, createAndSendOffer, cleanup, onClose]);
+  }, [socket, callId, callType, handleOffer, handleAnswer, handleIceCandidate, cleanup, onClose, remoteUser]);
 
   // Initialize call based on state
   useEffect(() => {
