@@ -120,6 +120,18 @@ function MessageBubble({ message, isMine }) {
     : '';
 
   const senderName = sender?.name || '';
+  
+  // Формирование URL для медиа-файлов
+  const getMediaUrl = (url) => {
+    if (!url) return '';
+    // Если URL уже абсолютный - возвращаем как есть
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      return url;
+    }
+    // Получаем базовый URL без /api
+    const baseUrl = API_URL.replace('/api', '');
+    return `${baseUrl}${url}`;
+  };
 
   const renderContent = () => {
     switch (type) {
@@ -127,10 +139,10 @@ function MessageBubble({ message, isMine }) {
         return (
           <div style={styles.mediaWrapper}>
             <img
-              src={`${API_URL.replace('/api', '')}${attachment?.url}`}
+              src={getMediaUrl(attachment?.url)}
               alt={attachment?.originalName || 'Изображение'}
               style={styles.imagePreview}
-              onClick={() => window.open(`${API_URL.replace('/api', '')}${attachment?.url}`, '_blank')}
+              onClick={() => window.open(getMediaUrl(attachment?.url), '_blank')}
             />
             {text && <div style={styles.mediaCaption}>{text}</div>}
           </div>
@@ -140,8 +152,9 @@ function MessageBubble({ message, isMine }) {
         return (
           <div style={styles.mediaWrapper}>
             <video
-              src={`${API_URL.replace('/api', '')}${attachment?.url}`}
+              src={getMediaUrl(attachment?.url)}
               controls
+              preload="metadata"
               style={styles.videoPreview}
             />
             {text && <div style={styles.mediaCaption}>{text}</div>}
@@ -149,25 +162,32 @@ function MessageBubble({ message, isMine }) {
         );
 
       case 'audio':
+        // CRITICAL: Правильное воспроизведение голосовых сообщений
+        const audioUrl = getMediaUrl(attachment?.url);
         return (
           <div style={styles.audioWrapper}>
             <span style={styles.audioIcon}>🎤</span>
             <audio
-              src={`${API_URL.replace('/api', '')}${attachment?.url}`}
               controls
+              preload="metadata"
               style={styles.audioPlayer}
-            />
+            >
+              <source src={audioUrl} type="audio/webm" />
+              <source src={audioUrl} type="audio/ogg" />
+              <source src={audioUrl} type="audio/mpeg" />
+              Ваш браузер не поддерживает аудио
+            </audio>
           </div>
         );
 
       case 'file':
         return (
           <a
-            href={`${API_URL.replace('/api', '')}${attachment?.url}`}
+            href={getMediaUrl(attachment?.url)}
             target="_blank"
             rel="noopener noreferrer"
             style={styles.fileLink}
-            download
+            download={attachment?.originalName || 'file'}
           >
             <span style={styles.fileIcon}>📄</span>
             <div style={styles.fileInfo}>
@@ -176,6 +196,7 @@ function MessageBubble({ message, isMine }) {
                 {attachment?.size ? formatFileSize(attachment.size) : ''}
               </div>
             </div>
+            <span style={styles.downloadIcon}>⬇️</span>
           </a>
         );
 
@@ -410,6 +431,7 @@ const styles = {
   },
   fileInfo: {
     overflow: 'hidden',
+    flex: 1,
   },
   fileName: {
     fontSize: '13px',
@@ -422,6 +444,10 @@ const styles = {
   fileSize: {
     fontSize: '11px',
     opacity: 0.7,
+  },
+  downloadIcon: {
+    fontSize: '16px',
+    opacity: 0.8,
   },
 };
 

@@ -36,8 +36,76 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// Статические файлы
-app.use('/uploads', express.static(uploadsDir));
+// MIME-типы для корректного воспроизведения
+const mimeTypes = {
+  '.webm': 'audio/webm',
+  '.ogg': 'audio/ogg',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.m4a': 'audio/mp4',
+  '.mp4': 'video/mp4',
+  '.webp': 'image/webp',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.pdf': 'application/pdf',
+  '.doc': 'application/msword',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xls': 'application/vnd.ms-excel',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.zip': 'application/zip',
+  '.rar': 'application/x-rar-compressed',
+};
+
+// Роут для скачивания файлов с правильными заголовками
+app.get('/uploads/:filename', (req, res) => {
+  const filename = req.params.filename;
+  const filePath = path.join(uploadsDir, filename);
+  
+  // Проверка существования файла
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'Файл не найден' });
+  }
+  
+  // Получение расширения и MIME-типа
+  const ext = path.extname(filename).toLowerCase();
+  const mimeType = mimeTypes[ext] || 'application/octet-stream';
+  
+  // Установка заголовков
+  res.setHeader('Content-Type', mimeType);
+  res.setHeader('Accept-Ranges', 'bytes');
+  
+  // Для аудио/видео - inline, для остальных - attachment
+  const isMedia = mimeType.startsWith('audio/') || mimeType.startsWith('video/') || mimeType.startsWith('image/');
+  if (isMedia) {
+    res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+  } else {
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  }
+  
+  // Поддержка Range requests для аудио/видео
+  const stat = fs.statSync(filePath);
+  const fileSize = stat.size;
+  const range = req.headers.range;
+  
+  if (range && (mimeType.startsWith('audio/') || mimeType.startsWith('video/'))) {
+    const parts = range.replace(/bytes=/, '').split('-');
+    const start = parseInt(parts[0], 10);
+    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+    const chunkSize = end - start + 1;
+    
+    res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
+    res.setHeader('Content-Length', chunkSize);
+    res.status(206);
+    
+    const stream = fs.createReadStream(filePath, { start, end });
+    stream.pipe(res);
+  } else {
+    res.setHeader('Content-Length', fileSize);
+    fs.createReadStream(filePath).pipe(res);
+  }
+});
 
 // Загрузка файлов
 const storage = multer.diskStorage({

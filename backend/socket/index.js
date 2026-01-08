@@ -207,13 +207,17 @@ module.exports = function(io) {
 
     socket.on('call:accept', async ({ callId }, callback) => {
       try {
+        console.log(`[Socket] call:accept from ${userId}, callId: ${callId}`);
+        
         const call = await Call.findById(callId);
         if (!call) {
+          console.log('[Socket] call:accept - call not found');
           return callback?.({ error: 'Звонок не найден' });
         }
 
         const chat = await Chat.findById(call.chat);
         if (!chat || !chat.isParticipant(userId)) {
+          console.log('[Socket] call:accept - user not in chat');
           return callback?.({ error: 'Нет доступа к звонку' });
         }
 
@@ -231,9 +235,26 @@ module.exports = function(io) {
           activeCall.participants.add(userId);
         }
 
+        // Уведомляем инициатора что звонок принят
+        const initiatorId = call.initiator.toString();
+        const initiatorSockets = userSockets.get(initiatorId);
+        
+        console.log(`[Socket] Notifying initiator ${initiatorId} about accepted call`);
+        
+        if (initiatorSockets) {
+          initiatorSockets.forEach(socketId => {
+            io.to(socketId).emit('call:participant_joined', {
+              callId,
+              userId: userId,
+              userName: socket.user.name
+            });
+          });
+        }
+
+        // Также отправляем в комнату чата
         io.to(`chat:${chat._id}`).emit('call:participant_joined', {
           callId,
-          odst: userId,
+          userId: userId,
           userName: socket.user.name
         });
 
@@ -246,11 +267,24 @@ module.exports = function(io) {
 
     // WebRTC signaling - НЕ сохраняем в БД!
     socket.on('call:signal', async ({ callId, targetUserId, signal }) => {
+      console.log(`[Socket] call:signal from ${userId} to ${targetUserId}, type: ${signal?.type}`);
+      
       const call = await Call.findById(callId);
-      if (!call || !call.isInCall(userId)) return;
+      if (!call) {
+        console.log('[Socket] call:signal - call not found:', callId);
+        return;
+      }
+      
+      // Проверяем что отправитель участник звонка
+      const chat = await Chat.findById(call.chat);
+      if (!chat || !chat.isParticipant(userId)) {
+        console.log('[Socket] call:signal - user not in chat');
+        return;
+      }
 
       const targetSockets = userSockets.get(targetUserId);
-      if (targetSockets) {
+      if (targetSockets && targetSockets.size > 0) {
+        console.log(`[Socket] Sending signal to ${targetUserId}, sockets: ${targetSockets.size}`);
         targetSockets.forEach(socketId => {
           io.to(socketId).emit('call:signal', {
             callId,
@@ -258,6 +292,8 @@ module.exports = function(io) {
             signal
           });
         });
+      } else {
+        console.log(`[Socket] Target user ${targetUserId} not connected`);
       }
     });
 
@@ -350,12 +386,12 @@ module.exports = function(io) {
 
   // Рассылка статуса
   async function broadcastUserStatus(io, odst, status) {
-    const userChats = await Chat.find({ 'participants.user': userId }).select('participants');
+    const userChats = await Chat.find({ 'participants.user': odst }).select('participants');
     const contactIds = new Set();
 
     userChats.forEach(chat => {
       chat.participants.forEach(p => {
-        if (p.user.toString() !== userId) {
+        if (p.user.toString() !== odst) {
           contactIds.add(p.user.toString());
         }
       });
@@ -366,7 +402,7 @@ module.exports = function(io) {
       if (contactSockets) {
         contactSockets.forEach(socketId => {
           io.to(socketId).emit('user:status', {
-            userId,
+            userId: odst,
             status,
             lastSeen: status === 'offline' ? new Date() : null
           });

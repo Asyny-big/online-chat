@@ -123,23 +123,43 @@ function MessageInput({ chatId, socket, token, onTyping }) {
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg'
-      });
+      
+      // Определяем поддерживаемый MIME-тип
+      let mimeType = 'audio/webm';
+      if (!MediaRecorder.isTypeSupported('audio/webm')) {
+        if (MediaRecorder.isTypeSupported('audio/ogg')) {
+          mimeType = 'audio/ogg';
+        } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+          mimeType = 'audio/mp4';
+        } else {
+          mimeType = ''; // Использовать дефолтный
+        }
+      }
+      
+      console.log('[MessageInput] Recording with mimeType:', mimeType);
+      
+      const options = mimeType ? { mimeType } : {};
+      const mediaRecorder = new MediaRecorder(stream, options);
       
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
 
       mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+        if (e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
       };
 
       mediaRecorder.onstop = async () => {
         stream.getTracks().forEach(track => track.stop());
         
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const actualMimeType = mediaRecorder.mimeType || mimeType || 'audio/webm';
+        const audioBlob = new Blob(audioChunksRef.current, { type: actualMimeType });
+        
+        console.log('[MessageInput] Recording stopped, blob size:', audioBlob.size, 'type:', actualMimeType);
+        
         if (audioBlob.size > 0) {
-          await uploadVoiceMessage(audioBlob);
+          await uploadVoiceMessage(audioBlob, actualMimeType);
         }
       };
 
@@ -183,11 +203,17 @@ function MessageInput({ chatId, socket, token, onTyping }) {
     }
   };
 
-  const uploadVoiceMessage = async (blob) => {
+  const uploadVoiceMessage = async (blob, mimeType) => {
     setUploading(true);
     try {
+      // Определяем расширение файла на основе MIME-типа
+      let extension = '.webm';
+      if (mimeType.includes('ogg')) extension = '.ogg';
+      else if (mimeType.includes('mp4') || mimeType.includes('m4a')) extension = '.m4a';
+      else if (mimeType.includes('mpeg') || mimeType.includes('mp3')) extension = '.mp3';
+      
       const formData = new FormData();
-      formData.append('file', blob, `voice_${Date.now()}.webm`);
+      formData.append('file', blob, `voice_${Date.now()}${extension}`);
 
       const res = await axios.post(`${API_URL}/upload`, formData, {
         headers: {
@@ -196,6 +222,8 @@ function MessageInput({ chatId, socket, token, onTyping }) {
         }
       });
 
+      console.log('[MessageInput] Voice uploaded:', res.data);
+
       socket.emit('message:send', {
         chatId,
         type: 'audio',
@@ -203,7 +231,7 @@ function MessageInput({ chatId, socket, token, onTyping }) {
         attachment: {
           url: res.data.url,
           originalName: 'Голосовое сообщение',
-          mimeType: 'audio/webm',
+          mimeType: mimeType || 'audio/webm',
           size: res.data.size
         }
       });

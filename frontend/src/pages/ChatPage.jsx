@@ -104,27 +104,46 @@ function ChatPage({ token, onLogout }) {
     });
 
     // === ЗВОНКИ ===
-    socket.on('call:incoming', ({ callId, chatId, chatName, initiator, type }) => {
+    socket.on('call:incoming', ({ callId: incomingCallId, chatId: incomingChatId, chatName, initiator, type }) => {
+      console.log('[ChatPage] Incoming call:', { incomingCallId, incomingChatId, initiator, type });
+      
+      // Ищем чат для отображения
+      const chat = chats.find(c => c._id === incomingChatId);
+      
       setCallState('incoming');
       setCallType(type);
-      setCallId(callId);
-      setRemoteUser(initiator);
+      setCallId(incomingCallId);
+      setRemoteUser({
+        _id: initiator._id,
+        name: initiator.name || chatName || 'Пользователь',
+        avatarUrl: initiator.avatarUrl
+      });
+      
+      // Если мы не в этом чате - переключаемся
+      if (!selectedChat || selectedChat._id !== incomingChatId) {
+        if (chat) {
+          setSelectedChat(chat);
+        }
+      }
     });
 
-    socket.on('call:participant_joined', ({ callId: cId, userId, userName }) => {
-      if (cId === callId && callState === 'outgoing') {
+    socket.on('call:participant_joined', ({ callId: cId, userId: joinedUserId, userName }) => {
+      console.log('[ChatPage] Participant joined:', { cId, joinedUserId, userName, currentCallId: callId, currentCallState: callState });
+      
+      // Если это наш звонок и мы инициатор (outgoing)
+      if (callState === 'outgoing') {
         setCallState('active');
       }
     });
 
     socket.on('call:ended', ({ callId: cId, reason }) => {
-      if (cId === callId || callState !== 'idle') {
-        resetCallState();
-      }
+      console.log('[ChatPage] Call ended:', { cId, reason, currentCallId: callId });
+      resetCallState();
     });
 
     socket.on('call:participant_left', ({ callId: cId, callEnded }) => {
-      if (callEnded && (cId === callId || callState !== 'idle')) {
+      console.log('[ChatPage] Participant left:', { cId, callEnded });
+      if (callEnded) {
         resetCallState();
       }
     });
@@ -277,6 +296,7 @@ function ChatPage({ token, onLogout }) {
           chatId={selectedChat?._id}
           remoteUser={remoteUser}
           onClose={resetCallState}
+          currentUserId={currentUserId}
         />
       )}
     </div>
