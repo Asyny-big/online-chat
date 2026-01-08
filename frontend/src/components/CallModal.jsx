@@ -72,6 +72,10 @@ function CallModal({
 }) {
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
+  // videoMode описывает, ЧТО именно мы отправляем в видеотреке: камера или демонстрация экрана.
+  // Это локальное состояние (UI/логика) + мы синхронизируем его с собеседником через socket.
+  const [localVideoMode, setLocalVideoMode] = useState('camera'); // 'camera' | 'screen'
+  const [remoteVideoMode, setRemoteVideoMode] = useState('camera'); // 'camera' | 'screen'
   const [callDuration, setCallDuration] = useState(0);
   const [connectionState, setConnectionState] = useState('new');
   const [hasLocalStream, setHasLocalStream] = useState(false);
@@ -83,11 +87,83 @@ function CallModal({
   const remoteVideoRef = useRef(null);
   const peerConnectionRef = useRef(null);
   const localStreamRef = useRef(null);
+  const screenStreamRef = useRef(null);
   const timerRef = useRef(null);
   const ringtoneRef = useRef(null);
   const pendingCandidatesRef = useRef([]);
   const isInitiatorRef = useRef(false);
   const remoteUserIdRef = useRef(null); // ID собеседника для отправки сигналов
+  const localVideoModeRef = useRef('camera');
+
+  useEffect(() => {
+    localVideoModeRef.current = localVideoMode;
+  }, [localVideoMode]);
+
+  // Явно НЕ поддерживаем screen share в мобильных браузерах.
+  // (Android WebView/Chrome mobile и iOS Safari имеют другие ограничения; под них будет отдельная логика в будущем.)
+  const isMobileBrowser = () => {
+    try {
+      const ua = navigator.userAgent || '';
+      const uaDataMobile = navigator.userAgentData?.mobile;
+      if (uaDataMobile === true) return true;
+      if (/Android|iPhone|iPad|iPod|IEMobile|Opera Mini/i.test(ua)) return true;
+      // Фолбэк: coarse pointer часто означает touch-девайс
+      if (window.matchMedia?.('(pointer:coarse)')?.matches) return true;
+    } catch (e) {
+      // Если что-то пошло не так — считаем что НЕ mobile, чтобы не ломать десктоп.
+    }
+    return false;
+  };
+
+  const getVideoSender = (pc) => pc?.getSenders?.().find(s => s.track?.kind === 'video') || null;
+
+  // Универсальная логика замены исходящего видеотрека в существующем RTCPeerConnection.
+  // Важно: не делаем renegotiation (offer/answer), только sender.replaceTrack().
+  const replaceOutgoingVideoTrack = useCallback(async (newVideoTrack) => {
+    const pc = peerConnectionRef.current;
+    if (!pc) throw new Error('PeerConnection не инициализирован');
+
+    const videoSender = getVideoSender(pc);
+    if (!videoSender) throw new Error('Видео sender не найден');
+
+    const oldVideoTrack = localStreamRef.current?.getVideoTracks?.()?.[0] || null;
+
+    await videoSender.replaceTrack(newVideoTrack);
+    console.log('[CallModal] Outgoing video track replaced via replaceTrack()');
+
+    // Обновляем локальный stream (чтобы local preview показывал актуальный источник)
+    if (localStreamRef.current) {
+      if (oldVideoTrack) {
+        try { localStreamRef.current.removeTrack(oldVideoTrack); } catch (e) {}
+      }
+      try { localStreamRef.current.addTrack(newVideoTrack); } catch (e) {}
+    }
+
+    // Останавливаем старый видеотрек, чтобы не держать камеру/ресурсы.
+    if (oldVideoTrack && oldVideoTrack !== newVideoTrack) {
+      try { oldVideoTrack.stop(); } catch (e) {}
+    }
+
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = localStreamRef.current;
+    }
+  }, []);
+
+  // Отправляем текущее состояние видеорежима собеседнику через существующий signaling-канал.
+  // Сервер прозрачно форвардит любые типы signal.
+  const sendVideoMode = useCallback((mode, explicitTargetUserId = null) => {
+    const targetId = explicitTargetUserId || remoteUserIdRef.current || remoteUser?._id;
+    if (!socket || !callId || !targetId) return;
+
+    socket.emit('call:signal', {
+      callId,
+      targetUserId: targetId,
+      signal: {
+        type: 'video-mode',
+        mode
+      }
+    });
+  }, [socket, callId, remoteUser]);
 
   // Загрузка ICE серверов с backend (с временными TURN credentials)
   const fetchIceServers = useCallback(async () => {
@@ -146,6 +222,14 @@ function CallModal({
       });
       localStreamRef.current = null;
     }
+
+    // Stop screen stream (если был отдельный stream от getDisplayMedia)
+    if (screenStreamRef.current) {
+      try {
+        screenStreamRef.current.getTracks().forEach(track => track.stop());
+      } catch (e) {}
+      screenStreamRef.current = null;
+    }
     
     // Close peer connection
     if (peerConnectionRef.current) {
@@ -156,6 +240,8 @@ function CallModal({
     pendingCandidatesRef.current = [];
     setHasLocalStream(false);
     setHasRemoteStream(false);
+    setLocalVideoMode('camera');
+    setRemoteVideoMode('camera');
   }, []);
 
   // Initialize media (CRITICAL: This MUST work)
@@ -480,6 +566,10 @@ function CallModal({
   // Смена камеры (фронтальная/задняя)
   const switchCamera = useCallback(async () => {
     if (callType !== 'video' || !localStreamRef.current) return;
+    if (localVideoModeRef.current === 'screen') {
+      alert('Сейчас включена демонстрация экрана. Сначала верните камеру.');
+      return;
+    }
     
     try {
       const newFacingMode = facingMode === 'user' ? 'environment' : 'user';
@@ -532,6 +622,107 @@ function CallModal({
     }
   }, [callType, facingMode]);
 
+  // Выключить демонстрацию экрана и вернуть камеру.
+  const stopScreenShare = useCallback(async () => {
+    if (callType !== 'video') return;
+    if (localVideoModeRef.current !== 'screen') return;
+
+    try {
+      console.log('[CallModal] Stopping screen share and returning camera');
+
+      // ВАЖНО: сначала подменяем трек на camera, и только потом останавливаем screen-track.
+      // Иначе можно получить короткий "black frame" на удалённой стороне.
+      const prevScreenStream = screenStreamRef.current;
+
+      // Забираем новый camera video track (аудио остаётся прежним)
+      const camStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+          facingMode
+        },
+        audio: false
+      });
+      const camTrack = camStream.getVideoTracks()[0];
+      if (!camTrack) {
+        throw new Error('Не удалось получить video track камеры');
+      }
+
+      await replaceOutgoingVideoTrack(camTrack);
+
+      // Теперь безопасно остановить демонстрацию экрана.
+      if (prevScreenStream) {
+        try { prevScreenStream.getTracks().forEach(t => t.stop()); } catch (e) {}
+      }
+      screenStreamRef.current = null;
+
+      // camStream содержит только video; чтобы не держать лишний stream объект, оставим жить только track.
+      // (Остановка camStream остановит и camTrack, поэтому НЕ останавливаем camStream здесь.)
+
+      setLocalVideoMode('camera');
+      sendVideoMode('camera');
+    } catch (err) {
+      console.error('[CallModal] stopScreenShare error:', err);
+      alert('Не удалось вернуть камеру: ' + (err?.message || err));
+    }
+  }, [callType, facingMode, replaceOutgoingVideoTrack, sendVideoMode]);
+
+  // Включить демонстрацию экрана (ТОЛЬКО по клику пользователя).
+  // Требования:
+  // - navigator.mediaDevices.getDisplayMedia({ video: true, audio: false })
+  // - не создаём новый RTCPeerConnection
+  // - используем sender.replaceTrack() без offer/answer
+  const startScreenShare = useCallback(async () => {
+    if (callType !== 'video') return;
+    if (isMobileBrowser()) {
+      alert('Демонстрация экрана не поддерживается в мобильных браузерах. Откройте чат в десктопном Chrome/Edge/Firefox.');
+      return;
+    }
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      alert('Ваш браузер не поддерживает getDisplayMedia().');
+      return;
+    }
+    if (!peerConnectionRef.current || !localStreamRef.current) {
+      alert('Звонок ещё не готов для демонстрации экрана.');
+      return;
+    }
+    if (localVideoModeRef.current === 'screen') return;
+
+    try {
+      console.log('[CallModal] Starting screen share via getDisplayMedia()');
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: false
+      });
+
+      const screenTrack = screenStream.getVideoTracks()[0];
+      if (!screenTrack) {
+        throw new Error('Не удалось получить video track для экрана');
+      }
+
+      // На случай повторного запуска — остановим предыдущий screen stream
+      if (screenStreamRef.current) {
+        try { screenStreamRef.current.getTracks().forEach(t => t.stop()); } catch (e) {}
+      }
+      screenStreamRef.current = screenStream;
+
+      // Автовозврат к камере, если пользователь нажал "Stop sharing" в UI браузера.
+      screenTrack.onended = () => {
+        console.log('[CallModal] Screen track ended by user');
+        stopScreenShare();
+      };
+
+      await replaceOutgoingVideoTrack(screenTrack);
+
+      setIsVideoOff(false);
+      setLocalVideoMode('screen');
+      sendVideoMode('screen');
+    } catch (err) {
+      console.error('[CallModal] startScreenShare error:', err);
+      alert('Не удалось запустить демонстрацию экрана: ' + (err?.message || err));
+    }
+  }, [callType, replaceOutgoingVideoTrack, sendVideoMode, stopScreenShare]);
+
   // Socket event handlers
   useEffect(() => {
     if (!socket) return;
@@ -558,6 +749,12 @@ function CallModal({
           await handleAnswer(pc, signal.sdp);
         } else if (signal.type === 'ice-candidate' && signal.candidate) {
           await handleIceCandidate(pc, signal.candidate);
+        } else if (signal.type === 'video-mode') {
+          const mode = signal?.mode;
+          if (mode === 'camera' || mode === 'screen') {
+            console.log('[CallModal] Remote video mode:', mode);
+            setRemoteVideoMode(mode);
+          }
         }
       } catch (err) {
         console.error('[CallModal] Signal handling error:', err);
@@ -605,6 +802,10 @@ function CallModal({
             }
           });
           console.log('[CallModal] Offer sent to:', joinedUserId);
+
+          // Сразу синхронизируем видеорежим (camera/screen) с присоединившимся.
+          // Это важно, если инициатор включил screen share ДО того, как собеседник принял звонок.
+          sendVideoMode(localVideoModeRef.current, joinedUserId);
         } catch (err) {
           console.error('[CallModal] Error sending offer:', err);
         }
@@ -630,7 +831,7 @@ function CallModal({
       socket.off('call:participant_joined', handleParticipantJoined);
       socket.off('call:participant_left', handleParticipantLeft);
     };
-  }, [socket, callId, callType, handleOffer, handleAnswer, handleIceCandidate, cleanup, onClose, remoteUser, currentUserId]);
+  }, [socket, callId, callType, handleOffer, handleAnswer, handleIceCandidate, cleanup, onClose, remoteUser, currentUserId, sendVideoMode]);
 
   // Initialize call based on state
   useEffect(() => {
@@ -725,14 +926,16 @@ function CallModal({
               autoPlay
               playsInline
               style={{
-                ...styles.remoteVideo,
-                display: hasRemoteStream ? 'block' : 'none'
+                ...(localVideoMode === 'screen' ? styles.localVideo : styles.remoteVideo),
+                display: hasRemoteStream ? 'block' : 'none',
+                // Если собеседник шлёт screen — показываем без кропа
+                objectFit: remoteVideoMode === 'screen' ? 'contain' : (localVideoMode === 'screen' ? 'cover' : 'cover')
               }}
             />
           ) : null}
           
-          {/* Avatar placeholder when no remote video */}
-          {(!hasRemoteStream || callType === 'audio') && (
+          {/* Avatar placeholder when no remote video (не показываем поверх screen share) */}
+          {(!hasRemoteStream || callType === 'audio') && localVideoMode !== 'screen' && (
             <div style={styles.avatarContainer}>
               <div style={styles.avatar}>
                 {remoteUser?.avatarUrl ? (
@@ -755,8 +958,10 @@ function CallModal({
               playsInline
               muted
               style={{
-                ...styles.localVideo,
-                opacity: hasLocalStream ? 1 : 0
+                ...(localVideoMode === 'screen' ? styles.remoteVideo : styles.localVideo),
+                opacity: hasLocalStream ? 1 : 0,
+                // Локальная демонстрация экрана тоже без кропа
+                objectFit: localVideoMode === 'screen' ? 'contain' : 'cover'
               }}
             />
           )}
@@ -822,6 +1027,27 @@ function CallModal({
                   🔄
                 </button>
               )}
+
+              {/* Screen share (только web desktop). */}
+              {callType === 'video' && localVideoMode !== 'screen' && (
+                <button
+                  onClick={startScreenShare}
+                  style={styles.screenShareBtn}
+                  title="Начать демонстрацию экрана"
+                >
+                  Показ экрана
+                </button>
+              )}
+
+              {callType === 'video' && localVideoMode === 'screen' && (
+                <button
+                  onClick={stopScreenShare}
+                  style={styles.screenShareBtn}
+                  title="Остановить демонстрацию экрана"
+                >
+                  Вернуть камеру
+                </button>
+              )}
               
               <button onClick={handleEndCall} style={styles.endBtn} title="Завершить">
                 <span>📵</span>
@@ -883,6 +1109,20 @@ const styles = {
     border: '2px solid #3b82f6',
     background: '#000',
     transition: 'opacity 0.3s',
+  },
+  screenShareBtn: {
+    height: '40px',
+    padding: '0 12px',
+    borderRadius: '12px',
+    border: 'none',
+    background: '#334155',
+    color: '#fff',
+    fontSize: '14px',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    whiteSpace: 'nowrap',
   },
   avatarContainer: {
     position: 'relative',
