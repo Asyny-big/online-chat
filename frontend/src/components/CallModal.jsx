@@ -1159,8 +1159,44 @@ function CallModal({
                   onClick={switchCamera}
                   style={styles.controlBtn}
                   title="Сменить камеру"
-                >75)', // Затемненный фон
-    backdropFilter: 'blur(12px)',      // Размытие фона
+                >
+                  <Icons.Switch />
+                </button>
+              )}
+
+              {callType === 'video' && !isMobileBrowser() && (
+                <button
+                  onClick={localVideoMode === 'screen' ? stopScreenShare : startScreenShare}
+                  style={{
+                    ...styles.controlBtn,
+                    ...(localVideoMode === 'screen' ? styles.controlBtnActive : {})
+                  }}
+                  title={localVideoMode === 'screen' ? "Остановить демонстрацию" : "Демонстрация экрана"}
+                >
+                  <Icons.Screen active={localVideoMode === 'screen'} />
+                </button>
+              )}
+              
+              <button onClick={handleEndCall} style={styles.endBtn} title="Завершить">
+                <Icons.Hangup />
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const styles = {
+  overlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    background: 'rgba(0, 0, 0, 0.75)', 
+    backdropFilter: 'blur(12px)',      
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1168,7 +1204,6 @@ function CallModal({
     perspective: '1000px',
   },
   modal: {
-    // Базовые стили, которые переопределяются логикой
     position: 'relative',
     overflow: 'hidden',
     display: 'flex',
@@ -1195,50 +1230,14 @@ function CallModal({
     position: 'absolute',
     top: '24px',
     right: '24px',
-    width: '180px', // Чуть больше на десктопе
+    width: '180px', 
     aspectRatio: '3/4',
     borderRadius: '16px',
     objectFit: 'cover',
     border: '2px solid rgba(255, 255, 255, 0.1)',
     boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
     background: '#1a1a1a',
-    transition: 'opacity 0.3s, width
-  modal: {
-    width: '100%',
-    height: '100%',
-    background: '#0f172a',
-    position: 'relative',
-    overflow: 'hidden',
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  videoContainer: {
-    flex: 1,
-    position: 'relative',
-    background: '#000',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: '100%',
-    height: '100%',
-  },
-  remoteVideo: {
-    width: '100%',
-    height: '100%',
-    objectFit: 'contain',
-  },
-  localVideo: {
-    position: 'absolute',
-    top: '24px',
-    right: '24px',
-    width: '140px',
-    aspectRatio: '3/4',
-    borderRadius: '16px',
-    objectFit: 'cover',
-    border: '1px solid rgba(255, 255, 255, 0.2)',
-    boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-    background: '#1a1a1a',
-    transition: 'opacity 0.3s',
+    transition: 'opacity 0.3s, width 0.3s',
     zIndex: 10,
   },
   avatarContainer: {
@@ -1310,13 +1309,15 @@ function CallModal({
     left: '50%',
     transform: 'translateX(-50%)',
     display: 'flex',
-    alignI16px', // Чуть плотнее отступы
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '16px', 
     padding: '12px 24px',
     borderRadius: '24px',
-    background: 'rgba(30, 41, 59, 0.75)', // Темно-синий оттенок (Slate 800)
-    backdropFilter: 'blur(16px) saturate(180%)', // Сильное размытие для стекла
+    background: 'rgba(30, 41, 59, 0.75)', 
+    backdropFilter: 'blur(16px) saturate(180%)', 
     border: '1px solid rgba(255, 255, 255, 0.1)',
-    boxShadow: '0 20px 40px rgba(0, 0, 0, 0.4), inset 0 1px 1px rgba(255,255,255,0.1)', // Объем
+    boxShadow: '0 20px 40px rgba(0, 0, 0, 0.4), inset 0 1px 1px rgba(255,255,255,0.1)',
     zIndex: 50,
     transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
   },
@@ -1325,8 +1326,8 @@ function CallModal({
     height: '52px',
     borderRadius: '50%',
     border: 'none',
-    background: 'rgba(255, 255, 255, 0.05)', // Легкая подложка
-    color: '#e2e8f0', // Светлый текст
+    background: 'rgba(255, 255, 255, 0.05)', 
+    color: '#e2e8f0', 
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
@@ -1334,9 +1335,9 @@ function CallModal({
     transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
   },
   controlBtnActive: {
-    background: '#3b82f6', // Яркий синий активный цвет (Tailwind blue-500)
+    background: '#3b82f6', 
     color: '#fff',
-    boxShadow: '0 0 20px rgba(59, 130, 246, 0.5)', // Свечение
+    boxShadow: '0 0 20px rgba(59, 130, 246, 0.5)', 
     transform: 'scale(1.05)',
   },
   acceptBtn: {
@@ -1344,7 +1345,7 @@ function CallModal({
     height: '64px',
     borderRadius: '50%',
     border: 'none',
-    background: 'linear-gradient(135deg, #22c55e, #16a34a)', // Градиент зеленого
+    background: 'linear-gradient(135deg, #22c55e, #16a34a)', 
     color: '#fff',
     fontSize: '32px',
     cursor: 'pointer',
@@ -1359,7 +1360,7 @@ function CallModal({
     height: '64px',
     borderRadius: '50%',
     border: 'none',
-    background: 'linear-gradient(135deg, #ef4444, #dc2626)', // Градиент красного
+    background: 'linear-gradient(135deg, #ef4444, #dc2626)', 
     fontSize: '32px',
     color: '#fff',
     cursor: 'pointer',
@@ -1369,11 +1370,11 @@ function CallModal({
     boxShadow: '0 8px 24px rgba(239, 68, 68, 0.4), inset 0 2px 4px rgba(255,255,255,0.2)',
   },
   endBtn: {
-    width: '52px', // Чуть аккуратнее кнопка сброса
+    width: '52px', 
     height: '52px',
     borderRadius: '50%',
     border: 'none',
-    background: 'rgba(239, 68, 68, 0.9)', // Полупрозрачный красный
+    background: 'rgba(239, 68, 68, 0.9)', 
     color: '#fff',
     cursor: 'pointer',
     display: 'flex',
@@ -1405,14 +1406,12 @@ if (typeof document !== 'undefined') {
     }
 
     button:hover {
-        transform: translateY(-2px); /* Легкий подъем при наведении */
+        transform: translateY(-2px); 
         filter: brightness(1.1);
     }
     
     button:active {
-        transform: translateY(0)
-    button:active {
-        transform: scale(0.95);
+        transform: translateY(0) scale(0.95);
     }
   `;
   document.head.appendChild(styleSheet);
