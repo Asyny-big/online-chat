@@ -1,6 +1,64 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { API_URL } from '../config';
 
+const Icons = {
+  Mic: ({ off }) => (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {off ? (
+        <>
+          <line x1="1" y1="1" x2="23" y2="23"></line>
+          <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94 0v5.12"></path>
+          <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
+          <line x1="12" y1="19" x2="12" y2="23"></line>
+          <line x1="8" y1="23" x2="16" y2="23"></line>
+        </>
+      ) : (
+        <>
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+          <line x1="12" y1="19" x2="12" y2="23"></line>
+          <line x1="8" y1="23" x2="16" y2="23"></line>
+        </>
+      )}
+    </svg>
+  ),
+  Camera: ({ off }) => (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {off ? (
+        <>
+          <line x1="1" y1="1" x2="23" y2="23"></line>
+          <path d="M21 21l-3.5-3.5m-2-2l-2-2m-2-2l-2-2m-2-2l-3.5-3.5"></path>
+          <path d="M15 7h2a2 2 0 0 1 2 2v2m0 4v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h1"></path>
+          <polygon points="23 7 16 12 23 17 23 7"></polygon>
+        </>
+      ) : (
+        <>
+          <polygon points="23 7 16 12 23 17 23 7"></polygon>
+          <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+        </>
+      )}
+    </svg>
+  ),
+  Screen: ({ active }) => (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={active ? "#3b82f6" : "currentColor"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+      <line x1="8" y1="21" x2="16" y2="21"></line>
+      <line x1="12" y1="17" x2="12" y2="21"></line>
+    </svg>
+  ),
+  Switch: () => (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M20 10c0-4.418-3.582-8-8-8s-8 3.582-8 8H1l5 6 5-6H7c0-2.761 2.239-5 5-5s5 2.239 5 5c0 1.25-.457 2.39-1.21 3.266" />
+        <path d="M4 14c0 4.418 3.582 8 8 8s8-3.582 8-8h3l-5-6-5 6h4c0 2.761-2.239 5-5 5s-5-2.239-5-5c0-1.25.457-2.39 1.21-3.266" />
+    </svg>
+  ),
+  Hangup: () => (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+        <path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.18-.43.28-.7.28-.28 0-.53-.11-.71-.29L.29 13.08a.956.956 0 0 1-.29-.7c0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.67c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.48 2.48c-.18.18-.43.29-.71.29-.27 0-.52-.11-.7-.28-.79-.74-1.69-1.36-2.67-1.85-.33-.16-.56-.5-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z"/>
+    </svg>
+  )
+};
+
 // Простой рингтон (Web Audio API)
 function createRingtone() {
   try {
@@ -82,6 +140,40 @@ function CallModal({
   const [facingMode, setFacingMode] = useState('user'); // 'user' = фронтальная, 'environment' = задняя
   const [hasRemoteStream, setHasRemoteStream] = useState(false);
   const [iceServers, setIceServers] = useState(null);
+
+  // UI state for floating controls
+  const [showControls, setShowControls] = useState(true);
+  const controlsTimeoutRef = useRef(null);
+
+  useEffect(() => {
+    const handleActivity = () => {
+      setShowControls(true);
+      if (controlsTimeoutRef.current) {
+        clearTimeout(controlsTimeoutRef.current);
+      }
+      controlsTimeoutRef.current = setTimeout(() => {
+        setShowControls(false);
+      }, 3000);
+    };
+
+    window.addEventListener('mousemove', handleActivity);
+    window.addEventListener('touchstart', handleActivity);
+    window.addEventListener('click', handleActivity);
+
+    // Initial timer
+    controlsTimeoutRef.current = setTimeout(() => {
+      setShowControls(false);
+    }, 3000);
+
+    return () => {
+      window.removeEventListener('mousemove', handleActivity);
+      window.removeEventListener('touchstart', handleActivity);
+      window.removeEventListener('click', handleActivity);
+      if (controlsTimeoutRef.current) {
+        clearTimeout(controlsTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
@@ -979,15 +1071,24 @@ function CallModal({
         </div>
         
         {/* Controls */}
-        <div style={styles.controls}>
+        <div style={{
+          ...styles.controls,
+          ...(callState === 'active' ? {
+             opacity: showControls ? 1 : 0,
+             transform: showControls ? 'translateX(-50%) translateY(0)' : 'translateX(-50%) translateY(24px)',
+             pointerEvents: showControls ? 'auto' : 'none',
+          } : {})
+        }}>
           {callState === 'incoming' ? (
             // Incoming call controls
             <>
               <button onClick={handleDecline} style={styles.declineBtn} title="Отклонить">
-                <span>✕</span>
+                <Icons.Hangup />
               </button>
               <button onClick={handleAccept} style={styles.acceptBtn} title="Принять">
-                <span>{callType === 'video' ? '🎥' : '📞'}</span>
+                 <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                    <path d="M20.01 15.38c-1.23 0-2.42-.2-3.53-.56a.977.977 0 0 0-1.01.24l-1.57 1.97c-2.83-1.44-5.15-3.75-6.59-6.59l1.97-1.57c.26-.26.35-.63.24-1.01a11.36 11.36 0 0 1-.56-3.53c0-.54-.45-.99-.99-.99H4.19C3.65 3.3 3 3.24 3 3.99 3 13.28 10.73 21 20.01 21c.71 0 .99-.63.99-1.18v-3.45c0-.54-.45-.99-.99-.99z"/>
+                 </svg>
               </button>
             </>
           ) : (
@@ -1001,7 +1102,7 @@ function CallModal({
                 }}
                 title={isMuted ? 'Включить микрофон' : 'Выключить микрофон'}
               >
-                {isMuted ? '🔇' : '🎤'}
+                <Icons.Mic off={isMuted} />
               </button>
               
               {callType === 'video' && (
@@ -1013,44 +1114,35 @@ function CallModal({
                   }}
                   title={isVideoOff ? 'Включить камеру' : 'Выключить камеру'}
                 >
-                  {isVideoOff ? '📷' : '🎥'}
+                  <Icons.Camera off={isVideoOff} />
                 </button>
               )}
               
-              {/* Кнопка смены камеры - только для видеозвонков */}
               {callType === 'video' && (
                 <button
                   onClick={switchCamera}
                   style={styles.controlBtn}
-                  title={facingMode === 'user' ? 'Переключить на заднюю камеру' : 'Переключить на фронтальную камеру'}
+                  title="Сменить камеру"
                 >
-                  🔄
+                  <Icons.Switch />
                 </button>
               )}
 
-              {/* Screen share (только web desktop). */}
-              {callType === 'video' && localVideoMode !== 'screen' && (
+              {callType === 'video' && !isMobileBrowser() && (
                 <button
-                  onClick={startScreenShare}
-                  style={styles.screenShareBtn}
-                  title="Начать демонстрацию экрана"
+                  onClick={localVideoMode === 'screen' ? stopScreenShare : startScreenShare}
+                  style={{
+                    ...styles.controlBtn,
+                    ...(localVideoMode === 'screen' ? styles.controlBtnActive : {})
+                  }}
+                  title={localVideoMode === 'screen' ? "Остановить демонстрацию" : "Демонстрация экрана"}
                 >
-                  Показ экрана
-                </button>
-              )}
-
-              {callType === 'video' && localVideoMode === 'screen' && (
-                <button
-                  onClick={stopScreenShare}
-                  style={styles.screenShareBtn}
-                  title="Остановить демонстрацию экрана"
-                >
-                  Вернуть камеру
+                  <Icons.Screen active={localVideoMode === 'screen'} />
                 </button>
               )}
               
               <button onClick={handleEndCall} style={styles.endBtn} title="Завершить">
-                <span>📵</span>
+                <Icons.Hangup />
               </button>
             </>
           )}
@@ -1075,73 +1167,64 @@ const styles = {
   },
   modal: {
     width: '100%',
-    maxWidth: '480px',
     height: '100%',
-    maxHeight: '720px',
-    background: '#1e293b',
-    borderRadius: '16px',
+    background: '#0f172a',
+    position: 'relative',
+    overflow: 'hidden',
     display: 'flex',
     flexDirection: 'column',
-    overflow: 'hidden',
   },
   videoContainer: {
     flex: 1,
     position: 'relative',
-    background: '#0f172a',
+    background: '#000',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: '300px',
+    width: '100%',
+    height: '100%',
   },
   remoteVideo: {
     width: '100%',
     height: '100%',
-    objectFit: 'cover',
+    objectFit: 'contain',
   },
   localVideo: {
     position: 'absolute',
-    bottom: '16px',
-    right: '16px',
-    width: '120px',
-    height: '160px',
-    borderRadius: '12px',
+    top: '24px',
+    right: '24px',
+    width: '140px',
+    aspectRatio: '3/4',
+    borderRadius: '16px',
     objectFit: 'cover',
-    border: '2px solid #3b82f6',
-    background: '#000',
+    border: '1px solid rgba(255, 255, 255, 0.2)',
+    boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+    background: '#1a1a1a',
     transition: 'opacity 0.3s',
-  },
-  screenShareBtn: {
-    height: '40px',
-    padding: '0 12px',
-    borderRadius: '12px',
-    border: 'none',
-    background: '#334155',
-    color: '#fff',
-    fontSize: '14px',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    whiteSpace: 'nowrap',
+    zIndex: 10,
   },
   avatarContainer: {
     position: 'relative',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
+    width: '100%',
+    height: '100%',
   },
   avatar: {
-    width: '120px',
-    height: '120px',
+    width: '140px',
+    height: '140px',
     borderRadius: '50%',
     background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    fontSize: '48px',
+    fontSize: '56px',
     fontWeight: '600',
     color: '#fff',
     overflow: 'hidden',
+    boxShadow: '0 0 60px rgba(59, 130, 246, 0.2)',
+    zIndex: 5,
   },
   avatarImg: {
     width: '100%',
@@ -1150,78 +1233,103 @@ const styles = {
   },
   incomingPulse: {
     position: 'absolute',
-    width: '140px',
-    height: '140px',
+    width: '200px',
+    height: '200px',
     borderRadius: '50%',
-    border: '3px solid #22c55e',
-    animation: 'pulse-ring 1.5s infinite',
+    border: '2px solid rgba(34, 197, 94, 0.5)',
+    animation: 'pulse-ring 2s infinite',
   },
   info: {
-    padding: '20px',
+    position: 'absolute',
+    top: '48px',
+    left: 0,
+    right: 0,
     textAlign: 'center',
+    zIndex: 20,
+    pointerEvents: 'none',
   },
   userName: {
-    fontSize: '24px',
+    fontSize: '28px',
     fontWeight: '600',
     color: '#fff',
     marginBottom: '8px',
+    textShadow: '0 2px 8px rgba(0,0,0,0.6)',
   },
   status: {
     fontSize: '16px',
-    color: '#94a3b8',
+    color: 'rgba(255,255,255,0.8)',
+    textShadow: '0 1px 4px rgba(0,0,0,0.6)',
   },
   callTypeLabel: {
-    marginTop: '8px',
+    marginTop: '6px',
     fontSize: '14px',
     color: '#60a5fa',
+    textShadow: '0 1px 2px rgba(0,0,0,0.8)',
   },
   controls: {
-    padding: '24px',
+    position: 'absolute',
+    bottom: '40px',
+    left: '50%',
+    transform: 'translateX(-50%)',
     display: 'flex',
+    alignItems: 'center',
     justifyContent: 'center',
     gap: '20px',
+    padding: '16px 32px',
+    borderRadius: '28px',
+    background: 'rgba(20, 20, 20, 0.65)',
+    backdropFilter: 'blur(20px)',
+    border: '1px solid rgba(255, 255, 255, 0.08)',
+    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+    zIndex: 50,
+    transition: 'opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
   },
   controlBtn: {
     width: '56px',
     height: '56px',
     borderRadius: '50%',
-    border: 'none',
-    background: '#334155',
-    fontSize: '24px',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    transition: 'all 0.2s',
-  },
-  controlBtnActive: {
-    background: '#ef4444',
-  },
-  acceptBtn: {
-    width: '64px',
-    height: '64px',
-    borderRadius: '50%',
-    border: 'none',
-    background: '#22c55e',
-    fontSize: '28px',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    animation: 'pulse-btn 1s infinite',
-  },
-  declineBtn: {
-    width: '64px',
-    height: '64px',
-    borderRadius: '50%',
-    border: 'none',
-    background: '#ef4444',
-    fontSize: '28px',
+    border: '1.5px solid rgba(255, 255, 255, 0.3)',
+    background: 'transparent',
     color: '#fff',
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
+    transition: 'all 0.2s ease',
+  },
+  controlBtnActive: {
+    background: '#fff',
+    color: '#0f172a',
+    border: '1.5px solid #fff',
+    boxShadow: '0 0 16px rgba(255, 255, 255, 0.3)',
+  },
+  acceptBtn: {
+    width: '72px',
+    height: '72px',
+    borderRadius: '50%',
+    border: 'none',
+    background: '#22c55e',
+    fontSize: '32px',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    animation: 'pulse-btn 1s infinite',
+    boxShadow: '0 8px 24px rgba(34, 197, 94, 0.3)',
+  },
+  declineBtn: {
+    width: '72px',
+    height: '72px',
+    borderRadius: '50%',
+    border: 'none',
+    background: '#ef4444',
+    fontSize: '32px',
+    color: '#fff',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    boxShadow: '0 8px 24px rgba(239, 68, 68, 0.3)',
   },
   endBtn: {
     width: '64px',
@@ -1229,36 +1337,37 @@ const styles = {
     borderRadius: '50%',
     border: 'none',
     background: '#ef4444',
-    fontSize: '28px',
+    color: '#fff',
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
+    marginLeft: '12px',
+    boxShadow: '0 4px 16px rgba(239, 68, 68, 0.4)',
+    transition: 'all 0.2s ease',
   },
 };
 
-// Add keyframes for animations
+// Add keyframes for animations & hover styles
 if (typeof document !== 'undefined') {
   const styleSheet = document.createElement('style');
   styleSheet.textContent = `
     @keyframes pulse-ring {
-      0% {
-        transform: scale(1);
-        opacity: 1;
-      }
-      100% {
-        transform: scale(1.3);
-        opacity: 0;
-      }
+      0% { transform: scale(1); opacity: 0.8; }
+      100% { transform: scale(1.5); opacity: 0; }
     }
     
     @keyframes pulse-btn {
-      0%, 100% {
-        transform: scale(1);
-      }
-      50% {
-        transform: scale(1.1);
-      }
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.05); }
+    }
+
+    button:hover {
+        transform: scale(1.05);
+    }
+    
+    button:active {
+        transform: scale(0.95);
     }
   `;
   document.head.appendChild(styleSheet);
