@@ -147,8 +147,20 @@ module.exports = function(io) {
 
     socket.on('call:start', async ({ chatId, type = 'video' }, callback) => {
       try {
+        console.log(`[Socket] call:start from ${userId}, chatId: ${chatId}, type: ${type}`);
+        
         const chat = await Chat.findById(chatId).populate('participants.user', 'name');
-        if (!chat || !chat.isParticipant(userId)) {
+        
+        if (!chat) {
+          console.log(`[Socket] call:start - chat not found: ${chatId}`);
+          return callback?.({ error: 'Чат не найден' });
+        }
+        
+        const isParticipant = chat.isParticipant(userId);
+        console.log(`[Socket] call:start - isParticipant: ${isParticipant}, userId: ${userId}`);
+        
+        if (!isParticipant) {
+          console.log(`[Socket] call:start - user not in chat, participants:`, chat.participants.map(p => p.user?._id?.toString?.() || p.user?.toString?.()));
           return callback?.({ error: 'Нет доступа к чату' });
         }
 

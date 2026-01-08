@@ -115,12 +115,18 @@ chatSchema.statics.findPrivateChat = function(userId1, userId2) {
 
 // Проверка, является ли пользователь участником
 chatSchema.methods.isParticipant = function(userId) {
-  return this.participants.some(p => p.user.toString() === userId.toString());
+  return this.participants.some(p => {
+    const participantId = p.user?._id?.toString?.() || p.user?.toString?.() || p.user;
+    return participantId === userId.toString();
+  });
 };
 
 // Проверка, является ли пользователь админом
 chatSchema.methods.isAdmin = function(userId) {
-  const participant = this.participants.find(p => p.user.toString() === userId.toString());
+  const participant = this.participants.find(p => {
+    const participantId = p.user?._id?.toString?.() || p.user?.toString?.() || p.user;
+    return participantId === userId.toString();
+  });
   return participant && participant.role === 'admin';
 };
 
