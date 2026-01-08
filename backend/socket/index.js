@@ -179,10 +179,16 @@ module.exports = function(io) {
         const otherParticipants = chat.participants
           .filter(p => p.user._id.toString() !== userId);
 
+        console.log(`[Socket] call:start - notifying ${otherParticipants.length} other participants`);
+        
         otherParticipants.forEach(({ user: participant }) => {
-          const participantSockets = userSockets.get(participant._id.toString());
-          if (participantSockets) {
+          const participantId = participant._id.toString();
+          const participantSockets = userSockets.get(participantId);
+          console.log(`[Socket] call:start - participant ${participantId} has ${participantSockets?.size || 0} sockets`);
+          
+          if (participantSockets && participantSockets.size > 0) {
             participantSockets.forEach(socketId => {
+              console.log(`[Socket] call:start - sending call:incoming to socket ${socketId}`);
               io.to(socketId).emit('call:incoming', {
                 callId: call._id,
                 chatId,
