@@ -1,119 +1,209 @@
 <!DOCTYPE html>
 <html lang="ru">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="yandex-verification" content="b6bbc3b11127cd01" />
-    
-    <!-- Основные мета-теги -->
-    <title>ГоВЧат 2.1 Beta - Современный групповой чат с видеозвонками</title>
-    <meta name="description" content="ГоВЧат - современное веб-приложение для группового общения с видеозвонками, обменом файлами и голосовыми сообщениями. Бесплатный онлайн чат для команд и друзей." />
-    <meta name="keywords" content="чат, групповой чат, видеозвонки, онлайн общение, веб чат, мессенджер, голосовые сообщения, обмен файлами, WebRTC, командное общение" />
-    <meta name="author" content="ГоВЧат Team" />
-    <meta name="robots" content="index, follow" />
-    <meta name="language" content="ru" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    
-    <!-- Open Graph / Facebook -->
-    <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://frutin.me/" />
-    <meta property="og:title" content="ГоВЧат 2.1 Beta - Современный групповой чат" />
-    <meta property="og:description" content="Современное веб-приложение для группового общения с видеозвонками, обменом файлами и голосовыми сообщениями" />
-    <!-- Временно убираем изображение до его создания -->
-    <!-- <meta property="og:image" content="https://frutin.me/og-image.png" /> -->
-    <meta property="og:site_name" content="ГоВЧат" />
-    <meta property="og:locale" content="ru_RU" />
-    
-    <!-- Twitter -->
-    <meta property="twitter:card" content="summary_large_image" />
-    <meta property="twitter:url" content="https://frutin.me/" />
-    <meta property="twitter:title" content="ГоВЧат 2.1 Beta - Современный групповой чат" />
-    <meta property="twitter:description" content="Современное веб-приложение для группового общения с видеозвонками" />
-    <!-- Временно убираем изображение до его создания -->
-    <!-- <meta property="twitter:image" content="https://frutin.me/og-image.png" /> -->
-    
-    <!-- Дополнительные мета-теги -->
-    <meta name="theme-color" content="#00c3ff" />
-    <meta name="msapplication-TileColor" content="#00c3ff" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="ГоВЧат" />
-    
-    <!-- Canonical URL -->
-    <link rel="canonical" href="https://frutin.me/" />
-    
-    <!-- Favicon -->
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><text y='52' font-size='52'>🦆</text></svg>" />
-    <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><rect width='180' height='180' fill='%2300c3ff'/><text x='90' y='130' font-size='120' text-anchor='middle' fill='white'>🦆</text></svg>" />
-    
-    <!-- Preconnect для внешних ресурсов -->
-    <link rel="preconnect" href="https://www.google.com" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    
-    <!-- JSON-LD структурированные данные -->
-    <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "WebApplication",
-      "name": "ГоВЧат",
-      "description": "Современное веб-приложение для группового общения с видеозвонками, обменом файлами и голосовыми сообщениями",
-      "url": "https://frutin.me/",
-      "applicationCategory": "CommunicationApplication",
-      "operatingSystem": "Web",
-      "offers": {
-        "@type": "Offer",
-        "price": "0",
-        "priceCurrency": "RUB"
-      },
-      "featureList": [
-        "Групповые чаты",
-        "Видеозвонки",
-        "Обмен файлами", 
-        "Голосовые сообщения",
-        "Настройка профиля",
-        "Темы оформления"
-      ]
+<head>
+  <!-- Основные -->
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=5" />
+  <meta name="theme-color" content="#1a1d29" media="(prefers-color-scheme: dark)" />
+  <meta name="theme-color" content="#00c3ff" media="(prefers-color-scheme: light)" />
+  
+  <!-- SEO -->
+  <title>ГоВЧат 2.1 Beta — Современный мессенджер с видеозвонками</title>
+  <meta name="description" content="Современный веб-мессенджер для группового общения с видеозвонками, обменом файлами и голосовыми сообщениями. WebRTC, real-time чат, командная работа." />
+  <meta name="keywords" content="чат, мессенджер, видеозвонки, групповой чат, WebRTC, онлайн общение, веб-чат, голосовые сообщения, обмен файлами" />
+  <meta name="author" content="ГоВЧат Team" />
+  <meta name="robots" content="index, follow" />
+  <link rel="canonical" href="https://govchat.ru/" />
+  
+  <!-- Яндекс -->
+  <meta name="yandex-verification" content="b6bbc3b11127cd01" />
+  
+  <!-- Open Graph -->
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://govchat.ru/" />
+  <meta property="og:title" content="ГоВЧат 2.1 Beta — Современный мессенджер" />
+  <meta property="og:description" content="Веб-мессенджер с видеозвонками, обменом файлами и голосовыми сообщениями. Бесплатно." />
+  <meta property="og:site_name" content="ГоВЧат" />
+  <meta property="og:locale" content="ru_RU" />
+  
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="ГоВЧат 2.1 Beta — Современный мессенджер" />
+  <meta name="twitter:description" content="Веб-мессенджер с видеозвонками и обменом файлами" />
+  
+  <!-- PWA / Mobile -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="ГоВЧат" />
+  <meta name="msapplication-TileColor" content="#1a1d29" />
+  <meta name="format-detection" content="telephone=no" />
+  
+  <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><text y='52' font-size='52'>🦆</text></svg>" />
+  <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><rect width='180' height='180' fill='%231a1d29'/><text x='90' y='130' font-size='120' text-anchor='middle' fill='%2300c3ff'>🦆</text></svg>" />
+  
+  <!-- Preconnect -->
+  <link rel="preconnect" href="https://www.google.com" crossorigin />
+  <link rel="dns-prefetch" href="https://www.google.com" />
+  
+  <!-- Manifest -->
+  <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+  
+  <!-- Structured Data -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "ГоВЧат",
+    "description": "Современный веб-мессенджер с видеозвонками, обменом файлами и голосовыми сообщениями",
+    "url": "https://govchat.ru/",
+    "applicationCategory": "CommunicationApplication",
+    "operatingSystem": "Web",
+    "browserRequirements": "Requires JavaScript. Requires HTML5.",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "RUB"
+    },
+    "featureList": [
+      "Групповые чаты в реальном времени",
+      "Видеозвонки WebRTC",
+      "Обмен файлами и медиа",
+      "Голосовые сообщения",
+      "Персональные профили",
+      "Кастомные темы оформления"
+    ]
+  }
+  </script>
+  
+  <!-- Critical CSS — Тёмная тема по умолчанию -->
+  <style>
+    /* Reset & Base */
+    *, *::before, *::after {
+      box-sizing: border-box;
     }
-    </script>
     
-    <style>
-      html, body, #root {
-        height: 100%;
-        width: 100%;
-        margin: 0;
-        padding: 0;
-        background: none;
-      }
-      /* --- для мобилы --- */
-      @media (max-width: 700px) {
-        html, body, #root {
-          height: 100vh;
-          width: 100vw;
-        }
-      }
-      /* Анимация для индикатора активного звонка */
-      @keyframes pulse {
-        0% { opacity: 1; transform: scale(1); }
-        50% { opacity: 0.7; transform: scale(1.2); }
-        100% { opacity: 1; transform: scale(1); }
-      }
-      /* Улучшенная анимация для индикатора звонка */
-      @keyframes callPulse {
-        0%, 100% { 
-          opacity: 1; 
-          transform: scale(1); 
-          box-shadow: 0 0 6px #ff4757;
-        }
-        50% { 
-          opacity: 0.7; 
-          transform: scale(1.3); 
-          box-shadow: 0 0 12px #ff4757;
-        }
-      }
-    </style>
+    html {
+      height: 100%;
+      -webkit-text-size-adjust: 100%;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+    }
     
-  </head>
-  <body>
-    <noscript>Вам нужно включить JavaScript для запуска этого приложения.</noscript>
-    <div id="root"></div>
-  </body>
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+      font-size: 16px;
+      line-height: 1.5;
+      color: #e4e6eb;
+      background: linear-gradient(135deg, #1a1d29 0%, #252a3d 100%);
+      overscroll-behavior: none;
+    }
+    
+    #root {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      position: relative;
+    }
+    
+    /* Предотвращение белой вспышки */
+    body::before {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: #1a1d29;
+      z-index: -1;
+    }
+    
+    /* Loader (опционально — пока React грузится) */
+    #root:empty::before {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 40px;
+      height: 40px;
+      margin: -20px 0 0 -20px;
+      border: 3px solid rgba(0, 195, 255, 0.2);
+      border-top-color: #00c3ff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    
+    /* NoScript */
+    noscript {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      padding: 2rem;
+      text-align: center;
+      font-size: 1.125rem;
+      color: #00c3ff;
+      background: #1a1d29;
+    }
+    
+    /* Mobile optimizations */
+    @media (max-width: 768px) {
+      body {
+        font-size: 14px;
+      }
+      
+      #root {
+        height: 100vh;
+        height: -webkit-fill-available;
+      }
+    }
+    
+    /* Высокий DPI */
+    @media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+      body {
+        -webkit-font-smoothing: subpixel-antialiased;
+      }
+    }
+    
+    /* Анимации для звонков (из React) */
+    @keyframes pulse {
+      0%, 100% { 
+        opacity: 1; 
+        transform: scale(1); 
+      }
+      50% { 
+        opacity: 0.7; 
+        transform: scale(1.2); 
+      }
+    }
+    
+    @keyframes callPulse {
+      0%, 100% { 
+        opacity: 1; 
+        transform: scale(1); 
+        box-shadow: 0 0 6px #ff4757;
+      }
+      50% { 
+        opacity: 0.7; 
+        transform: scale(1.3); 
+        box-shadow: 0 0 12px #ff4757;
+      }
+    }
+  </style>
+</head>
+<body>
+  <noscript>
+    ⚠️ Для работы ГоВЧат необходимо включить JavaScript в настройках браузера.
+  </noscript>
+  <div id="root"></div>
+</body>
 </html>
