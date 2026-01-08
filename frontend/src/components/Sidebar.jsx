@@ -2,7 +2,7 @@ import React from 'react';
 import UserSearch from './UserSearch';
 import ChatList from './ChatList';
 
-function Sidebar({ token, chats, selectedChat, onSelectChat, onCreateChat, onLogout }) {
+function Sidebar({ token, chats, selectedChat, onSelectChat, onCreateChat, onLogout, incomingCallChatId }) {
   return (
     <div style={styles.sidebar}>
       {/* Заголовок и кнопка выхода */}
@@ -24,6 +24,7 @@ function Sidebar({ token, chats, selectedChat, onSelectChat, onCreateChat, onLog
         chats={chats}
         selectedChat={selectedChat}
         onSelectChat={onSelectChat}
+        incomingCallChatId={incomingCallChatId}
       />
     </div>
   );

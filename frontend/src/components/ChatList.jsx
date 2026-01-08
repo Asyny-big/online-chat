@@ -1,6 +1,6 @@
 import React from 'react';
 
-function ChatList({ chats, selectedChat, onSelectChat }) {
+function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
   if (chats.length === 0) {
     return (
       <div style={styles.empty}>
@@ -18,6 +18,7 @@ function ChatList({ chats, selectedChat, onSelectChat }) {
       <div style={styles.label}>Чаты</div>
       {chats.map((chat) => {
         const isActive = selectedChat?._id === chat._id;
+        const hasIncomingCall = incomingCallChatId === chat._id;
         const displayName = chat.displayName || chat.name || 'Чат';
         const lastMsg = chat.lastMessage;
         
@@ -39,12 +40,27 @@ function ChatList({ chats, selectedChat, onSelectChat }) {
             style={{
               ...styles.chatItem,
               ...(isActive ? styles.chatItemActive : {}),
+              ...(hasIncomingCall ? styles.chatItemCalling : {}),
             }}
           >
-            <div style={styles.avatar}>{initial}</div>
+            <div style={styles.avatarWrapper}>
+              <div style={styles.avatar}>{initial}</div>
+              {hasIncomingCall && (
+                <div style={styles.callIndicator}>
+                  <span style={styles.callIndicatorDot}></span>
+                </div>
+              )}
+            </div>
             <div style={styles.chatInfo}>
-              <div style={styles.chatName}>{displayName}</div>
-              <div style={styles.lastMessage}>{lastMessageText}</div>
+              <div style={styles.chatNameRow}>
+                <span style={styles.chatName}>{displayName}</span>
+                {hasIncomingCall && (
+                  <span style={styles.callBadge}>📞</span>
+                )}
+              </div>
+              <div style={styles.lastMessage}>
+                {hasIncomingCall ? '🔔 Входящий звонок...' : lastMessageText}
+              </div>
             </div>
           </button>
         );
@@ -109,6 +125,15 @@ const styles = {
   chatItemActive: {
     background: 'linear-gradient(135deg, #3b82f6, #2563eb)',
   },
+  chatItemCalling: {
+    background: 'rgba(239, 68, 68, 0.15)',
+    border: '1px solid rgba(239, 68, 68, 0.3)',
+    animation: 'pulse-call 1.5s infinite',
+  },
+  avatarWrapper: {
+    position: 'relative',
+    flexShrink: 0,
+  },
   avatar: {
     width: '44px',
     height: '44px',
@@ -121,14 +146,43 @@ const styles = {
     fontSize: '16px',
     flexShrink: 0,
   },
+  callIndicator: {
+    position: 'absolute',
+    top: '-2px',
+    right: '-2px',
+    width: '16px',
+    height: '16px',
+    background: '#ef4444',
+    borderRadius: '50%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    border: '2px solid #1e293b',
+    animation: 'pulse-dot 1s infinite',
+  },
+  callIndicatorDot: {
+    width: '6px',
+    height: '6px',
+    background: '#fff',
+    borderRadius: '50%',
+  },
   chatInfo: {
     flex: 1,
     minWidth: 0,
   },
+  chatNameRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    marginBottom: '2px',
+  },
   chatName: {
     fontWeight: '600',
-    marginBottom: '2px',
     fontSize: '14px',
+  },
+  callBadge: {
+    fontSize: '12px',
+    animation: 'shake 0.5s infinite',
   },
   lastMessage: {
     fontSize: '12px',
@@ -138,5 +192,32 @@ const styles = {
     whiteSpace: 'nowrap',
   },
 };
+
+// Добавляем анимации
+if (typeof document !== 'undefined') {
+  const styleSheet = document.createElement('style');
+  styleSheet.textContent = `
+    @keyframes pulse-call {
+      0%, 100% { 
+        background: rgba(239, 68, 68, 0.15);
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+      }
+      50% { 
+        background: rgba(239, 68, 68, 0.25);
+        box-shadow: 0 0 0 4px rgba(239, 68, 68, 0);
+      }
+    }
+    @keyframes pulse-dot {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.2); }
+    }
+    @keyframes shake {
+      0%, 100% { transform: rotate(0deg); }
+      25% { transform: rotate(-10deg); }
+      75% { transform: rotate(10deg); }
+    }
+  `;
+  document.head.appendChild(styleSheet);
+}
 
 export default ChatList;

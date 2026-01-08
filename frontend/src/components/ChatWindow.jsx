@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import MessageInput from './MessageInput';
 import { API_URL } from '../config';
 
-function ChatWindow({ token, chat, messages, socket, currentUserId, onStartCall, typingUsers }) {
+function ChatWindow({ token, chat, messages, socket, currentUserId, onStartCall, typingUsers, incomingCall, onAcceptCall, onDeclineCall }) {
   const messagesEndRef = useRef(null);
   const containerRef = useRef(null);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -36,9 +36,45 @@ function ChatWindow({ token, chat, messages, socket, currentUserId, onStartCall,
 
   const displayName = chat.displayName || chat.name || 'Чат';
   const typingList = typingUsers?.filter(u => u.chatId === chat._id && u.userId !== currentUserId) || [];
+  
+  // Проверяем есть ли входящий звонок для этого чата
+  const hasIncomingCall = incomingCall && incomingCall.chatId === chat._id;
 
   return (
     <div style={styles.container}>
+      {/* Всплывающее уведомление о входящем звонке */}
+      {hasIncomingCall && (
+        <div style={styles.incomingCallBanner}>
+          <div style={styles.callBannerContent}>
+            <div style={styles.callBannerIcon}>
+              {incomingCall.type === 'video' ? '📹' : '📞'}
+            </div>
+            <div style={styles.callBannerInfo}>
+              <div style={styles.callBannerTitle}>Входящий звонок</div>
+              <div style={styles.callBannerSubtitle}>
+                {incomingCall.initiator?.name || 'Пользователь'} звонит вам
+              </div>
+            </div>
+          </div>
+          <div style={styles.callBannerActions}>
+            <button 
+              onClick={() => onDeclineCall?.(incomingCall.callId)}
+              style={styles.callBannerDecline}
+              title="Отклонить"
+            >
+              ✕
+            </button>
+            <button 
+              onClick={() => onAcceptCall?.(incomingCall.callId, incomingCall.type)}
+              style={styles.callBannerAccept}
+              title="Принять"
+            >
+              {incomingCall.type === 'video' ? '🎥' : '📞'}
+            </button>
+          </div>
+        </div>
+      )}
+      
       {/* Шапка с кнопками звонков */}
       <div style={styles.header}>
         <div style={styles.headerInfo}>
@@ -266,6 +302,69 @@ const styles = {
     fontSize: '14px',
     color: '#64748b',
   },
+  // Incoming call banner
+  incomingCallBanner: {
+    background: 'linear-gradient(135deg, #22c55e, #16a34a)',
+    padding: '12px 16px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '12px',
+    animation: 'slideDown 0.3s ease, pulse-banner 1.5s infinite',
+  },
+  callBannerContent: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+  },
+  callBannerIcon: {
+    fontSize: '24px',
+    animation: 'shake 0.5s infinite',
+  },
+  callBannerInfo: {
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  callBannerTitle: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: '14px',
+  },
+  callBannerSubtitle: {
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: '12px',
+  },
+  callBannerActions: {
+    display: 'flex',
+    gap: '8px',
+  },
+  callBannerDecline: {
+    width: '40px',
+    height: '40px',
+    borderRadius: '50%',
+    border: 'none',
+    background: '#ef4444',
+    color: '#fff',
+    fontSize: '16px',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transition: 'transform 0.2s',
+  },
+  callBannerAccept: {
+    width: '40px',
+    height: '40px',
+    borderRadius: '50%',
+    border: 'none',
+    background: '#fff',
+    fontSize: '18px',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    animation: 'pulse-btn 1s infinite',
+  },
   // Header
   header: {
     padding: '12px 16px',
@@ -450,5 +549,40 @@ const styles = {
     opacity: 0.8,
   },
 };
+
+// Добавляем анимации для баннера звонка
+if (typeof document !== 'undefined') {
+  const styleSheet = document.createElement('style');
+  styleSheet.textContent = `
+    @keyframes slideDown {
+      from {
+        transform: translateY(-100%);
+        opacity: 0;
+      }
+      to {
+        transform: translateY(0);
+        opacity: 1;
+      }
+    }
+    @keyframes pulse-banner {
+      0%, 100% {
+        box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4);
+      }
+      50% {
+        box-shadow: 0 0 0 8px rgba(34, 197, 94, 0);
+      }
+    }
+    @keyframes pulse-btn {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.1); }
+    }
+    @keyframes shake {
+      0%, 100% { transform: rotate(0deg); }
+      25% { transform: rotate(-15deg); }
+      75% { transform: rotate(15deg); }
+    }
+  `;
+  document.head.appendChild(styleSheet);
+}
 
 export default ChatWindow;

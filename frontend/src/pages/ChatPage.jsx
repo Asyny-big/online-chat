@@ -20,6 +20,9 @@ function ChatPage({ token, onLogout }) {
   const [callId, setCallId] = useState(null);
   const [remoteUser, setRemoteUser] = useState(null);
   
+  // Данные входящего звонка для отображения в UI (баннер и индикатор)
+  const [incomingCallData, setIncomingCallData] = useState(null);
+  
   const socketRef = useRef(null);
 
   // Получение текущего пользователя
@@ -110,6 +113,18 @@ function ChatPage({ token, onLogout }) {
       // Ищем чат для отображения
       const chat = chats.find(c => c._id === incomingChatId);
       
+      // Сохраняем данные входящего звонка для UI
+      setIncomingCallData({
+        callId: incomingCallId,
+        chatId: incomingChatId,
+        initiator: {
+          _id: initiator._id,
+          name: initiator.name || chatName || 'Пользователь',
+          avatarUrl: initiator.avatarUrl
+        },
+        type
+      });
+      
       setCallState('incoming');
       setCallType(type);
       setCallId(incomingCallId);
@@ -139,12 +154,14 @@ function ChatPage({ token, onLogout }) {
     socket.on('call:ended', ({ callId: cId, reason }) => {
       console.log('[ChatPage] Call ended:', { cId, reason, currentCallId: callId });
       resetCallState();
+      setIncomingCallData(null);
     });
 
     socket.on('call:participant_left', ({ callId: cId, callEnded }) => {
       console.log('[ChatPage] Participant left:', { cId, callEnded });
       if (callEnded) {
         resetCallState();
+        setIncomingCallData(null);
       }
     });
 
@@ -242,7 +259,32 @@ function ChatPage({ token, onLogout }) {
     setCallType(null);
     setCallId(null);
     setRemoteUser(null);
+    setIncomingCallData(null);
   };
+
+  // Обработчик принятия звонка из баннера
+  const handleAcceptCallFromBanner = useCallback((cId, type) => {
+    console.log('[ChatPage] Accept call from banner:', cId, type);
+    // Убираем баннер и переводим звонок в активное состояние
+    setIncomingCallData(null);
+    setCallState('active');
+  }, []);
+
+  // Обработчик отклонения звонка из баннера
+  const handleDeclineCallFromBanner = useCallback((cId) => {
+    console.log('[ChatPage] Decline call from banner:', cId);
+    if (socketRef.current) {
+      socketRef.current.emit('call:decline', { callId: cId });
+    }
+    resetCallState();
+  }, []);
+  
+  // Колбэк когда звонок принят в CallModal
+  const handleCallAccepted = useCallback(() => {
+    console.log('[ChatPage] Call accepted in modal');
+    setIncomingCallData(null);
+    setCallState('active');
+  }, []);
 
   return (
     <div style={styles.container}>
@@ -273,6 +315,7 @@ function ChatPage({ token, onLogout }) {
           onSelectChat={handleSelectChat}
           onCreateChat={handleCreateChat}
           onLogout={onLogout}
+          incomingCallChatId={incomingCallData?.chatId}
         />
       </div>
 
@@ -284,6 +327,9 @@ function ChatPage({ token, onLogout }) {
         currentUserId={currentUserId}
         onStartCall={handleStartCall}
         typingUsers={typingUsers}
+        incomingCall={incomingCallData}
+        onAcceptCall={handleAcceptCallFromBanner}
+        onDeclineCall={handleDeclineCallFromBanner}
       />
 
       {/* Модальное окно звонка */}
@@ -296,6 +342,7 @@ function ChatPage({ token, onLogout }) {
           chatId={selectedChat?._id}
           remoteUser={remoteUser}
           onClose={resetCallState}
+          onCallAccepted={handleCallAccepted}
           currentUserId={currentUserId}
         />
       )}

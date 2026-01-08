@@ -6,7 +6,25 @@ const ICE_SERVERS = {
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
     { urls: 'stun:stun3.l.google.com:19302' },
-  ]
+    { urls: 'stun:stun4.l.google.com:19302' },
+    // Публичные TURN сервера для улучшения NAT traversal
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    }
+  ],
+  iceCandidatePoolSize: 10
 };
 
 // Простой рингтон (Web Audio API)
@@ -74,6 +92,7 @@ function CallModal({
   chatId,
   remoteUser,     // { _id, name, avatarUrl }
   onClose,
+  onCallAccepted, // Колбэк когда звонок принят
   currentUserId,
 }) {
   const [isMuted, setIsMuted] = useState(false);
@@ -367,16 +386,20 @@ function CallModal({
     // Create peer connection
     const pc = createPeerConnection(stream);
     
-    // Notify server we accepted
+    // Notify server we accepted - инициатор получит participant_joined и отправит offer
     socket.emit('call:accept', { callId }, (response) => {
       console.log('[CallModal] call:accept response:', response);
       if (response.error) {
         alert('Ошибка принятия звонка: ' + response.error);
         cleanup();
         onClose?.();
+      } else {
+        // Уведомляем родителя что звонок принят
+        onCallAccepted?.();
       }
+      // Теперь ждем offer от инициатора через call:signal
     });
-  }, [initMedia, createPeerConnection, socket, callId, cleanup, onClose]);
+  }, [initMedia, createPeerConnection, socket, callId, cleanup, onClose, onCallAccepted]);
 
   // Decline incoming call
   const handleDecline = useCallback(() => {
@@ -428,8 +451,14 @@ function CallModal({
   useEffect(() => {
     if (!socket) return;
     
-    const handleSignal = async ({ fromUserId, signal }) => {
-      console.log('[CallModal] Received signal:', signal.type, 'from:', fromUserId);
+    const handleSignal = async ({ callId: signalCallId, fromUserId, signal }) => {
+      console.log('[CallModal] Received signal:', signal.type, 'from:', fromUserId, 'for callId:', signalCallId);
+      
+      // Проверяем что сигнал для нашего звонка
+      if (signalCallId && callId && signalCallId !== callId) {
+        console.log('[CallModal] Signal for different call, ignoring');
+        return;
+      }
       
       const pc = peerConnectionRef.current;
       if (!pc) {
@@ -456,11 +485,12 @@ function CallModal({
       onClose?.();
     };
     
-    const handleParticipantJoined = async ({ userId, userName }) => {
-      console.log('[CallModal] Participant joined:', userName);
+    const handleParticipantJoined = async ({ userId: joinedUserId, userName }) => {
+      console.log('[CallModal] Participant joined:', userName, 'joinedUserId:', joinedUserId, 'isInitiator:', isInitiatorRef.current);
       
       // If we are the initiator and someone joined, send offer
       if (isInitiatorRef.current && peerConnectionRef.current) {
+        console.log('[CallModal] We are initiator, sending offer to joined participant');
         await createAndSendOffer(peerConnectionRef.current);
       }
     };
@@ -484,7 +514,7 @@ function CallModal({
       socket.off('call:participant_joined', handleParticipantJoined);
       socket.off('call:participant_left', handleParticipantLeft);
     };
-  }, [socket, handleOffer, handleAnswer, handleIceCandidate, createAndSendOffer, cleanup, onClose]);
+  }, [socket, callId, handleOffer, handleAnswer, handleIceCandidate, createAndSendOffer, cleanup, onClose]);
 
   // Initialize call based on state
   useEffect(() => {
