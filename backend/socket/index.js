@@ -235,28 +235,21 @@ module.exports = function(io) {
           activeCall.participants.add(userId);
         }
 
-        // Уведомляем инициатора что звонок принят
+        // Уведомляем ТОЛЬКО инициатора что звонок принят (не в комнату чата!)
         const initiatorId = call.initiator.toString();
         const initiatorSockets = userSockets.get(initiatorId);
         
-        console.log(`[Socket] Notifying initiator ${initiatorId} about accepted call`);
+        console.log(`[Socket] Notifying initiator ${initiatorId} about accepted call, accepter: ${userId}`);
         
         if (initiatorSockets) {
           initiatorSockets.forEach(socketId => {
             io.to(socketId).emit('call:participant_joined', {
-              callId,
+              callId: callId.toString(),
               userId: userId,
               userName: socket.user.name
             });
           });
         }
-
-        // Также отправляем в комнату чата
-        io.to(`chat:${chat._id}`).emit('call:participant_joined', {
-          callId,
-          userId: userId,
-          userName: socket.user.name
-        });
 
         callback?.({ success: true, call: call.toObject() });
       } catch (error) {

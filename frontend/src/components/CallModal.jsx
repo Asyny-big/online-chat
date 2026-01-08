@@ -469,7 +469,13 @@ function CallModal({
     };
     
     const handleParticipantJoined = async ({ userId: joinedUserId, userName }) => {
-      console.log('[CallModal] Participant joined:', userName, 'joinedUserId:', joinedUserId, 'isInitiator:', isInitiatorRef.current, 'remoteUser:', remoteUser);
+      console.log('[CallModal] Participant joined:', userName, 'joinedUserId:', joinedUserId, 'isInitiator:', isInitiatorRef.current, 'currentUserId:', currentUserId);
+      
+      // Игнорируем если это мы сами присоединились
+      if (joinedUserId === currentUserId) {
+        console.log('[CallModal] Ignoring self participant_joined');
+        return;
+      }
       
       // Сохраняем ID собеседника
       remoteUserIdRef.current = joinedUserId;
@@ -522,7 +528,7 @@ function CallModal({
       socket.off('call:participant_joined', handleParticipantJoined);
       socket.off('call:participant_left', handleParticipantLeft);
     };
-  }, [socket, callId, callType, handleOffer, handleAnswer, handleIceCandidate, cleanup, onClose, remoteUser]);
+  }, [socket, callId, callType, handleOffer, handleAnswer, handleIceCandidate, cleanup, onClose, remoteUser, currentUserId]);
 
   // Initialize call based on state
   useEffect(() => {
@@ -533,6 +539,12 @@ function CallModal({
         // Outgoing call: we are the initiator
         console.log('[CallModal] Initializing OUTGOING call');
         isInitiatorRef.current = true;
+        
+        // Сохраняем ID собеседника сразу
+        if (remoteUser?._id) {
+          remoteUserIdRef.current = remoteUser._id;
+          console.log('[CallModal] Set remoteUserIdRef to:', remoteUser._id);
+        }
         
         const stream = await initMedia();
         if (!stream || !isMounted) return;
@@ -545,6 +557,12 @@ function CallModal({
         console.log('[CallModal] Initializing INCOMING call');
         isInitiatorRef.current = false;
         
+        // Сохраняем ID инициатора (кто нам звонит)
+        if (remoteUser?._id) {
+          remoteUserIdRef.current = remoteUser._id;
+          console.log('[CallModal] Set remoteUserIdRef to initiator:', remoteUser._id);
+        }
+        
         ringtoneRef.current = createRingtone();
         ringtoneRef.current.play();
       }
@@ -555,7 +573,7 @@ function CallModal({
     return () => {
       isMounted = false;
     };
-  }, [callState, initMedia, createPeerConnection]);
+  }, [callState, initMedia, createPeerConnection, remoteUser]);
 
   // Update local video ref when stream changes
   useEffect(() => {

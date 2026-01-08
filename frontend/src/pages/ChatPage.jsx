@@ -143,7 +143,13 @@ function ChatPage({ token, onLogout }) {
     });
 
     socket.on('call:participant_joined', ({ callId: cId, userId: joinedUserId, userName }) => {
-      console.log('[ChatPage] Participant joined:', { cId, joinedUserId, userName, currentCallId: callId, currentCallState: callState });
+      console.log('[ChatPage] Participant joined:', { cId, joinedUserId, userName, currentCallId: callId, currentCallState: callState, currentUserId });
+      
+      // Игнорируем если это мы сами
+      if (joinedUserId === currentUserId) {
+        console.log('[ChatPage] Ignoring self participant_joined');
+        return;
+      }
       
       // Если это наш звонок и мы инициатор (outgoing)
       if (callState === 'outgoing') {
