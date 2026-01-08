@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
 import { API_URL } from '../config';
-import { SendIcon, AttachmentIcon, MicIcon, CloseIcon } from './Icons';
 
 function MessageInput({ chatId, socket, token, onTyping }) {
   const [input, setInput] = useState('');
@@ -284,10 +283,10 @@ function MessageInput({ chatId, socket, token, onTyping }) {
             <span style={styles.recordingTime}>{formatTime(recordingTime)}</span>
           </div>
           <button onClick={cancelRecording} style={styles.cancelBtn} title="Отмена">
-            <CloseIcon size={18} color="#fff" />
+            ✕
           </button>
           <button onClick={stopRecording} style={styles.sendVoiceBtn} title="Отправить">
-            <SendIcon size={18} color="#fff" />
+            ➤
           </button>
         </div>
       ) : (
@@ -300,14 +299,14 @@ function MessageInput({ chatId, socket, token, onTyping }) {
             disabled={uploading}
             title="Прикрепить файл"
           >
-            <AttachmentIcon size={22} color="#64748b" />
+            📎
           </button>
 
           <input
             type="text"
             value={input}
             onChange={handleInputChange}
-            placeholder={uploading ? 'Загрузка...' : 'Написать сообщение...'}
+            placeholder={uploading ? 'Загрузка...' : 'Введите сообщение...'}
             style={styles.input}
             disabled={uploading}
             onKeyDown={(e) => {
@@ -327,7 +326,7 @@ function MessageInput({ chatId, socket, token, onTyping }) {
               }}
               disabled={!canSend}
             >
-              <SendIcon size={18} color="#fff" />
+              ➤
             </button>
           ) : (
             <button
@@ -337,7 +336,7 @@ function MessageInput({ chatId, socket, token, onTyping }) {
               disabled={uploading}
               title="Голосовое сообщение"
             >
-              <MicIcon size={20} color="#fff" />
+              🎤
             </button>
           )}
         </form>
@@ -348,14 +347,13 @@ function MessageInput({ chatId, socket, token, onTyping }) {
 
 const styles = {
   container: {
-    padding: '14px 20px',
-    borderTop: '1px solid #e2e8f0',
-    background: '#ffffff',
+    padding: '12px 16px',
+    borderTop: '1px solid #334155',
+    background: '#1e293b',
     position: 'relative',
   },
   dragging: {
-    background: 'rgba(59, 130, 246, 0.05)',
-    borderColor: '#3b82f6',
+    background: '#1e40af',
   },
   dropOverlay: {
     position: 'absolute',
@@ -366,75 +364,74 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    background: 'rgba(59, 130, 246, 0.1)',
-    backdropFilter: 'blur(4px)',
-    WebkitBackdropFilter: 'blur(4px)',
+    background: 'rgba(30, 64, 175, 0.9)',
     borderRadius: '8px',
     zIndex: 10,
   },
   dropText: {
-    color: '#3b82f6',
-    fontSize: '15px',
+    color: '#fff',
+    fontSize: '16px',
     fontWeight: '600',
   },
   form: {
     display: 'flex',
     alignItems: 'center',
-    gap: '10px',
+    gap: '8px',
   },
   input: {
     flex: 1,
-    padding: '14px 20px',
-    background: '#f8fafc',
-    border: '1.5px solid #e2e8f0',
-    borderRadius: '28px',
-    color: '#1e293b',
-    fontSize: '15px',
+    padding: '12px 16px',
+    background: '#0f172a',
+    border: '1px solid #334155',
+    borderRadius: '24px',
+    color: '#fff',
+    fontSize: '14px',
     outline: 'none',
-    transition: 'all 0.2s ease',
+    transition: 'border-color 0.2s',
   },
   iconBtn: {
-    width: '44px',
-    height: '44px',
+    width: '40px',
+    height: '40px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    background: '#f8fafc',
-    border: '1.5px solid #e2e8f0',
+    background: 'transparent',
+    border: 'none',
     borderRadius: '50%',
+    fontSize: '20px',
     cursor: 'pointer',
-    transition: 'all 0.2s ease',
+    transition: 'background 0.2s',
   },
   sendBtn: {
-    width: '44px',
-    height: '44px',
+    width: '40px',
+    height: '40px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     background: '#3b82f6',
     border: 'none',
     borderRadius: '50%',
+    fontSize: '16px',
+    color: '#fff',
     cursor: 'pointer',
-    transition: 'all 0.2s ease',
-    boxShadow: '0 4px 12px rgba(59, 130, 246, 0.3)',
+    transition: 'all 0.2s',
   },
   sendBtnDisabled: {
-    background: '#cbd5e1',
-    boxShadow: 'none',
+    background: '#334155',
     cursor: 'not-allowed',
   },
   micBtn: {
-    width: '44px',
-    height: '44px',
+    width: '40px',
+    height: '40px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     background: '#3b82f6',
     border: 'none',
     borderRadius: '50%',
+    fontSize: '18px',
     cursor: 'pointer',
-    transition: 'all 0.2s ease',
-    boxShadow: '0 4px 12px rgba(59, 130, 246, 0.3)',
+    transition: 'all 0.2s',
   },
   // Запись
   recordingRow: {
@@ -446,11 +443,10 @@ const styles = {
     flex: 1,
     display: 'flex',
     alignItems: 'center',
-    gap: '12px',
-    padding: '14px 20px',
-    background: '#fef2f2',
-    borderRadius: '28px',
-    border: '1.5px solid #fecaca',
+    gap: '10px',
+    padding: '12px 16px',
+    background: '#0f172a',
+    borderRadius: '24px',
   },
   recordingDot: {
     width: '10px',
@@ -460,34 +456,35 @@ const styles = {
     animation: 'pulse 1s infinite',
   },
   recordingTime: {
-    color: '#1e293b',
-    fontSize: '15px',
-    fontWeight: '600',
+    color: '#fff',
+    fontSize: '14px',
+    fontWeight: '500',
   },
   cancelBtn: {
-    width: '44px',
-    height: '44px',
+    width: '40px',
+    height: '40px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    background: '#fef2f2',
-    border: '1.5px solid #fecaca',
-    borderRadius: '50%',
-    cursor: 'pointer',
-    transition: 'all 0.2s ease',
-  },
-  sendVoiceBtn: {
-    width: '44px',
-    height: '44px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: '#10b981',
+    background: '#ef4444',
     border: 'none',
     borderRadius: '50%',
+    fontSize: '16px',
+    color: '#fff',
     cursor: 'pointer',
-    boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
-    transition: 'all 0.2s ease',
+  },
+  sendVoiceBtn: {
+    width: '40px',
+    height: '40px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: '#22c55e',
+    border: 'none',
+    borderRadius: '50%',
+    fontSize: '16px',
+    color: '#fff',
+    cursor: 'pointer',
   },
 };
 

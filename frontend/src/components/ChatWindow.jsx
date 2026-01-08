@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import MessageInput from './MessageInput';
 import { API_URL } from '../config';
-import { PhoneIcon, VideoIcon, BackIcon, MoreVerticalIcon, TrashIcon, CheckIcon, CloseIcon, DownloadIcon, FileIcon } from './Icons';
 
 function ChatWindow({ token, chat, messages, socket, currentUserId, onStartCall, typingUsers, incomingCall, onAcceptCall, onDeclineCall, onBack, onDeleteMessage, onDeleteChat }) {
   const messagesEndRef = useRef(null);
@@ -73,7 +72,7 @@ function ChatWindow({ token, chat, messages, socket, currentUserId, onStartCall,
         <div style={styles.incomingCallBanner}>
           <div style={styles.callBannerContent}>
             <div style={styles.callBannerIcon}>
-              {incomingCall.type === 'video' ? <VideoIcon size={24} color="#10b981" /> : <PhoneIcon size={24} color="#10b981" />}
+              {incomingCall.type === 'video' ? '📹' : '📞'}
             </div>
             <div style={styles.callBannerInfo}>
               <div style={styles.callBannerTitle}>Входящий звонок</div>
@@ -88,14 +87,14 @@ function ChatWindow({ token, chat, messages, socket, currentUserId, onStartCall,
               style={styles.callBannerDecline}
               title="Отклонить"
             >
-              <CloseIcon size={18} color="#ef4444" />
+              ✕
             </button>
             <button 
               onClick={() => onAcceptCall?.(incomingCall.callId, incomingCall.type)}
               style={styles.callBannerAccept}
               title="Принять"
             >
-              {incomingCall.type === 'video' ? <VideoIcon size={20} color="#fff" /> : <PhoneIcon size={20} color="#fff" />}
+              {incomingCall.type === 'video' ? '🎥' : '📞'}
             </button>
           </div>
         </div>
@@ -111,7 +110,7 @@ function ChatWindow({ token, chat, messages, socket, currentUserId, onStartCall,
               style={styles.backBtn}
               title="Назад к чатам"
             >
-              <BackIcon size={22} color="#64748b" />
+              ←
             </button>
           )}
           <div style={styles.avatar}>
@@ -132,14 +131,14 @@ function ChatWindow({ token, chat, messages, socket, currentUserId, onStartCall,
             style={styles.callBtn}
             title="Аудиозвонок"
           >
-            <PhoneIcon size={20} color="#64748b" />
+            📞
           </button>
           <button
             onClick={() => onStartCall?.('video')}
             style={styles.callBtn}
             title="Видеозвонок"
           >
-            <VideoIcon size={20} color="#64748b" />
+            🎥
           </button>
           {/* Меню чата */}
           <div style={styles.menuContainer}>
@@ -151,7 +150,7 @@ function ChatWindow({ token, chat, messages, socket, currentUserId, onStartCall,
               style={styles.callBtn}
               title="Меню"
             >
-              <MoreVerticalIcon size={20} color="#64748b" />
+              ⋮
             </button>
             {showChatMenu && (
               <div style={styles.chatMenu}>
@@ -162,8 +161,7 @@ function ChatWindow({ token, chat, messages, socket, currentUserId, onStartCall,
                   }}
                   style={styles.menuItem}
                 >
-                  <TrashIcon size={16} color="#ef4444" />
-                  <span>Удалить чат</span>
+                  🗑️ Удалить чат
                 </button>
               </div>
             )}
@@ -442,7 +440,7 @@ const styles = {
     flex: 1,
     display: 'flex',
     flexDirection: 'column',
-    background: '#f8fafc',
+    background: '#0f172a',
     height: '100%',
     minHeight: 0,
   },
@@ -452,99 +450,90 @@ const styles = {
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    background: '#f8fafc',
+    background: '#0f172a',
   },
   emptyIcon: {
-    fontSize: '56px',
-    marginBottom: '20px',
-    opacity: 0.6,
+    fontSize: '48px',
+    marginBottom: '16px',
   },
   emptyText: {
     fontSize: '20px',
     fontWeight: '600',
-    color: '#64748b',
+    color: '#94a3b8',
     marginBottom: '8px',
   },
   emptyHint: {
     fontSize: '14px',
-    color: '#94a3b8',
+    color: '#64748b',
   },
   // Incoming call banner
   incomingCallBanner: {
-    background: '#ffffff',
-    padding: '16px 20px',
+    background: 'linear-gradient(135deg, #22c55e, #16a34a)',
+    padding: '12px 16px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: '16px',
-    boxShadow: '0 4px 20px rgba(16, 185, 129, 0.15)',
-    border: '1px solid rgba(16, 185, 129, 0.2)',
-    borderRadius: 0,
-    animation: 'slideDown 0.3s ease',
+    gap: '12px',
+    animation: 'slideDown 0.3s ease, pulse-banner 1.5s infinite',
   },
   callBannerContent: {
     display: 'flex',
     alignItems: 'center',
-    gap: '14px',
+    gap: '12px',
   },
   callBannerIcon: {
-    width: '44px',
-    height: '44px',
-    borderRadius: '50%',
-    background: 'rgba(16, 185, 129, 0.1)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    animation: 'pulse 1.5s infinite',
+    fontSize: '24px',
+    animation: 'shake 0.5s infinite',
   },
   callBannerInfo: {
     display: 'flex',
     flexDirection: 'column',
   },
   callBannerTitle: {
-    color: '#1e293b',
+    color: '#fff',
     fontWeight: '600',
-    fontSize: '15px',
+    fontSize: '14px',
   },
   callBannerSubtitle: {
-    color: '#64748b',
-    fontSize: '13px',
-    marginTop: '2px',
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: '12px',
   },
   callBannerActions: {
     display: 'flex',
-    gap: '10px',
+    gap: '8px',
   },
   callBannerDecline: {
-    width: '44px',
-    height: '44px',
-    borderRadius: '50%',
-    border: '1.5px solid #fecaca',
-    background: '#fef2f2',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    transition: 'all 0.2s ease',
-  },
-  callBannerAccept: {
-    width: '44px',
-    height: '44px',
+    width: '40px',
+    height: '40px',
     borderRadius: '50%',
     border: 'none',
-    background: '#10b981',
+    background: '#ef4444',
+    color: '#fff',
+    fontSize: '16px',
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
-    animation: 'pulse 1.5s infinite',
+    transition: 'transform 0.2s',
+  },
+  callBannerAccept: {
+    width: '40px',
+    height: '40px',
+    borderRadius: '50%',
+    border: 'none',
+    background: '#fff',
+    fontSize: '18px',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    animation: 'pulse-btn 1s infinite',
   },
   // Header
   header: {
-    padding: '14px 20px',
-    borderBottom: '1px solid #e2e8f0',
-    background: '#ffffff',
+    padding: '12px 16px',
+    borderBottom: '1px solid #334155',
+    background: '#1e293b',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -552,11 +541,11 @@ const styles = {
   headerInfo: {
     display: 'flex',
     alignItems: 'center',
-    gap: '14px',
+    gap: '12px',
   },
   avatar: {
-    width: '44px',
-    height: '44px',
+    width: '40px',
+    height: '40px',
     borderRadius: '50%',
     background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)',
     display: 'flex',
@@ -564,21 +553,18 @@ const styles = {
     justifyContent: 'center',
     color: '#fff',
     fontWeight: '600',
-    fontSize: '17px',
-    boxShadow: '0 2px 8px rgba(59, 130, 246, 0.25)',
+    fontSize: '16px',
   },
   chatName: {
     margin: 0,
     fontSize: '16px',
     fontWeight: '600',
-    color: '#1e293b',
-    letterSpacing: '-0.01em',
+    color: '#fff',
   },
   typingIndicator: {
     fontSize: '12px',
     color: '#3b82f6',
     marginTop: '2px',
-    fontWeight: '500',
   },
   typingDots: {
     animation: 'blink 1s infinite',
@@ -588,39 +574,41 @@ const styles = {
     gap: '8px',
   },
   backBtn: {
+    width: '36px',
+    height: '36px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'transparent',
+    border: 'none',
+    borderRadius: '50%',
+    fontSize: '20px',
+    color: '#fff',
+    cursor: 'pointer',
+    marginRight: '8px',
+    transition: 'background 0.2s',
+  },
+  callBtn: {
     width: '40px',
     height: '40px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     background: 'transparent',
-    border: 'none',
-    borderRadius: '10px',
+    border: '1px solid #334155',
+    borderRadius: '50%',
+    fontSize: '18px',
     cursor: 'pointer',
-    marginRight: '4px',
-    transition: 'all 0.2s ease',
-  },
-  callBtn: {
-    width: '42px',
-    height: '42px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: '#f8fafc',
-    border: '1.5px solid #e2e8f0',
-    borderRadius: '12px',
-    cursor: 'pointer',
-    transition: 'all 0.2s ease',
+    transition: 'all 0.2s',
   },
   // Messages
   messagesContainer: {
     flex: 1,
     overflowY: 'auto',
-    padding: '20px',
+    padding: '16px',
     display: 'flex',
     flexDirection: 'column',
-    gap: '6px',
-    background: '#f8fafc',
+    gap: '8px',
   },
   noMessages: {
     flex: 1,
@@ -628,13 +616,12 @@ const styles = {
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    color: '#94a3b8',
+    color: '#64748b',
     fontSize: '14px',
     gap: '8px',
   },
   noMessagesIcon: {
-    fontSize: '40px',
-    opacity: 0.6,
+    fontSize: '32px',
   },
   // Message bubble
   messageRow: {
@@ -642,118 +629,103 @@ const styles = {
     width: '100%',
   },
   bubble: {
-    maxWidth: '70%',
-    padding: '12px 16px',
-    borderRadius: '20px',
+    maxWidth: '75%',
+    padding: '10px 14px',
+    borderRadius: '18px',
     wordWrap: 'break-word',
-    boxShadow: '0 1px 2px rgba(0, 0, 0, 0.04)',
   },
   bubbleMine: {
-    background: '#3b82f6',
+    background: 'linear-gradient(135deg, #3b82f6, #2563eb)',
     color: '#fff',
-    borderBottomRightRadius: '6px',
+    borderBottomRightRadius: '4px',
   },
   bubbleTheirs: {
-    background: '#ffffff',
-    color: '#1e293b',
-    borderBottomLeftRadius: '6px',
-    border: '1px solid #e2e8f0',
+    background: '#334155',
+    color: '#e2e8f0',
+    borderBottomLeftRadius: '4px',
   },
   senderName: {
     fontSize: '12px',
     fontWeight: '600',
-    color: '#3b82f6',
+    color: '#60a5fa',
     marginBottom: '4px',
   },
   textContent: {
-    fontSize: '15px',
-    lineHeight: '1.45',
+    fontSize: '14px',
+    lineHeight: '1.4',
   },
   messageTime: {
-    fontSize: '11px',
-    color: 'rgba(255,255,255,0.7)',
-    marginTop: '6px',
+    fontSize: '10px',
+    color: 'rgba(255,255,255,0.6)',
+    marginTop: '4px',
   },
   // Media
   mediaWrapper: {
-    maxWidth: '300px',
+    maxWidth: '280px',
   },
   imagePreview: {
     maxWidth: '100%',
-    maxHeight: '320px',
-    borderRadius: '14px',
+    maxHeight: '300px',
+    borderRadius: '12px',
     cursor: 'pointer',
     display: 'block',
-    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
   },
   videoPreview: {
     maxWidth: '100%',
-    maxHeight: '320px',
-    borderRadius: '14px',
-    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
+    maxHeight: '300px',
+    borderRadius: '12px',
   },
   mediaCaption: {
-    marginTop: '8px',
+    marginTop: '6px',
     fontSize: '14px',
   },
   // Audio
   audioWrapper: {
     display: 'flex',
     alignItems: 'center',
-    gap: '10px',
-    minWidth: '220px',
-    padding: '4px 0',
+    gap: '8px',
+    minWidth: '200px',
   },
   audioIcon: {
-    fontSize: '18px',
-    color: '#3b82f6',
+    fontSize: '20px',
   },
   audioPlayer: {
     height: '36px',
     flex: 1,
-    borderRadius: '8px',
   },
   // File
   fileLink: {
     display: 'flex',
     alignItems: 'center',
-    gap: '12px',
-    padding: '12px 14px',
-    background: 'rgba(59, 130, 246, 0.08)',
-    borderRadius: '12px',
+    gap: '10px',
+    padding: '8px 12px',
+    background: 'rgba(0,0,0,0.2)',
+    borderRadius: '8px',
     textDecoration: 'none',
     color: 'inherit',
-    transition: 'all 0.2s ease',
   },
   fileIcon: {
-    width: '36px',
-    height: '36px',
-    borderRadius: '8px',
-    background: 'rgba(59, 130, 246, 0.15)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
+    fontSize: '28px',
   },
   fileInfo: {
     overflow: 'hidden',
     flex: 1,
   },
   fileName: {
-    fontSize: '14px',
+    fontSize: '13px',
     fontWeight: '500',
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     maxWidth: '180px',
-    color: '#1e293b',
   },
   fileSize: {
-    fontSize: '12px',
-    color: '#64748b',
-    marginTop: '2px',
+    fontSize: '11px',
+    opacity: 0.7,
   },
   downloadIcon: {
-    opacity: 0.6,
+    fontSize: '16px',
+    opacity: 0.8,
   },
   // Меню чата
   menuContainer: {
@@ -764,28 +736,26 @@ const styles = {
     top: '100%',
     right: 0,
     marginTop: '8px',
-    background: '#ffffff',
-    borderRadius: '14px',
-    boxShadow: '0 4px 24px rgba(0, 0, 0, 0.12)',
+    background: '#1e293b',
+    borderRadius: '12px',
+    boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
     overflow: 'hidden',
     zIndex: 100,
-    minWidth: '180px',
-    border: '1px solid #e2e8f0',
+    minWidth: '160px',
   },
   menuItem: {
     width: '100%',
-    padding: '14px 18px',
+    padding: '12px 16px',
     background: 'transparent',
     border: 'none',
     color: '#ef4444',
     fontSize: '14px',
-    fontWeight: '500',
     textAlign: 'left',
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
-    gap: '10px',
-    transition: 'background 0.2s ease',
+    gap: '8px',
+    transition: 'background 0.2s',
   },
   // Модальное окно удаления чата
   modalOverlay: {
@@ -794,39 +764,35 @@ const styles = {
     left: 0,
     right: 0,
     bottom: 0,
-    background: 'rgba(15, 23, 42, 0.6)',
-    backdropFilter: 'blur(4px)',
-    WebkitBackdropFilter: 'blur(4px)',
+    background: 'rgba(0,0,0,0.7)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 10000,
   },
   modal: {
-    background: '#ffffff',
-    borderRadius: '20px',
-    padding: '28px',
-    maxWidth: '380px',
+    background: '#1e293b',
+    borderRadius: '16px',
+    padding: '24px',
+    maxWidth: '360px',
     width: '90%',
     textAlign: 'center',
-    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.12)',
   },
   modalIcon: {
-    fontSize: '52px',
-    marginBottom: '18px',
+    fontSize: '48px',
+    marginBottom: '16px',
   },
   modalTitle: {
-    color: '#1e293b',
+    color: '#fff',
     fontSize: '20px',
-    fontWeight: '700',
+    fontWeight: '600',
     marginBottom: '12px',
-    letterSpacing: '-0.02em',
   },
   modalText: {
-    color: '#64748b',
+    color: '#94a3b8',
     fontSize: '14px',
-    lineHeight: '1.6',
-    marginBottom: '28px',
+    lineHeight: '1.5',
+    marginBottom: '24px',
   },
   modalActions: {
     display: 'flex',
@@ -834,58 +800,52 @@ const styles = {
     justifyContent: 'center',
   },
   modalCancelBtn: {
-    padding: '12px 28px',
-    background: '#f1f5f9',
+    padding: '12px 24px',
+    background: '#334155',
     border: 'none',
-    borderRadius: '12px',
-    color: '#64748b',
-    fontSize: '14px',
-    fontWeight: '600',
-    cursor: 'pointer',
-    transition: 'all 0.2s ease',
-  },
-  modalDeleteBtn: {
-    padding: '12px 28px',
-    background: '#ef4444',
-    border: 'none',
-    borderRadius: '12px',
+    borderRadius: '8px',
     color: '#fff',
     fontSize: '14px',
-    fontWeight: '600',
+    fontWeight: '500',
     cursor: 'pointer',
-    boxShadow: '0 4px 12px rgba(239, 68, 68, 0.3)',
-    transition: 'all 0.2s ease',
+  },
+  modalDeleteBtn: {
+    padding: '12px 24px',
+    background: '#ef4444',
+    border: 'none',
+    borderRadius: '8px',
+    color: '#fff',
+    fontSize: '14px',
+    fontWeight: '500',
+    cursor: 'pointer',
   },
   // Удаление сообщения
   deleteMessageBtn: {
     background: 'transparent',
     border: 'none',
+    fontSize: '12px',
     cursor: 'pointer',
-    opacity: 0.4,
-    transition: 'opacity 0.2s ease',
-    padding: '2px',
-    display: 'flex',
-    alignItems: 'center',
+    opacity: 0.5,
+    transition: 'opacity 0.2s',
+    padding: '0',
   },
   messageContextMenu: {
     position: 'absolute',
     top: '100%',
     right: 0,
     marginTop: '4px',
-    background: '#ffffff',
-    borderRadius: '10px',
-    boxShadow: '0 4px 16px rgba(0, 0, 0, 0.12)',
+    background: '#1e293b',
+    borderRadius: '8px',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
     overflow: 'hidden',
     zIndex: 100,
-    border: '1px solid #e2e8f0',
   },
   contextMenuItem: {
-    padding: '12px 18px',
+    padding: '10px 16px',
     background: 'transparent',
     border: 'none',
     color: '#ef4444',
     fontSize: '13px',
-    fontWeight: '500',
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
@@ -897,19 +857,17 @@ const styles = {
     bottom: '100%',
     right: 0,
     marginBottom: '8px',
-    background: '#ffffff',
-    borderRadius: '14px',
-    padding: '14px',
-    boxShadow: '0 4px 24px rgba(0, 0, 0, 0.12)',
+    background: '#1e293b',
+    borderRadius: '12px',
+    padding: '12px',
+    boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
     zIndex: 100,
-    minWidth: '190px',
-    border: '1px solid #e2e8f0',
+    minWidth: '180px',
   },
   deleteConfirmText: {
-    color: '#1e293b',
-    fontSize: '14px',
-    fontWeight: '500',
-    marginBottom: '14px',
+    color: '#fff',
+    fontSize: '13px',
+    marginBottom: '12px',
     textAlign: 'center',
   },
   deleteConfirmActions: {
@@ -918,23 +876,21 @@ const styles = {
     justifyContent: 'center',
   },
   deleteConfirmCancel: {
-    padding: '8px 16px',
-    background: '#f1f5f9',
+    padding: '6px 12px',
+    background: '#334155',
     border: 'none',
-    borderRadius: '8px',
-    color: '#64748b',
-    fontSize: '13px',
-    fontWeight: '500',
+    borderRadius: '6px',
+    color: '#fff',
+    fontSize: '12px',
     cursor: 'pointer',
   },
   deleteConfirmYes: {
-    padding: '8px 16px',
+    padding: '6px 12px',
     background: '#ef4444',
     border: 'none',
-    borderRadius: '8px',
+    borderRadius: '6px',
     color: '#fff',
-    fontSize: '13px',
-    fontWeight: '500',
+    fontSize: '12px',
     cursor: 'pointer',
   },
 };

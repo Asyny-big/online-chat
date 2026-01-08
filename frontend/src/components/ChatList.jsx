@@ -1,5 +1,4 @@
 import React from 'react';
-import { PhoneIcon } from './Icons';
 
 function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
   // Защита от неправильного типа данных
@@ -28,8 +27,8 @@ function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
         
         let lastMessageText = 'Нет сообщений';
         if (lastMsg) {
-          if (lastMsg.type === 'audio') lastMessageText = '🎤 Голосовое';
-          else if (lastMsg.type === 'image') lastMessageText = '📷 Фото';
+          if (lastMsg.type === 'audio') lastMessageText = '🎤 Голосовое сообщение';
+          else if (lastMsg.type === 'image') lastMessageText = '📷 Изображение';
           else if (lastMsg.type === 'video') lastMessageText = '🎥 Видео';
           else if (lastMsg.type === 'file') lastMessageText = '📎 Файл';
           else lastMessageText = lastMsg.text || 'Сообщение';
@@ -48,10 +47,7 @@ function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
             }}
           >
             <div style={styles.avatarWrapper}>
-              <div style={{
-                ...styles.avatar,
-                ...(isActive ? styles.avatarActive : {}),
-              }}>{initial}</div>
+              <div style={styles.avatar}>{initial}</div>
               {hasIncomingCall && (
                 <div style={styles.callIndicator}>
                   <span style={styles.callIndicatorDot}></span>
@@ -60,21 +56,13 @@ function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
             </div>
             <div style={styles.chatInfo}>
               <div style={styles.chatNameRow}>
-                <span style={{
-                  ...styles.chatName,
-                  ...(isActive ? styles.chatNameActive : {}),
-                }}>{displayName}</span>
+                <span style={styles.chatName}>{displayName}</span>
                 {hasIncomingCall && (
-                  <span style={styles.callBadge}>
-                    <PhoneIcon size={14} color="#10b981" />
-                  </span>
+                  <span style={styles.callBadge}>📞</span>
                 )}
               </div>
-              <div style={{
-                ...styles.lastMessage,
-                ...(hasIncomingCall ? styles.lastMessageCalling : {}),
-              }}>
-                {hasIncomingCall ? 'Входящий звонок...' : lastMessageText}
+              <div style={styles.lastMessage}>
+                {hasIncomingCall ? '🔔 Входящий звонок...' : lastMessageText}
               </div>
             </div>
           </button>
@@ -88,16 +76,16 @@ const styles = {
   container: {
     flex: 1,
     overflowY: 'auto',
-    padding: '12px 14px',
+    padding: '12px',
   },
   label: {
     fontSize: '11px',
-    color: '#94a3b8',
-    marginBottom: '14px',
+    color: '#64748b',
+    marginBottom: '12px',
     fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: '0.5px',
-    padding: '0 6px',
+    padding: '0 4px',
   },
   empty: {
     flex: 1,
@@ -105,47 +93,44 @@ const styles = {
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: '40px 24px',
+    padding: '32px',
   },
   emptyIcon: {
-    fontSize: '48px',
-    marginBottom: '16px',
-    opacity: 0.6,
+    fontSize: '40px',
+    marginBottom: '12px',
   },
   emptyText: {
-    fontSize: '17px',
+    fontSize: '16px',
     fontWeight: '600',
-    color: '#64748b',
-    marginBottom: '8px',
+    color: '#94a3b8',
+    marginBottom: '6px',
   },
   emptyHint: {
-    fontSize: '14px',
-    color: '#94a3b8',
+    fontSize: '13px',
+    color: '#64748b',
     textAlign: 'center',
-    lineHeight: '1.5',
   },
   chatItem: {
     width: '100%',
-    padding: '12px 14px',
+    padding: '10px 12px',
     background: 'transparent',
     border: 'none',
-    borderRadius: '14px',
-    color: '#1e293b',
+    borderRadius: '12px',
+    color: '#fff',
     cursor: 'pointer',
     textAlign: 'left',
     marginBottom: '4px',
-    transition: 'all 0.2s ease',
+    transition: 'all 0.15s ease',
     display: 'flex',
     alignItems: 'center',
-    gap: '14px',
+    gap: '12px',
   },
   chatItemActive: {
-    background: '#3b82f6',
-    boxShadow: '0 4px 12px rgba(59, 130, 246, 0.3)',
+    background: 'linear-gradient(135deg, #3b82f6, #2563eb)',
   },
   chatItemCalling: {
-    background: 'rgba(16, 185, 129, 0.08)',
-    border: '1.5px solid rgba(16, 185, 129, 0.25)',
+    background: 'rgba(239, 68, 68, 0.15)',
+    border: '1px solid rgba(239, 68, 68, 0.3)',
     animation: 'pulse-call 1.5s infinite',
   },
   avatarWrapper: {
@@ -153,34 +138,29 @@ const styles = {
     flexShrink: 0,
   },
   avatar: {
-    width: '48px',
-    height: '48px',
+    width: '44px',
+    height: '44px',
     borderRadius: '50%',
     background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     fontWeight: '600',
-    fontSize: '17px',
-    color: '#fff',
+    fontSize: '16px',
     flexShrink: 0,
-    boxShadow: '0 2px 8px rgba(99, 102, 241, 0.25)',
-  },
-  avatarActive: {
-    boxShadow: '0 2px 8px rgba(255, 255, 255, 0.3)',
   },
   callIndicator: {
     position: 'absolute',
     top: '-2px',
     right: '-2px',
-    width: '18px',
-    height: '18px',
-    background: '#10b981',
+    width: '16px',
+    height: '16px',
+    background: '#ef4444',
     borderRadius: '50%',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    border: '2.5px solid #ffffff',
+    border: '2px solid #1e293b',
     animation: 'pulse-dot 1s infinite',
   },
   callIndicatorDot: {
@@ -196,32 +176,23 @@ const styles = {
   chatNameRow: {
     display: 'flex',
     alignItems: 'center',
-    gap: '8px',
-    marginBottom: '4px',
+    gap: '6px',
+    marginBottom: '2px',
   },
   chatName: {
     fontWeight: '600',
-    fontSize: '15px',
-    color: '#1e293b',
-  },
-  chatNameActive: {
-    color: '#ffffff',
+    fontSize: '14px',
   },
   callBadge: {
-    display: 'flex',
-    alignItems: 'center',
+    fontSize: '12px',
     animation: 'shake 0.5s infinite',
   },
   lastMessage: {
-    fontSize: '13px',
-    color: '#64748b',
+    fontSize: '12px',
+    color: '#94a3b8',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-  },
-  lastMessageCalling: {
-    color: '#10b981',
-    fontWeight: '500',
   },
 };
 
@@ -231,22 +202,22 @@ if (typeof document !== 'undefined') {
   styleSheet.textContent = `
     @keyframes pulse-call {
       0%, 100% { 
-        background: rgba(16, 185, 129, 0.08);
-        box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.3);
+        background: rgba(239, 68, 68, 0.15);
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
       }
       50% { 
-        background: rgba(16, 185, 129, 0.15);
-        box-shadow: 0 0 0 4px rgba(16, 185, 129, 0);
+        background: rgba(239, 68, 68, 0.25);
+        box-shadow: 0 0 0 4px rgba(239, 68, 68, 0);
       }
     }
     @keyframes pulse-dot {
       0%, 100% { transform: scale(1); }
-      50% { transform: scale(1.15); }
+      50% { transform: scale(1.2); }
     }
     @keyframes shake {
       0%, 100% { transform: rotate(0deg); }
-      25% { transform: rotate(-8deg); }
-      75% { transform: rotate(8deg); }
+      25% { transform: rotate(-10deg); }
+      75% { transform: rotate(10deg); }
     }
   `;
   document.head.appendChild(styleSheet);

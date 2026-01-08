@@ -47,10 +47,10 @@ function App() {
     <div style={styles.authContainer}>
       <div style={styles.authBox}>
         <h1 style={styles.title}>
-          <span>💬</span>
+          <span>🦆</span>
           GovChat
         </h1>
-        <p style={styles.subtitle}>Безопасный мессенджер</p>
+        <p style={styles.subtitle}>Современный мессенджер</p>
         
         <div style={styles.tabs}>
           <button

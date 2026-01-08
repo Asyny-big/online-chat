@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { API_URL } from '../config';
-import { MicIcon, MicOffIcon, VideoIcon, VideoOffIcon, ScreenShareIcon, ScreenShareOffIcon, PhoneOffIcon, PhoneIcon, CameraFlipIcon } from './Icons';
 
 // Простой рингтон (Web Audio API)
 function createRingtone() {
@@ -985,10 +984,10 @@ function CallModal({
             // Incoming call controls
             <>
               <button onClick={handleDecline} style={styles.declineBtn} title="Отклонить">
-                <PhoneOffIcon size={24} color="#fff" />
+                <span>✕</span>
               </button>
               <button onClick={handleAccept} style={styles.acceptBtn} title="Принять">
-                {callType === 'video' ? <VideoIcon size={26} color="#fff" /> : <PhoneIcon size={26} color="#fff" />}
+                <span>{callType === 'video' ? '🎥' : '📞'}</span>
               </button>
             </>
           ) : (
@@ -1002,7 +1001,7 @@ function CallModal({
                 }}
                 title={isMuted ? 'Включить микрофон' : 'Выключить микрофон'}
               >
-                {isMuted ? <MicOffIcon size={22} color="#fff" /> : <MicIcon size={22} color="#1e293b" />}
+                {isMuted ? '🔇' : '🎤'}
               </button>
               
               {callType === 'video' && (
@@ -1014,7 +1013,7 @@ function CallModal({
                   }}
                   title={isVideoOff ? 'Включить камеру' : 'Выключить камеру'}
                 >
-                  {isVideoOff ? <VideoOffIcon size={22} color="#fff" /> : <VideoIcon size={22} color="#1e293b" />}
+                  {isVideoOff ? '📷' : '🎥'}
                 </button>
               )}
               
@@ -1025,26 +1024,33 @@ function CallModal({
                   style={styles.controlBtn}
                   title={facingMode === 'user' ? 'Переключить на заднюю камеру' : 'Переключить на фронтальную камеру'}
                 >
-                  <CameraFlipIcon size={22} color="#1e293b" />
+                  🔄
                 </button>
               )}
 
               {/* Screen share (только web desktop). */}
-              {callType === 'video' && (
+              {callType === 'video' && localVideoMode !== 'screen' && (
                 <button
-                  onClick={localVideoMode === 'screen' ? stopScreenShare : startScreenShare}
-                  style={{
-                    ...styles.controlBtn,
-                    ...(localVideoMode === 'screen' ? styles.controlBtnScreen : {})
-                  }}
-                  title={localVideoMode === 'screen' ? 'Остановить демонстрацию экрана' : 'Начать демонстрацию экрана'}
+                  onClick={startScreenShare}
+                  style={styles.screenShareBtn}
+                  title="Начать демонстрацию экрана"
                 >
-                  {localVideoMode === 'screen' ? <ScreenShareOffIcon size={22} color="#fff" /> : <ScreenShareIcon size={22} color="#1e293b" />}
+                  Показ экрана
+                </button>
+              )}
+
+              {callType === 'video' && localVideoMode === 'screen' && (
+                <button
+                  onClick={stopScreenShare}
+                  style={styles.screenShareBtn}
+                  title="Остановить демонстрацию экрана"
+                >
+                  Вернуть камеру
                 </button>
               )}
               
               <button onClick={handleEndCall} style={styles.endBtn} title="Завершить">
-                <PhoneOffIcon size={24} color="#fff" />
+                <span>📵</span>
               </button>
             </>
           )}
@@ -1061,7 +1067,7 @@ const styles = {
     left: 0,
     right: 0,
     bottom: 0,
-    background: 'linear-gradient(180deg, rgba(15, 23, 42, 0.98) 0%, rgba(30, 41, 59, 0.98) 100%)',
+    background: 'rgba(0, 0, 0, 0.95)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1069,14 +1075,14 @@ const styles = {
   },
   modal: {
     width: '100%',
-    maxWidth: '100vw',
+    maxWidth: '480px',
     height: '100%',
-    maxHeight: '100vh',
-    background: 'transparent',
+    maxHeight: '720px',
+    background: '#1e293b',
+    borderRadius: '16px',
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',
-    position: 'relative',
   },
   videoContainer: {
     flex: 1,
@@ -1094,16 +1100,29 @@ const styles = {
   },
   localVideo: {
     position: 'absolute',
-    bottom: '100px',
-    right: '20px',
-    width: '140px',
-    height: '200px',
-    borderRadius: '16px',
+    bottom: '16px',
+    right: '16px',
+    width: '120px',
+    height: '160px',
+    borderRadius: '12px',
     objectFit: 'cover',
-    border: '3px solid rgba(255, 255, 255, 0.2)',
+    border: '2px solid #3b82f6',
     background: '#000',
-    transition: 'all 0.3s ease',
-    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+    transition: 'opacity 0.3s',
+  },
+  screenShareBtn: {
+    height: '40px',
+    padding: '0 12px',
+    borderRadius: '12px',
+    border: 'none',
+    background: '#334155',
+    color: '#fff',
+    fontSize: '14px',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    whiteSpace: 'nowrap',
   },
   avatarContainer: {
     position: 'relative',
@@ -1112,18 +1131,17 @@ const styles = {
     justifyContent: 'center',
   },
   avatar: {
-    width: '140px',
-    height: '140px',
+    width: '120px',
+    height: '120px',
     borderRadius: '50%',
     background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    fontSize: '56px',
+    fontSize: '48px',
     fontWeight: '600',
     color: '#fff',
     overflow: 'hidden',
-    boxShadow: '0 8px 32px rgba(59, 130, 246, 0.3)',
   },
   avatarImg: {
     width: '100%',
@@ -1132,94 +1150,65 @@ const styles = {
   },
   incomingPulse: {
     position: 'absolute',
-    width: '160px',
-    height: '160px',
+    width: '140px',
+    height: '140px',
     borderRadius: '50%',
-    border: '3px solid rgba(16, 185, 129, 0.6)',
+    border: '3px solid #22c55e',
     animation: 'pulse-ring 1.5s infinite',
   },
   info: {
-    position: 'absolute',
-    top: '40px',
-    left: '50%',
-    transform: 'translateX(-50%)',
+    padding: '20px',
     textAlign: 'center',
-    zIndex: 10,
   },
   userName: {
-    fontSize: '28px',
-    fontWeight: '700',
+    fontSize: '24px',
+    fontWeight: '600',
     color: '#fff',
     marginBottom: '8px',
-    textShadow: '0 2px 12px rgba(0, 0, 0, 0.5)',
-    letterSpacing: '-0.02em',
   },
   status: {
     fontSize: '16px',
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontWeight: '500',
+    color: '#94a3b8',
   },
   callTypeLabel: {
-    marginTop: '12px',
+    marginTop: '8px',
     fontSize: '14px',
-    color: 'rgba(255, 255, 255, 0.7)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '6px',
+    color: '#60a5fa',
   },
-  // Плавающая панель управления с blur-эффектом
   controls: {
-    position: 'absolute',
-    bottom: '40px',
-    left: '50%',
-    transform: 'translateX(-50%)',
+    padding: '24px',
     display: 'flex',
     justifyContent: 'center',
-    alignItems: 'center',
-    gap: '16px',
-    padding: '16px 28px',
-    background: 'rgba(255, 255, 255, 0.12)',
-    backdropFilter: 'blur(24px)',
-    WebkitBackdropFilter: 'blur(24px)',
-    borderRadius: '32px',
-    border: '1px solid rgba(255, 255, 255, 0.15)',
-    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+    gap: '20px',
   },
   controlBtn: {
-    width: '52px',
-    height: '52px',
+    width: '56px',
+    height: '56px',
     borderRadius: '50%',
     border: 'none',
-    background: 'rgba(255, 255, 255, 0.95)',
+    background: '#334155',
+    fontSize: '24px',
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    transition: 'all 0.2s ease',
-    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+    transition: 'all 0.2s',
   },
   controlBtnActive: {
     background: '#ef4444',
-    boxShadow: '0 4px 16px rgba(239, 68, 68, 0.4)',
-  },
-  controlBtnScreen: {
-    background: '#10b981',
-    boxShadow: '0 4px 16px rgba(16, 185, 129, 0.4)',
   },
   acceptBtn: {
     width: '64px',
     height: '64px',
     borderRadius: '50%',
     border: 'none',
-    background: '#10b981',
+    background: '#22c55e',
+    fontSize: '28px',
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    animation: 'pulse-btn 1.2s infinite',
-    boxShadow: '0 4px 20px rgba(16, 185, 129, 0.5)',
-    transition: 'all 0.2s ease',
+    animation: 'pulse-btn 1s infinite',
   },
   declineBtn: {
     width: '64px',
@@ -1227,25 +1216,24 @@ const styles = {
     borderRadius: '50%',
     border: 'none',
     background: '#ef4444',
+    fontSize: '28px',
+    color: '#fff',
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    boxShadow: '0 4px 20px rgba(239, 68, 68, 0.5)',
-    transition: 'all 0.2s ease',
   },
   endBtn: {
-    width: '56px',
-    height: '56px',
+    width: '64px',
+    height: '64px',
     borderRadius: '50%',
     border: 'none',
     background: '#ef4444',
+    fontSize: '28px',
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    boxShadow: '0 4px 16px rgba(239, 68, 68, 0.4)',
-    transition: 'all 0.2s ease',
   },
 };
 
