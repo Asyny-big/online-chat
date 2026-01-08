@@ -41,6 +41,9 @@ module.exports = function(io) {
       userSockets.set(userId, new Set());
     }
     userSockets.get(userId).add(socket.id);
+    
+    // Логирование всех подключённых пользователей
+    console.log(`[Socket] Total connected users: ${userSockets.size}, users:`, Array.from(userSockets.keys()));
 
     // Обновление статуса
     await User.findByIdAndUpdate(userId, { status: 'online' });
@@ -189,14 +192,18 @@ module.exports = function(io) {
 
         // Уведомление других участников
         const otherParticipants = chat.participants
-          .filter(p => p.user._id.toString() !== userId);
+          .filter(p => {
+            const pId = p.user?._id?.toString?.() || p.user?.toString?.();
+            return pId !== userId;
+          });
 
         console.log(`[Socket] call:start - notifying ${otherParticipants.length} other participants`);
+        console.log(`[Socket] call:start - all participants:`, chat.participants.map(p => p.user?._id?.toString?.() || p.user?.toString?.()));
         
         otherParticipants.forEach(({ user: participant }) => {
-          const participantId = participant._id.toString();
+          const participantId = participant?._id?.toString?.() || participant?.toString?.();
           const participantSockets = userSockets.get(participantId);
-          console.log(`[Socket] call:start - participant ${participantId} has ${participantSockets?.size || 0} sockets`);
+          console.log(`[Socket] call:start - participant ${participantId} has ${participantSockets?.size || 0} sockets, userSockets keys:`, Array.from(userSockets.keys()));
           
           if (participantSockets && participantSockets.size > 0) {
             participantSockets.forEach(socketId => {
