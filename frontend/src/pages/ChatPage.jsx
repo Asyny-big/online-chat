@@ -135,6 +135,32 @@ function ChatPage({ token, onLogout }) {
       socket.emit('chat:join', { chatId: newChat._id });
     });
 
+    // Сообщение удалено
+    socket.on('message:deleted', ({ chatId, messageId }) => {
+      console.log('[ChatPage] Message deleted:', messageId);
+      setMessages((prev) => prev.filter(m => m._id !== messageId));
+      
+      // Обновляем lastMessage в списке чатов если удалено последнее сообщение
+      setChats((prev) => prev.map(chat => {
+        if (chat._id === chatId && chat.lastMessage?._id === messageId) {
+          return { ...chat, lastMessage: null };
+        }
+        return chat;
+      }));
+    });
+
+    // Чат удалён
+    socket.on('chat:deleted', ({ chatId }) => {
+      console.log('[ChatPage] Chat deleted:', chatId);
+      setChats((prev) => prev.filter(c => c._id !== chatId));
+      
+      // Если удалён текущий выбранный чат - сбрасываем выбор
+      if (selectedChatRef.current?._id === chatId) {
+        setSelectedChat(null);
+        setMessages([]);
+      }
+    });
+
     // === ЗВОНКИ ===
     socket.on('call:incoming', ({ callId: incomingCallId, chatId: incomingChatId, chatName, initiator, type }) => {
       console.log('[ChatPage] Incoming call:', { incomingCallId, incomingChatId, initiator, type });
@@ -256,6 +282,37 @@ function ChatPage({ token, onLogout }) {
     }
   };
 
+  // === Удаление ===
+  const handleDeleteMessage = useCallback(async (messageId) => {
+    if (!selectedChat || !token) return;
+    
+    try {
+      await axios.delete(
+        `${API_URL}/messages/${selectedChat._id}/${messageId}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      // Сообщение удалится через socket событие message:deleted
+    } catch (error) {
+      console.error('Ошибка удаления сообщения:', error);
+      alert(error.response?.data?.error || 'Не удалось удалить сообщение');
+    }
+  }, [selectedChat, token]);
+
+  const handleDeleteChat = useCallback(async () => {
+    if (!selectedChat || !token) return;
+    
+    try {
+      await axios.delete(
+        `${API_URL}/chats/${selectedChat._id}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      // Чат удалится через socket событие chat:deleted
+    } catch (error) {
+      console.error('Ошибка удаления чата:', error);
+      alert(error.response?.data?.error || 'Не удалось удалить чат');
+    }
+  }, [selectedChat, token]);
+
   // === Звонки ===
   const handleStartCall = useCallback((type) => {
     if (!selectedChat || !socketRef.current) return;
@@ -354,6 +411,8 @@ function ChatPage({ token, onLogout }) {
           onAcceptCall={handleAcceptCallFromBanner}
           onDeclineCall={handleDeclineCallFromBanner}
           onBack={() => setSelectedChat(null)}
+          onDeleteMessage={handleDeleteMessage}
+          onDeleteChat={handleDeleteChat}
         />
       </div>
 

@@ -5,8 +5,30 @@ const User = require('../models/User');
 const Message = require('../models/Message');
 const authMiddleware = require('../middleware/auth');
 const { checkChatAccess, checkChatAdmin } = require('../middleware/checkChatAccess');
+const fs = require('fs');
+const path = require('path');
 
 router.use(authMiddleware);
+
+// Путь к папке uploads
+const uploadsDir = path.join(__dirname, '..', 'uploads');
+
+// Функция удаления файла вложения
+const deleteAttachmentFile = (attachmentUrl) => {
+  if (!attachmentUrl) return;
+  
+  try {
+    const filename = attachmentUrl.split('/').pop();
+    const filePath = path.join(uploadsDir, filename);
+    
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      console.log(`[Chats] Deleted file: ${filename}`);
+    }
+  } catch (err) {
+    console.error('[Chats] Error deleting file:', err);
+  }
+};
 
 // Получение списка чатов пользователя
 router.get('/', async (req, res) => {
@@ -275,6 +297,73 @@ router.delete('/:chatId/participants/:targetUserId', checkChatAccess, async (req
   } catch (error) {
     console.error('Remove participant error:', error);
     res.status(500).json({ error: 'Ошибка удаления участника' });
+  }
+});
+
+// Удаление чата (со всеми сообщениями и вложениями)
+router.delete('/:chatId', checkChatAccess, async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { chatId } = req.params;
+    const chat = req.chat;
+
+    // Для групп - только админ может удалить
+    if (chat.type === 'group' && !chat.isAdmin(userId)) {
+      return res.status(403).json({ error: 'Только администратор может удалить группу' });
+    }
+
+    // Получаем все сообщения с вложениями для удаления файлов
+    const messagesWithAttachments = await Message.find({
+      chat: chatId,
+      'attachment.url': { $exists: true, $ne: null }
+    }).select('attachment');
+
+    // Удаляем все файлы вложений
+    let deletedFilesCount = 0;
+    for (const msg of messagesWithAttachments) {
+      if (msg.attachment?.url) {
+        deleteAttachmentFile(msg.attachment.url);
+        deletedFilesCount++;
+      }
+    }
+    console.log(`[Chats] Deleted ${deletedFilesCount} attachment files for chat ${chatId}`);
+
+    // Удаляем все сообщения чата
+    const deletedMessages = await Message.deleteMany({ chat: chatId });
+    console.log(`[Chats] Deleted ${deletedMessages.deletedCount} messages for chat ${chatId}`);
+
+    // Собираем ID всех участников для уведомления
+    const participantIds = chat.participants.map(p => 
+      p.user._id?.toString() || p.user.toString()
+    );
+
+    // Удаляем сам чат
+    await Chat.deleteOne({ _id: chatId });
+    console.log(`[Chats] Deleted chat ${chatId}`);
+
+    // Уведомляем всех участников об удалении чата
+    const io = req.app.get('io');
+    const socketData = req.app.get('socketData');
+
+    participantIds.forEach(participantId => {
+      if (socketData?.userSockets.has(participantId)) {
+        socketData.userSockets.get(participantId).forEach(socketId => {
+          io.to(socketId).emit('chat:deleted', {
+            chatId,
+            deletedBy: userId
+          });
+        });
+      }
+    });
+
+    res.json({ 
+      success: true, 
+      deletedMessages: deletedMessages.deletedCount,
+      deletedFiles: deletedFilesCount 
+    });
+  } catch (error) {
+    console.error('Delete chat error:', error);
+    res.status(500).json({ error: 'Ошибка удаления чата' });
   }
 });
 

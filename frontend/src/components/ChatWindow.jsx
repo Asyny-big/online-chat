@@ -1,12 +1,14 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import MessageInput from './MessageInput';
 import { API_URL } from '../config';
 
-function ChatWindow({ token, chat, messages, socket, currentUserId, onStartCall, typingUsers, incomingCall, onAcceptCall, onDeclineCall, onBack }) {
+function ChatWindow({ token, chat, messages, socket, currentUserId, onStartCall, typingUsers, incomingCall, onAcceptCall, onDeclineCall, onBack, onDeleteMessage, onDeleteChat }) {
   const messagesEndRef = useRef(null);
   const containerRef = useRef(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+  const [showDeleteChatModal, setShowDeleteChatModal] = useState(false);
+  const [showChatMenu, setShowChatMenu] = useState(false);
 
   // Отслеживание размера экрана
   useEffect(() => {
@@ -14,6 +16,15 @@ function ChatWindow({ token, chat, messages, socket, currentUserId, onStartCall,
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  // Закрытие меню при клике вне его
+  useEffect(() => {
+    const handleClickOutside = () => setShowChatMenu(false);
+    if (showChatMenu) {
+      document.addEventListener('click', handleClickOutside);
+      return () => document.removeEventListener('click', handleClickOutside);
+    }
+  }, [showChatMenu]);
 
   // Auto-scroll при новых сообщениях
   useEffect(() => {
@@ -29,6 +40,12 @@ function ChatWindow({ token, chat, messages, socket, currentUserId, onStartCall,
     const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
     setAutoScroll(isNearBottom);
   };
+
+  // Подтверждение удаления чата
+  const handleConfirmDeleteChat = useCallback(() => {
+    onDeleteChat?.();
+    setShowDeleteChatModal(false);
+  }, [onDeleteChat]);
 
   if (!chat) {
     return (
@@ -123,6 +140,32 @@ function ChatWindow({ token, chat, messages, socket, currentUserId, onStartCall,
           >
             🎥
           </button>
+          {/* Меню чата */}
+          <div style={styles.menuContainer}>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowChatMenu(!showChatMenu);
+              }}
+              style={styles.callBtn}
+              title="Меню"
+            >
+              ⋮
+            </button>
+            {showChatMenu && (
+              <div style={styles.chatMenu}>
+                <button
+                  onClick={() => {
+                    setShowChatMenu(false);
+                    setShowDeleteChatModal(true);
+                  }}
+                  style={styles.menuItem}
+                >
+                  🗑️ Удалить чат
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -145,6 +188,7 @@ function ChatWindow({ token, chat, messages, socket, currentUserId, onStartCall,
                 key={msg._id || idx}
                 message={msg}
                 isMine={isMine}
+                onDelete={isMine ? () => onDeleteMessage?.(msg._id) : null}
               />
             );
           })
@@ -158,12 +202,43 @@ function ChatWindow({ token, chat, messages, socket, currentUserId, onStartCall,
         socket={socket}
         token={token}
       />
+
+      {/* Модальное окно подтверждения удаления чата */}
+      {showDeleteChatModal && (
+        <div style={styles.modalOverlay}>
+          <div style={styles.modal}>
+            <div style={styles.modalIcon}>⚠️</div>
+            <h3 style={styles.modalTitle}>Удалить чат?</h3>
+            <p style={styles.modalText}>
+              Вы уверены, что хотите удалить этот чат?
+              <br /><br />
+              <strong>Внимание:</strong> Все сообщения, изображения, видео и файлы будут удалены безвозвратно у всех участников.
+            </p>
+            <div style={styles.modalActions}>
+              <button
+                onClick={() => setShowDeleteChatModal(false)}
+                style={styles.modalCancelBtn}
+              >
+                Отмена
+              </button>
+              <button
+                onClick={handleConfirmDeleteChat}
+                style={styles.modalDeleteBtn}
+              >
+                Удалить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 // Компонент сообщения
-function MessageBubble({ message, isMine }) {
+function MessageBubble({ message, isMine, onDelete }) {
+  const [showMenu, setShowMenu] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const { type = 'text', text, attachment, createdAt, sender } = message;
   
   const time = createdAt
@@ -264,10 +339,20 @@ function MessageBubble({ message, isMine }) {
       ...styles.messageRow,
       justifyContent: isMine ? 'flex-end' : 'flex-start',
     }}>
-      <div style={{
-        ...styles.bubble,
-        ...(isMine ? styles.bubbleMine : styles.bubbleTheirs),
-      }}>
+      <div 
+        style={{
+          ...styles.bubble,
+          ...(isMine ? styles.bubbleMine : styles.bubbleTheirs),
+          position: 'relative',
+        }}
+        onContextMenu={(e) => {
+          if (onDelete) {
+            e.preventDefault();
+            setShowMenu(true);
+          }
+        }}
+        onClick={() => setShowMenu(false)}
+      >
         {!isMine && senderName && (
           <div style={styles.senderName}>{senderName}</div>
         )}
@@ -275,9 +360,70 @@ function MessageBubble({ message, isMine }) {
         <div style={{
           ...styles.messageTime,
           textAlign: isMine ? 'right' : 'left',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: isMine ? 'flex-end' : 'flex-start',
+          gap: '8px',
         }}>
           {time}
+          {/* Кнопка удаления для своих сообщений */}
+          {isMine && onDelete && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowDeleteConfirm(true);
+              }}
+              style={styles.deleteMessageBtn}
+              title="Удалить сообщение"
+            >
+              🗑️
+            </button>
+          )}
         </div>
+
+        {/* Контекстное меню для удаления (по правому клику) */}
+        {showMenu && onDelete && (
+          <div style={styles.messageContextMenu}>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowMenu(false);
+                setShowDeleteConfirm(true);
+              }}
+              style={styles.contextMenuItem}
+            >
+              🗑️ Удалить
+            </button>
+          </div>
+        )}
+
+        {/* Подтверждение удаления сообщения */}
+        {showDeleteConfirm && (
+          <div style={styles.deleteConfirmPopup}>
+            <div style={styles.deleteConfirmText}>Удалить сообщение?</div>
+            <div style={styles.deleteConfirmActions}>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowDeleteConfirm(false);
+                }}
+                style={styles.deleteConfirmCancel}
+              >
+                Отмена
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete();
+                  setShowDeleteConfirm(false);
+                }}
+                style={styles.deleteConfirmYes}
+              >
+                Удалить
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -580,6 +726,172 @@ const styles = {
   downloadIcon: {
     fontSize: '16px',
     opacity: 0.8,
+  },
+  // Меню чата
+  menuContainer: {
+    position: 'relative',
+  },
+  chatMenu: {
+    position: 'absolute',
+    top: '100%',
+    right: 0,
+    marginTop: '8px',
+    background: '#1e293b',
+    borderRadius: '12px',
+    boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+    overflow: 'hidden',
+    zIndex: 100,
+    minWidth: '160px',
+  },
+  menuItem: {
+    width: '100%',
+    padding: '12px 16px',
+    background: 'transparent',
+    border: 'none',
+    color: '#ef4444',
+    fontSize: '14px',
+    textAlign: 'left',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    transition: 'background 0.2s',
+  },
+  // Модальное окно удаления чата
+  modalOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    background: 'rgba(0,0,0,0.7)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10000,
+  },
+  modal: {
+    background: '#1e293b',
+    borderRadius: '16px',
+    padding: '24px',
+    maxWidth: '360px',
+    width: '90%',
+    textAlign: 'center',
+  },
+  modalIcon: {
+    fontSize: '48px',
+    marginBottom: '16px',
+  },
+  modalTitle: {
+    color: '#fff',
+    fontSize: '20px',
+    fontWeight: '600',
+    marginBottom: '12px',
+  },
+  modalText: {
+    color: '#94a3b8',
+    fontSize: '14px',
+    lineHeight: '1.5',
+    marginBottom: '24px',
+  },
+  modalActions: {
+    display: 'flex',
+    gap: '12px',
+    justifyContent: 'center',
+  },
+  modalCancelBtn: {
+    padding: '12px 24px',
+    background: '#334155',
+    border: 'none',
+    borderRadius: '8px',
+    color: '#fff',
+    fontSize: '14px',
+    fontWeight: '500',
+    cursor: 'pointer',
+  },
+  modalDeleteBtn: {
+    padding: '12px 24px',
+    background: '#ef4444',
+    border: 'none',
+    borderRadius: '8px',
+    color: '#fff',
+    fontSize: '14px',
+    fontWeight: '500',
+    cursor: 'pointer',
+  },
+  // Удаление сообщения
+  deleteMessageBtn: {
+    background: 'transparent',
+    border: 'none',
+    fontSize: '12px',
+    cursor: 'pointer',
+    opacity: 0.5,
+    transition: 'opacity 0.2s',
+    padding: '0',
+  },
+  messageContextMenu: {
+    position: 'absolute',
+    top: '100%',
+    right: 0,
+    marginTop: '4px',
+    background: '#1e293b',
+    borderRadius: '8px',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+    overflow: 'hidden',
+    zIndex: 100,
+  },
+  contextMenuItem: {
+    padding: '10px 16px',
+    background: 'transparent',
+    border: 'none',
+    color: '#ef4444',
+    fontSize: '13px',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    whiteSpace: 'nowrap',
+  },
+  deleteConfirmPopup: {
+    position: 'absolute',
+    bottom: '100%',
+    right: 0,
+    marginBottom: '8px',
+    background: '#1e293b',
+    borderRadius: '12px',
+    padding: '12px',
+    boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
+    zIndex: 100,
+    minWidth: '180px',
+  },
+  deleteConfirmText: {
+    color: '#fff',
+    fontSize: '13px',
+    marginBottom: '12px',
+    textAlign: 'center',
+  },
+  deleteConfirmActions: {
+    display: 'flex',
+    gap: '8px',
+    justifyContent: 'center',
+  },
+  deleteConfirmCancel: {
+    padding: '6px 12px',
+    background: '#334155',
+    border: 'none',
+    borderRadius: '6px',
+    color: '#fff',
+    fontSize: '12px',
+    cursor: 'pointer',
+  },
+  deleteConfirmYes: {
+    padding: '6px 12px',
+    background: '#ef4444',
+    border: 'none',
+    borderRadius: '6px',
+    color: '#fff',
+    fontSize: '12px',
+    cursor: 'pointer',
   },
 };
 
