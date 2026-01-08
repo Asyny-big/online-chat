@@ -45,18 +45,23 @@ router.get('/', async (req, res) => {
   }
 });
 
-// ИСПРАВЛЕНО: Создание приватного чата с атомарной операцией
+// Создание приватного чата через userId (для поиска пользователей)
 router.post('/private', async (req, res) => {
   try {
     const userId = req.userId;
-    const { phone } = req.body;
+    const { userId: targetUserId, phone } = req.body;
 
-    if (!phone) {
-      return res.status(400).json({ error: 'Укажите номер телефона' });
+    let targetUser;
+
+    // Поддерживаем оба варианта: userId или phone
+    if (targetUserId) {
+      targetUser = await User.findById(targetUserId);
+    } else if (phone) {
+      const phoneNormalized = phone.replace(/[\s\-()]/g, '');
+      targetUser = await User.findOne({ phoneNormalized });
+    } else {
+      return res.status(400).json({ error: 'Укажите userId или phone' });
     }
-
-    const phoneNormalized = phone.replace(/[\s\-()]/g, '');
-    const targetUser = await User.findOne({ phoneNormalized });
 
     if (!targetUser) {
       return res.status(404).json({ error: 'Пользователь не найден' });
@@ -71,6 +76,18 @@ router.post('/private', async (req, res) => {
     
     await chat.populate('participants.user', 'name phone avatarUrl status lastSeen');
 
+    // Форматируем для клиента
+    const otherParticipant = chat.participants.find(
+      p => p.user._id.toString() !== userId
+    );
+    const formatted = {
+      ...chat.toObject(),
+      displayName: otherParticipant?.user.name,
+      displayPhone: otherParticipant?.user.phone,
+      displayAvatar: otherParticipant?.user.avatarUrl,
+      displayStatus: otherParticipant?.user.status
+    };
+
     // Уведомляем только если чат был создан
     if (created) {
       const io = req.app.get('io');
@@ -78,12 +95,12 @@ router.post('/private', async (req, res) => {
       
       if (socketData?.userSockets.has(targetUser._id.toString())) {
         socketData.userSockets.get(targetUser._id.toString()).forEach(socketId => {
-          io.to(socketId).emit('chat:new', chat);
+          io.to(socketId).emit('chat:new', formatted);
         });
       }
     }
 
-    res.status(created ? 201 : 200).json(chat);
+    res.status(created ? 201 : 200).json(formatted);
   } catch (error) {
     console.error('Create private chat error:', error);
     res.status(500).json({ error: 'Ошибка создания чата' });

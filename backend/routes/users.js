@@ -5,25 +5,39 @@ const authMiddleware = require('../middleware/auth');
 
 router.use(authMiddleware);
 
-// Поиск пользователя по номеру телефона
+// Поиск пользователей по номеру телефона (частичное совпадение)
 router.get('/search', async (req, res) => {
   try {
     const { phone } = req.query;
 
-    if (!phone) {
-      return res.status(400).json({ error: 'Укажите номер телефона' });
+    if (!phone || !phone.trim()) {
+      return res.json([]);
     }
 
     const phoneNormalized = phone.replace(/[\s\-()]/g, '');
-    const user = await User.findOne({ phoneNormalized });
+    
+    // Частичное совпадение по началу номера
+    const users = await User.find({
+      phoneNormalized: { $regex: `^${phoneNormalized}` },
+      _id: { $ne: req.userId } // Не показывать себя
+    })
+    .select('name phone phoneNormalized avatarUrl status')
+    .limit(10)
+    .lean();
 
-    if (!user) {
-      return res.status(404).json({ error: 'Пользователь не найден' });
-    }
+    const results = users.map(u => ({
+      _id: u._id,
+      id: u._id,
+      name: u.name,
+      phone: u.phone,
+      phoneNormalized: u.phoneNormalized,
+      avatarUrl: u.avatarUrl,
+      status: u.status
+    }));
 
-    res.json(user.toPublicJSON());
+    res.json(results);
   } catch (error) {
-    console.error('Search user error:', error);
+    console.error('Search users error:', error);
     res.status(500).json({ error: 'Ошибка поиска' });
   }
 });

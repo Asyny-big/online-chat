@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { createPortal } from 'react-dom';
 import axios from "axios";
 import * as chatStyles from "./styles/chatStyles";
@@ -80,8 +80,6 @@ function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
-  const [searchResults, setSearchResults] = useState([]);
-  const [searchLoading, setSearchLoading] = useState(false);
 
   // ═══════════════════════════════════════════════════════════════
   // 2. ВСЕ РЕФЫ (useRef)
@@ -157,7 +155,7 @@ function App() {
     if (typeof msg.sender === 'object' && msg.sender !== null) {
       return msg.sender.name || msg.sender.phone || msg.sender.username;
     }
-    const currentChat = chats.find(c => c._id === selectedChat);
+    const currentChat = channels.find(c => c._id === selectedChannel);
     if (currentChat?.participants) {
       const p = currentChat.participants.find(part => (part._id || part.id) === msg.sender);
       if (p) return p.name || p.username;
@@ -187,9 +185,9 @@ function App() {
 
   const registerPushTokenWithServer = async () => { /* disabled */ };
 
-  const focusChannelFromNotification = (chatId) => {
-    if (!chatId) return;
-    setSelectedChat((prev) => (prev === chatId ? prev : chatId));
+  const focusChannelFromNotification = (channelId) => {
+    if (!channelId) return;
+    setSelectedChannel((prev) => (prev === channelId ? prev : channelId));
   };
 
   const scheduleNativeNotification = async ({ title, body, extra = {}, isCall = false }) => {
@@ -199,7 +197,7 @@ function App() {
         notifications: [{
           id: Number(String(Date.now()).slice(-9)),
           title, body, extra,
-          chatId: isCall ? 'govchat-calls' : 'govchat-messages',
+          channelId: isCall ? 'govchat-calls' : 'govchat-messages',
           actionTypeId: isCall ? 'call-actions' : undefined,
           sound: 'default',
         }],
@@ -212,8 +210,8 @@ function App() {
   // ═══════════════════════════════════════════════════════════════
 
   const resetAppState = () => {
-    setChats([]);
-    setSelectedChat(null);
+    setChannels([]);
+    setSelectedChannel(null);
     setMessages([]);
     setInput("");
     setTyping("");
@@ -255,31 +253,6 @@ function App() {
     hardDisconnectSocket();
     resetAppState();
     setAuthMode("login");
-  };
-
-  // Создание чата с пользователем
-  const createChatWithUser = async (userId) => {
-    try {
-      const res = await axios.post(
-        `${API_URL}/chats/private`,
-        { userId },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      const newChat = res.data;
-
-      setChats(prev => {
-        const exists = prev.find(c => c._id === newChat._id);
-        if (exists) return prev;
-        return [newChat, ...prev];
-      });
-
-      setSelectedChat(newChat._id);
-      setSearchQuery("");
-      setSearchResults([]);
-    } catch (error) {
-      console.error('Create chat error:', error);
-      alert('Ошибка создания чата');
-    }
   };
 
   // ═══════════════════════════════════════════════════════════════
@@ -325,7 +298,7 @@ function App() {
     if (videoPeersRef.current[peerId]) return videoPeersRef.current[peerId];
     const streamToUse = localStream || videoStreams.local;
     if (!streamToUse) return null;
-    const chatId = chatIdOverride || videoCall.channel || selectedChat;
+    const chatId = chatIdOverride || videoCall.channel || selectedChannel;
     if (!chatId) return null;
 
     const pc = new RTCPeerConnection({
@@ -389,18 +362,18 @@ function App() {
 
   const startVideoCall = async () => {
     requestMediaPermissions();
-    if (!selectedChat) { alert("Выберите канал для начала видеозвонка"); return; }
+    if (!selectedChannel) { alert("Выберите канал для начала видеозвонка"); return; }
     setVideoError("");
     setVideoConnecting(true);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       setVideoStreams(s => ({ ...s, local: stream }));
-      setVideoCall({ active: true, incoming: false, from: null, channel: selectedChat });
+      setVideoCall({ active: true, incoming: false, from: null, channel: selectedChannel });
       setActiveCallInChannel(null);
       setMicEnabled(true);
       setCameraEnabled(true);
-      socketRef.current?.emit("call:start", { chatId: selectedChat });
-      socketRef.current?.emit("call:signal", { chatId: selectedChat, data: { type: "join" } });
+      socketRef.current?.emit("call:start", { chatId: selectedChannel });
+      socketRef.current?.emit("call:signal", { chatId: selectedChannel, data: { type: "join" } });
       setVideoConnecting(false);
     } catch (error) {
       setVideoError("Ошибка доступа к камере/микрофону: " + (error?.message || "unknown"));
@@ -481,7 +454,7 @@ function App() {
   };
 
   const sendAudioMessage = async () => {
-    if (!audioBlob || !selectedChat) return;
+    if (!audioBlob || !selectedChannel) return;
 
     const formData = new FormData();
     formData.append("file", audioBlob, "voice-message.webm");
@@ -491,7 +464,7 @@ function App() {
     });
 
     socketRef.current?.emit("message:send", {
-      chatId: selectedChat,
+      chatId: selectedChannel,
       text: "",
       fileUrl: uploadRes.data.url,
       fileType: uploadRes.data.fileType,
@@ -507,7 +480,7 @@ function App() {
   // ═══════════════════════════════════════════════════════════════
 
   const handleSend = async () => {
-    if (!selectedChat || !socketRef.current) return;
+    if (!selectedChannel || !socketRef.current) return;
 
     const text = input.trim();
     if (!text && !fileToSend) return;
@@ -530,12 +503,12 @@ function App() {
     }
 
     socketRef.current.emit("message:send", {
-      chatId: selectedChat,
+      chatId: selectedChannel,
       text,
       ...(filePayload || {}),
     });
 
-    socketRef.current.emit("typing:stop", { chatId: selectedChat });
+    socketRef.current.emit("typing:stop", { chatId: selectedChannel });
 
     setInput("");
     setFileToSend(null);
@@ -598,7 +571,7 @@ function App() {
   // 10. JSX-ЭЛЕМЕНТЫ (кнопки, меню)
   // ═══════════════════════════════════════════════════════════════
 
-  const videoCallButton = selectedChat ? (
+  const videoCallButton = selectedChannel ? (
     <button
       style={{ ...chatStyles.videoCallBtn, ...(videoCall.active ? chatStyles.videoCallBtnActive : {}) }}
       onClick={videoCall.active ? leaveVideoCall : startVideoCall}
@@ -667,90 +640,16 @@ function App() {
       <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
         <button style={chatStyles.profileEditBtn} onClick={() => setShowProfile(true)}>Профиль</button>
         <button style={chatStyles.profileEditBtn} onClick={() => setShowCustomizer(true)}>Тема</button>
-        <button style={chatStyles.profileLogoutBtn} onClick={handleLogout)>Выйти</button>
+        <button style={chatStyles.profileLogoutBtn} onClick={handleLogout}>Выйти</button>
       </div>
-
-      {/* ПОИСК ПОЛЬЗОВАТЕЛЕЙ */}
-      <div style={{ marginBottom: 12 }}>
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Найти пользователя по номеру"
-          style={{
-            width: "100%",
-            padding: "10px 12px",
-            borderRadius: 10,
-            border: "1px solid #1f2937",
-            background: "#111827",
-            color: "#fff",
-            fontSize: 14,
-            outline: "none"
-          }}
-        />
+      <div style={{ color: "#b2bec3", fontSize: 12, marginBottom: 8 }}>Чаты</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {channels.map((c) => (
+          <button key={c._id} onClick={() => setSelectedChannel(c._id)} style={{ textAlign: "left", padding: "10px 10px", borderRadius: 10, border: "1px solid #233", background: selectedChannel === c._id ? "#1f2937" : "#0b1220", color: "#fff", cursor: "pointer" }}>
+            {getChatDisplayName(c)}
+          </button>
+        ))}
       </div>
-
-      {/* РЕЗУЛЬТАТЫ ПОИСКА */}
-      {searchQuery && (
-        <div style={{ marginBottom: 12 }}>
-          {searchLoading && (
-            <div style={{ color: "#b2bec3", fontSize: 13, padding: "10px 0", textAlign: "center" }}>
-              Поиск...
-            </div>
-          )}
-          {!searchLoading && searchResults.length === 0 && (
-            <div style={{ color: "#b2bec3", fontSize: 13, padding: "10px 0", textAlign: "center" }}>
-              Пользователь не найден
-            </div>
-          )}
-          {!searchLoading && searchResults.map((user) => (
-            <button
-              key={user._id}
-              onClick={() => createChatWithUser(user._id)}
-              style={{
-                width: "100%",
-                textAlign: "left",
-                padding: "12px",
-                borderRadius: 10,
-                border: "1px solid #00c3ff",
-                background: "#0b1220",
-                color: "#fff",
-                cursor: "pointer",
-                marginBottom: 6,
-                display: "flex",
-                flexDirection: "column",
-                gap: 4,
-                transition: "all 0.2s"
-              }}
-              onMouseEnter={(e) => e.target.style.background = "#1f2937"}
-              onMouseLeave={(e) => e.target.style.background = "#0b1220"}
-            >
-              <div style={{ fontWeight: 600, fontSize: 14 }}>{user.name}</div>
-              <div style={{ fontSize: 12, color: "#b2bec3" }}>{user.phone}</div>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* СПИСОК ЧАТОВ */}
-      {!searchQuery && (
-        <>
-          <div style={{ color: "#b2bec3", fontSize: 12, marginBottom: 8 }}>Чаты</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {chats.length === 0 && (
-              <div style={{ color: "#b2bec3", fontSize: 13, padding: "20px 10px", textAlign: "center" }}>
-                Нет чатов<br/>
-                <span style={{ fontSize: 12 }}>Найдите пользователя по номеру телефона выше</span>
-              </div>
-            )}
-            {chats.map((c) => (
-              <button key={c._id} onClick={() => setSelectedChat(c._id)} style={{ textAlign: "left", padding: "10px 10px", borderRadius: 10, border: "1px solid #233", background: selectedChat === c._id ? "#1f2937" : "#0b1220", color: "#fff", cursor: "pointer" }}>
-                {c.displayName || getChatDisplayName(c)}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
     </div>
   );
 
@@ -758,7 +657,7 @@ function App() {
     <div style={{ position: "fixed", top: 0, left: 0, right: 0, height: 56, background: "#0b1220", zIndex: 140, display: "flex", alignItems: "center", padding: "0 12px" }}>
       <button style={chatStyles.profileEditBtn} onClick={() => setMobileMenuOpen((v) => !v)}>Меню</button>
       <div style={{ color: "#fff", fontWeight: 700, marginLeft: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-        {selectedChat ? getChatDisplayName(chats.find((c) => c._id === selectedChat)) : "ГоВЧат"}
+        {selectedChannel ? getChatDisplayName(channels.find((c) => c._id === selectedChannel)) : "ГоВЧат"}
       </div>
       <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
         <button style={chatStyles.profileEditBtn} onClick={() => setShowProfile(true)}>Профиль</button>
@@ -768,72 +667,19 @@ function App() {
 
   const mobileMenu = (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 160 }} onClick={() => setMobileMenuOpen(false)}>
-      <div style={{ width: "82vw", maxWidth: 340, height: "100%", background: "#0b1220", padding: 12, overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+      <div style={{ width: "82vw", maxWidth: 340, height: "100%", background: "#0b1220", padding: 12 }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
           <button style={chatStyles.profileEditBtn} onClick={() => { setShowCustomizer(true); setMobileMenuOpen(false); }}>Тема</button>
           <button style={chatStyles.profileLogoutBtn} onClick={handleLogout}>Выйти</button>
         </div>
-
-        {/* ПОИСК */}
-        <div style={{ marginBottom: 12 }}>
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Найти пользователя"
-            style={{
-              width: "100%",
-              padding: "10px 12px",
-              borderRadius: 10,
-              border: "1px solid #1f2937",
-              background: "#111827",
-              color: "#fff",
-              fontSize: 14
-            }}
-          />
+        <div style={{ color: "#b2bec3", fontSize: 12, marginBottom: 8 }}>Чаты</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {channels.map((c) => (
+            <button key={c._id} onClick={() => { setSelectedChannel(c._id); setMobileMenuOpen(false); }} style={{ textAlign: "left", padding: "10px 10px", borderRadius: 10, border: "1px solid #233", background: selectedChannel === c._id ? "#1f2937" : "#0b1220", color: "#fff", cursor: "pointer" }}>
+              {getChatDisplayName(c)}
+            </button>
+          ))}
         </div>
-
-        {/* РЕЗУЛЬТАТЫ ПОИСКА */}
-        {searchQuery && (
-          <div style={{ marginBottom: 12 }}>
-            {searchLoading && <div style={{ color: "#b2bec3", fontSize: 13, padding: "10px 0" }}>Поиск...</div>}
-            {!searchLoading && searchResults.length === 0 && <div style={{ color: "#b2bec3", fontSize: 13, padding: "10px 0" }}>Не найдено</div>}
-            {!searchLoading && searchResults.map((user) => (
-              <button
-                key={user._id}
-                onClick={() => { createChatWithUser(user._id); setMobileMenuOpen(false); }}
-                style={{
-                  width: "100%",
-                  textAlign: "left",
-                  padding: "12px",
-                  borderRadius: 10,
-                  border: "1px solid #00c3ff",
-                  background: "#0b1220",
-                  color: "#fff",
-                  cursor: "pointer",
-                  marginBottom: 6
-                }}
-              >
-                <div style={{ fontWeight: 600, fontSize: 14 }}>{user.name}</div>
-                <div style={{ fontSize: 12, color: "#b2bec3" }}>{user.phone}</div>
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* ЧАТЫ */}
-        {!searchQuery && (
-          <>
-            <div style={{ color: "#b2bec3", fontSize: 12, marginBottom: 8 }}>Чаты</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {chats.map((c) => (
-                <button key={c._id} onClick={() => { setSelectedChat(c._id); setMobileMenuOpen(false); }} style={{ textAlign: "left", padding: "10px 10px", borderRadius: 10, border: "1px solid #233", background: selectedChat === c._id ? "#1f2937" : "#0b1220", color: "#fff", cursor: "pointer" }}>
-                  {c.displayName || getChatDisplayName(c)}
-                </button>
-              ))}
-            </div>
-          </>
-        )}
       </div>
     </div>
   );
@@ -856,33 +702,6 @@ function App() {
     );
     return () => axios.interceptors.response.eject(interceptor);
   }, []);
-
-  // Поиск пользователей с debounce
-  useEffect(() => {
-    if (!token || !searchQuery.trim()) {
-      setSearchResults([]);
-      setSearchLoading(false);
-      return;
-    }
-
-    setSearchLoading(true);
-    const timer = setTimeout(async () => {
-      try {
-        const res = await axios.get(
-          `${API_URL}/users/search?phone=${encodeURIComponent(searchQuery)}`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        setSearchResults(res.data || []);
-      } catch (error) {
-        console.error('Search error:', error);
-        setSearchResults([]);
-      } finally {
-        setSearchLoading(false);
-      }
-    }, 300);
-
-    return () => clearTimeout(timer);
-  }, [searchQuery, token]);
 
   // ═══════════════════════════════════════════════════════════════
   // 12. ЭКРАН АВТОРИЗАЦИИ
@@ -985,7 +804,7 @@ function App() {
           marginTop: isMobile ? 18 : 0 // добавлено для мобильных
         }}>
           <div style={chatStyles.chatTitle}>
-             {selectedChat ? getChatDisplayName(chats.find(c => c._id === selectedChat)) : "Чат"}
+             {selectedChannel ? getChatDisplayName(channels.find(c => c._id === selectedChannel)) : "Чат"}
           </div>
           {/* Кнопка видеозвонка справа от "Чат" */}
           <div style={{ marginLeft: "auto", marginRight: 8 }}>
@@ -1479,22 +1298,22 @@ function App() {
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => {
-              if (selectedChat && !e.repeat) {
+              if (selectedChannel && !e.repeat) {
                 // Emit start typing, backend handles broadcasting
-                socketRef.current.emit("typing:start", { chatId: selectedChat });
+                socketRef.current.emit("typing:start", { chatId: selectedChannel });
                 // We should probably emit stop after some time or on blur, but keeping it simple
                 // Maybe auto-stop on backend or just let it timeout on client?
                 // For now, valid endpoint.
                 
                 if (e.key === "Enter") {
-                    socketRef.current.emit("typing:stop", { chatId: selectedChat });
+                    socketRef.current.emit("typing:stop", { chatId: selectedChannel });
                     handleSend();
                 }
               }
             }}
-            disabled={!selectedChat}
+            disabled={!selectedChannel}
             placeholder={
-              selectedChat
+              selectedChannel
                 ? "Введите сообщение..."
 
                 : "Выберите канал"
@@ -1524,7 +1343,7 @@ function App() {
                 : chatStyles.sendBtn),
             }}
             onClick={handleSend}
-            disabled={!selectedChat || (!input.trim() && !fileToSend)}
+            disabled={!selectedChannel || (!input.trim() && !fileToSend)}
             title="Отправить"
           >
             {isMobile
