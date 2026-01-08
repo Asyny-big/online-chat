@@ -2,19 +2,45 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 
 const ICE_SERVERS = {
   iceServers: [
+    // STUN серверы
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
     { urls: 'stun:stun3.l.google.com:19302' },
     { urls: 'stun:stun4.l.google.com:19302' },
+    // Дополнительные STUN серверы
+    { urls: 'stun:stun.stunprotocol.org:3478' },
+    { urls: 'stun:stun.voip.blackberry.com:3478' },
     // Публичные TURN сервера для улучшения NAT traversal
+    // Metered TURN серверы (более надёжные)
     {
-      urls: 'turn:openrelay.metered.ca:80',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
+      urls: 'turn:a.relay.metered.ca:80',
+      username: 'e8dd65c92eb0c42fa69e2e78',
+      credential: 'sK/dJ/qpHRCvzLqx'
     },
     {
-      urls: 'turn:openrelay.metered.ca:443',
+      urls: 'turn:a.relay.metered.ca:80?transport=tcp',
+      username: 'e8dd65c92eb0c42fa69e2e78',
+      credential: 'sK/dJ/qpHRCvzLqx'
+    },
+    {
+      urls: 'turn:a.relay.metered.ca:443',
+      username: 'e8dd65c92eb0c42fa69e2e78',
+      credential: 'sK/dJ/qpHRCvzLqx'
+    },
+    {
+      urls: 'turn:a.relay.metered.ca:443?transport=tcp',
+      username: 'e8dd65c92eb0c42fa69e2e78',
+      credential: 'sK/dJ/qpHRCvzLqx'
+    },
+    {
+      urls: 'turns:a.relay.metered.ca:443?transport=tcp',
+      username: 'e8dd65c92eb0c42fa69e2e78',
+      credential: 'sK/dJ/qpHRCvzLqx'
+    },
+    // OpenRelay резервные
+    {
+      urls: 'turn:openrelay.metered.ca:80',
       username: 'openrelayproject',
       credential: 'openrelayproject'
     },
@@ -24,7 +50,9 @@ const ICE_SERVERS = {
       credential: 'openrelayproject'
     }
   ],
-  iceCandidatePoolSize: 10
+  iceCandidatePoolSize: 10,
+  // Принудительно использовать relay если direct connection не работает
+  iceTransportPolicy: 'all' // 'all' или 'relay' для только TURN
 };
 
 // Простой рингтон (Web Audio API)
@@ -221,7 +249,11 @@ function CallModal({
     pc.onicecandidate = (event) => {
       const targetId = remoteUserIdRef.current || remoteUser?._id;
       if (event.candidate && socket && targetId) {
-        console.log('[CallModal] Sending ICE candidate to:', targetId);
+        // Логируем тип кандидата для диагностики
+        const candidateType = event.candidate.candidate.includes('relay') ? 'relay (TURN)' :
+                              event.candidate.candidate.includes('srflx') ? 'srflx (STUN)' :
+                              event.candidate.candidate.includes('host') ? 'host (local)' : 'unknown';
+        console.log('[CallModal] Sending ICE candidate to:', targetId, 'type:', candidateType);
         socket.emit('call:signal', {
           callId,
           targetUserId: targetId,
@@ -230,7 +262,14 @@ function CallModal({
             candidate: event.candidate.toJSON()
           }
         });
+      } else if (!event.candidate) {
+        console.log('[CallModal] ICE gathering complete');
       }
+    };
+    
+    // ICE gathering state - важно для диагностики
+    pc.onicegatheringstatechange = () => {
+      console.log('[CallModal] ICE gathering state:', pc.iceGatheringState);
     };
     
     // Connection state
@@ -246,13 +285,36 @@ function CallModal({
         startTimer();
       }
       
+      if (pc.connectionState === 'failed') {
+        console.log('[CallModal] Connection failed, attempting ICE restart...');
+        // Попробуем перезапустить ICE
+        pc.restartIce();
+      }
+      
       if (['disconnected', 'failed', 'closed'].includes(pc.connectionState)) {
         console.log('[CallModal] Connection ended:', pc.connectionState);
       }
     };
     
     pc.oniceconnectionstatechange = () => {
-      console.log('[CallModal] ICE state:', pc.iceConnectionState);
+      console.log('[CallModal] ICE connection state:', pc.iceConnectionState);
+      
+      // Если ICE в состоянии failed, попробуем перезапустить
+      if (pc.iceConnectionState === 'failed') {
+        console.log('[CallModal] ICE connection failed, attempting restart...');
+        pc.restartIce();
+      }
+      
+      // Если ICE в состоянии disconnected, подождём немного и проверим ещё раз
+      if (pc.iceConnectionState === 'disconnected') {
+        console.log('[CallModal] ICE disconnected, waiting for reconnection...');
+        setTimeout(() => {
+          if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
+            console.log('[CallModal] ICE still disconnected, restarting...');
+            pc.restartIce();
+          }
+        }, 5000);
+      }
     };
     
     pc.onsignalingstatechange = () => {
