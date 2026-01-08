@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { API_URL } from '../config';
+import { SearchIcon } from './Icons';
 
 function UserSearch({ token, onCreateChat }) {
   const [query, setQuery] = useState('');
@@ -39,13 +40,16 @@ function UserSearch({ token, onCreateChat }) {
 
   return (
     <div style={styles.container}>
-      <input
-        type="text"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder="Найдите пользователя по номеру телефона"
-        style={styles.input}
-      />
+      <div style={styles.inputWrapper}>
+        <SearchIcon size={18} color="#94a3b8" />
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Поиск по номеру телефона"
+          style={styles.input}
+        />
+      </div>
 
       {query && (
         <div style={styles.results}>
@@ -77,57 +81,66 @@ function UserSearch({ token, onCreateChat }) {
 
 const styles = {
   container: {
-    padding: '12px',
-    borderBottom: '1px solid #334155',
+    padding: '14px 16px',
+    borderBottom: '1px solid #e2e8f0',
+  },
+  inputWrapper: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    padding: '12px 16px',
+    background: '#f8fafc',
+    border: '1.5px solid #e2e8f0',
+    borderRadius: '14px',
+    transition: 'all 0.2s ease',
   },
   input: {
-    width: '100%',
-    padding: '12px 16px',
-    background: '#0f172a',
-    border: '1px solid #334155',
-    borderRadius: '24px',
-    color: '#fff',
+    flex: 1,
+    background: 'transparent',
+    border: 'none',
+    color: '#1e293b',
     fontSize: '14px',
     outline: 'none',
-    transition: 'border-color 0.2s',
   },
   results: {
-    marginTop: '12px',
-    maxHeight: '240px',
+    marginTop: '14px',
+    maxHeight: '260px',
     overflowY: 'auto',
   },
   hint: {
-    padding: '12px',
-    color: '#64748b',
-    fontSize: '13px',
+    padding: '14px',
+    color: '#94a3b8',
+    fontSize: '14px',
     textAlign: 'center',
   },
   userItem: {
     width: '100%',
-    padding: '10px 12px',
-    background: 'transparent',
-    border: '1px solid #334155',
-    borderRadius: '12px',
-    color: '#fff',
+    padding: '12px 14px',
+    background: '#ffffff',
+    border: '1.5px solid #e2e8f0',
+    borderRadius: '14px',
+    color: '#1e293b',
     cursor: 'pointer',
     textAlign: 'left',
-    marginBottom: '6px',
-    transition: 'all 0.15s ease',
+    marginBottom: '8px',
+    transition: 'all 0.2s ease',
     display: 'flex',
     alignItems: 'center',
-    gap: '12px',
+    gap: '14px',
   },
   userAvatar: {
-    width: '40px',
-    height: '40px',
+    width: '44px',
+    height: '44px',
     borderRadius: '50%',
-    background: 'linear-gradient(135deg, #22c55e, #16a34a)',
+    background: 'linear-gradient(135deg, #10b981, #059669)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     fontWeight: '600',
-    fontSize: '16px',
+    fontSize: '17px',
+    color: '#fff',
     flexShrink: 0,
+    boxShadow: '0 2px 8px rgba(16, 185, 129, 0.25)',
   },
   userInfo: {
     flex: 1,
@@ -135,12 +148,13 @@ const styles = {
   },
   userName: {
     fontWeight: '600',
-    fontSize: '14px',
-    marginBottom: '2px',
+    fontSize: '15px',
+    marginBottom: '4px',
+    color: '#1e293b',
   },
   userPhone: {
-    fontSize: '12px',
-    color: '#94a3b8',
+    fontSize: '13px',
+    color: '#64748b',
   },
 };
 

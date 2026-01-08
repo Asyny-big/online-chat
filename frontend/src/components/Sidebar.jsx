@@ -1,6 +1,7 @@
 import React from 'react';
 import UserSearch from './UserSearch';
 import ChatList from './ChatList';
+import { LogoutIcon } from './Icons';
 
 function Sidebar({ token, chats, selectedChat, onSelectChat, onCreateChat, onLogout, incomingCallChatId }) {
   return (
@@ -8,11 +9,11 @@ function Sidebar({ token, chats, selectedChat, onSelectChat, onCreateChat, onLog
       {/* Заголовок и кнопка выхода */}
       <div style={styles.header}>
         <h2 style={styles.title}>
-          <span style={styles.logo}>🦆</span>
+          <span style={styles.logoIcon}>💬</span>
           GovChat
         </h2>
         <button onClick={onLogout} style={styles.logoutBtn} title="Выйти">
-          ⎋
+          <LogoutIcon size={18} color="#ef4444" />
         </button>
       </div>
 
@@ -34,45 +35,46 @@ const styles = {
   sidebar: {
     width: '100%',
     height: '100%',
-    background: '#1e293b',
+    background: '#ffffff',
     display: 'flex',
     flexDirection: 'column',
-    borderRight: '1px solid #334155',
+    borderRight: '1px solid #e2e8f0',
     overflow: 'hidden',
   },
   header: {
-    padding: '16px',
-    borderBottom: '1px solid #334155',
+    padding: '18px 20px',
+    borderBottom: '1px solid #e2e8f0',
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
     flexShrink: 0,
+    background: '#ffffff',
   },
   title: {
     margin: 0,
-    fontSize: '20px',
+    fontSize: '22px',
     fontWeight: '700',
-    color: '#fff',
+    color: '#1e293b',
     display: 'flex',
     alignItems: 'center',
-    gap: '8px',
+    gap: '10px',
+    letterSpacing: '-0.02em',
   },
-  logo: {
-    fontSize: '24px',
+  logoIcon: {
+    fontSize: '26px',
   },
   logoutBtn: {
-    width: '36px',
-    height: '36px',
+    width: '40px',
+    height: '40px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    background: 'transparent',
+    background: '#fef2f2',
     color: '#ef4444',
-    border: '1px solid #ef4444',
-    borderRadius: '8px',
+    border: '1.5px solid #fecaca',
+    borderRadius: '12px',
     cursor: 'pointer',
-    fontSize: '18px',
-    transition: 'all 0.2s',
+    transition: 'all 0.2s ease',
   },
 };
 
