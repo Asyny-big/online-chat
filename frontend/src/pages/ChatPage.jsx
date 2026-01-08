@@ -11,7 +11,6 @@ function ChatPage({ token, onLogout }) {
   const [selectedChat, setSelectedChat] = useState(null);
   const [messages, setMessages] = useState([]);
   const [currentUserId, setCurrentUserId] = useState(null);
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [typingUsers, setTypingUsers] = useState([]);
   
   // Состояние звонка
@@ -123,6 +122,19 @@ function ChatPage({ token, onLogout }) {
       });
     });
 
+    // Новый чат создан (когда кто-то создал с нами чат)
+    socket.on('chat:new', (newChat) => {
+      console.log('[ChatPage] Received chat:new:', newChat);
+      setChats((prev) => {
+        // Проверяем что чата ещё нет в списке
+        if (prev.some(c => c._id === newChat._id)) return prev;
+        return [newChat, ...prev];
+      });
+      
+      // Присоединяемся к комнате нового чата
+      socket.emit('chat:join', { chatId: newChat._id });
+    });
+
     // === ЗВОНКИ ===
     socket.on('call:incoming', ({ callId: incomingCallId, chatId: incomingChatId, chatName, initiator, type }) => {
       console.log('[ChatPage] Incoming call:', { incomingCallId, incomingChatId, initiator, type });
@@ -219,7 +231,6 @@ function ChatPage({ token, onLogout }) {
 
   const handleSelectChat = (chat) => {
     setSelectedChat(chat);
-    setIsMobileMenuOpen(false); // Закрыть мобильное меню
   };
 
   const handleCreateChat = async (userId) => {
@@ -239,7 +250,6 @@ function ChatPage({ token, onLogout }) {
       });
 
       setSelectedChat(newChat);
-      setIsMobileMenuOpen(false);
     } catch (error) {
       console.error('Ошибка создания чата:', error);
       alert('Не удалось создать чат');
@@ -311,26 +321,11 @@ function ChatPage({ token, onLogout }) {
 
   return (
     <div style={styles.container}>
-      {/* Мобильная кнопка меню */}
-      <button
-        style={styles.mobileMenuBtn}
-        onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+      {/* Сайдбар с чатами */}
+      <div 
+        className={`sidebar-wrapper ${selectedChat ? 'hidden' : ''}`}
+        style={styles.sidebarWrapper}
       >
-        {isMobileMenuOpen ? '✕' : '☰'}
-      </button>
-
-      {/* Overlay для мобильного */}
-      {isMobileMenuOpen && (
-        <div
-          style={styles.overlay}
-          onClick={() => setIsMobileMenuOpen(false)}
-        />
-      )}
-
-      <div style={{
-        ...styles.sidebarWrapper,
-        ...(isMobileMenuOpen ? styles.sidebarOpen : {})
-      }}>
         <Sidebar
           token={token}
           chats={chats}
@@ -342,18 +337,25 @@ function ChatPage({ token, onLogout }) {
         />
       </div>
 
-      <ChatWindow
-        token={token}
-        chat={selectedChat}
-        messages={messages}
-        socket={socketRef.current}
-        currentUserId={currentUserId}
-        onStartCall={handleStartCall}
-        typingUsers={typingUsers}
-        incomingCall={incomingCallData}
-        onAcceptCall={handleAcceptCallFromBanner}
-        onDeclineCall={handleDeclineCallFromBanner}
-      />
+      {/* Окно чата */}
+      <div 
+        className={`chat-window-wrapper ${selectedChat ? 'active' : ''}`}
+        style={styles.chatWindowWrapper}
+      >
+        <ChatWindow
+          token={token}
+          chat={selectedChat}
+          messages={messages}
+          socket={socketRef.current}
+          currentUserId={currentUserId}
+          onStartCall={handleStartCall}
+          typingUsers={typingUsers}
+          incomingCall={incomingCallData}
+          onAcceptCall={handleAcceptCallFromBanner}
+          onDeclineCall={handleDeclineCallFromBanner}
+          onBack={() => setSelectedChat(null)}
+        />
+      </div>
 
       {/* Модальное окно звонка */}
       {callState !== 'idle' && (
@@ -388,31 +390,12 @@ const styles = {
     height: '100%',
     transition: 'transform 0.3s ease',
   },
-  sidebarOpen: {},
-  mobileMenuBtn: {
-    display: 'none',
-    position: 'fixed',
-    top: '12px',
-    left: '12px',
-    zIndex: 1001,
-    width: '40px',
-    height: '40px',
-    background: '#3b82f6',
-    border: 'none',
-    borderRadius: '8px',
-    color: '#fff',
-    fontSize: '20px',
-    cursor: 'pointer',
-  },
-  overlay: {
-    display: 'none',
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    background: 'rgba(0, 0, 0, 0.5)',
-    zIndex: 99,
+  chatWindowWrapper: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    minWidth: 0,
   },
 };
 
@@ -422,20 +405,33 @@ if (typeof window !== 'undefined') {
   styleSheet.textContent = `
     @media (max-width: 768px) {
       .mobile-menu-btn {
-        display: flex !important;
-        align-items: center;
-        justify-content: center;
+        display: none !important;
       }
       .sidebar-wrapper {
-        position: fixed !important;
+        position: absolute !important;
         top: 0;
         left: 0;
         height: 100% !important;
         z-index: 100;
-        transform: translateX(-100%);
-        width: 280px !important;
+        width: 100% !important;
+        transform: translateX(0);
+        transition: transform 0.3s ease;
       }
-      .sidebar-wrapper.open {
+      .sidebar-wrapper.hidden {
+        transform: translateX(-100%);
+        pointer-events: none;
+      }
+      .chat-window-wrapper {
+        position: absolute !important;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 99;
+        transform: translateX(100%);
+        transition: transform 0.3s ease;
+      }
+      .chat-window-wrapper.active {
         transform: translateX(0);
       }
       .overlay {

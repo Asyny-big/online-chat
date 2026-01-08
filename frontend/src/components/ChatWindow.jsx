@@ -2,10 +2,18 @@ import React, { useEffect, useRef, useState } from 'react';
 import MessageInput from './MessageInput';
 import { API_URL } from '../config';
 
-function ChatWindow({ token, chat, messages, socket, currentUserId, onStartCall, typingUsers, incomingCall, onAcceptCall, onDeclineCall }) {
+function ChatWindow({ token, chat, messages, socket, currentUserId, onStartCall, typingUsers, incomingCall, onAcceptCall, onDeclineCall, onBack }) {
   const messagesEndRef = useRef(null);
   const containerRef = useRef(null);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+
+  // Отслеживание размера экрана
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth <= 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // Auto-scroll при новых сообщениях
   useEffect(() => {
@@ -78,6 +86,16 @@ function ChatWindow({ token, chat, messages, socket, currentUserId, onStartCall,
       {/* Шапка с кнопками звонков */}
       <div style={styles.header}>
         <div style={styles.headerInfo}>
+          {/* Кнопка назад для мобильных */}
+          {isMobile && (
+            <button
+              onClick={onBack}
+              style={styles.backBtn}
+              title="Назад к чатам"
+            >
+              ←
+            </button>
+          )}
           <div style={styles.avatar}>
             {displayName.charAt(0).toUpperCase()}
           </div>
@@ -408,6 +426,21 @@ const styles = {
   headerActions: {
     display: 'flex',
     gap: '8px',
+  },
+  backBtn: {
+    width: '36px',
+    height: '36px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'transparent',
+    border: 'none',
+    borderRadius: '50%',
+    fontSize: '20px',
+    color: '#fff',
+    cursor: 'pointer',
+    marginRight: '8px',
+    transition: 'background 0.2s',
   },
   callBtn: {
     width: '40px',

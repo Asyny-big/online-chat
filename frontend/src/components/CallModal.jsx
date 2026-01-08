@@ -128,6 +128,7 @@ function CallModal({
   const [callDuration, setCallDuration] = useState(0);
   const [connectionState, setConnectionState] = useState('new');
   const [hasLocalStream, setHasLocalStream] = useState(false);
+  const [facingMode, setFacingMode] = useState('user'); // 'user' = фронтальная, 'environment' = задняя
   const [hasRemoteStream, setHasRemoteStream] = useState(false);
 
   const localVideoRef = useRef(null);
@@ -492,6 +493,61 @@ function CallModal({
     }
   }, [callType]);
 
+  // Смена камеры (фронтальная/задняя)
+  const switchCamera = useCallback(async () => {
+    if (callType !== 'video' || !localStreamRef.current) return;
+    
+    try {
+      const newFacingMode = facingMode === 'user' ? 'environment' : 'user';
+      console.log('[CallModal] Switching camera to:', newFacingMode);
+      
+      // Получаем новый видеопоток
+      const newStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+          facingMode: newFacingMode
+        },
+        audio: false // аудио оставляем старое
+      });
+      
+      const newVideoTrack = newStream.getVideoTracks()[0];
+      const oldVideoTrack = localStreamRef.current.getVideoTracks()[0];
+      
+      // Заменяем трек в PeerConnection
+      if (peerConnectionRef.current) {
+        const senders = peerConnectionRef.current.getSenders();
+        const videoSender = senders.find(s => s.track?.kind === 'video');
+        if (videoSender) {
+          await videoSender.replaceTrack(newVideoTrack);
+          console.log('[CallModal] Replaced video track in PeerConnection');
+        }
+      }
+      
+      // Останавливаем старый трек
+      if (oldVideoTrack) {
+        oldVideoTrack.stop();
+      }
+      
+      // Заменяем трек в локальном стриме
+      localStreamRef.current.removeTrack(oldVideoTrack);
+      localStreamRef.current.addTrack(newVideoTrack);
+      
+      // Обновляем видео элемент
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = localStreamRef.current;
+      }
+      
+      setFacingMode(newFacingMode);
+      console.log('[CallModal] Camera switched to:', newFacingMode);
+      
+    } catch (err) {
+      console.error('[CallModal] Error switching camera:', err);
+      // Возможно устройство не поддерживает вторую камеру
+      alert('Не удалось переключить камеру. Возможно, устройство не поддерживает вторую камеру.');
+    }
+  }, [callType, facingMode]);
+
   // Socket event handlers
   useEffect(() => {
     if (!socket) return;
@@ -765,6 +821,17 @@ function CallModal({
                   title={isVideoOff ? 'Включить камеру' : 'Выключить камеру'}
                 >
                   {isVideoOff ? '📷' : '🎥'}
+                </button>
+              )}
+              
+              {/* Кнопка смены камеры - только для видеозвонков */}
+              {callType === 'video' && (
+                <button
+                  onClick={switchCamera}
+                  style={styles.controlBtn}
+                  title={facingMode === 'user' ? 'Переключить на заднюю камеру' : 'Переключить на фронтальную камеру'}
+                >
+                  🔄
                 </button>
               )}
               
