@@ -80,8 +80,6 @@ function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
-  const [searchResults, setSearchResults] = useState([]);
-  const [searchLoading, setSearchLoading] = useState(false);
 
   // ═══════════════════════════════════════════════════════════════
   // 2. ВСЕ РЕФЫ (useRef)
@@ -667,7 +665,7 @@ function App() {
       <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
         <button style={chatStyles.profileEditBtn} onClick={() => setShowProfile(true)}>Профиль</button>
         <button style={chatStyles.profileEditBtn} onClick={() => setShowCustomizer(true)}>Тема</button>
-        <button style={chatStyles.profileLogoutBtn} onClick={handleLogout)>Выйти</button>
+        <button style={chatStyles.profileLogoutBtn} onClick={handleLogout}>Выйти</button>
       </div>
 
       {/* ПОИСК ПОЛЬЗОВАТЕЛЕЙ */}
