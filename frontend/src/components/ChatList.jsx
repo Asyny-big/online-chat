@@ -1,7 +1,10 @@
 import React from 'react';
 
 function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
-  if (chats.length === 0) {
+  // Защита от неправильного типа данных
+  const chatList = Array.isArray(chats) ? chats : [];
+  
+  if (chatList.length === 0) {
     return (
       <div style={styles.empty}>
         <div style={styles.emptyIcon}>💬</div>
@@ -16,7 +19,7 @@ function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
   return (
     <div style={styles.container}>
       <div style={styles.label}>Чаты</div>
-      {chats.map((chat) => {
+      {chatList.map((chat) => {
         const isActive = selectedChat?._id === chat._id;
         const hasIncomingCall = incomingCallChatId === chat._id;
         const displayName = chat.displayName || chat.name || 'Чат';
