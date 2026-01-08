@@ -11,6 +11,7 @@ function App() {
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (token) localStorage.setItem('token', token);
@@ -19,6 +20,7 @@ function App() {
   const handleAuth = async (e) => {
     e.preventDefault();
     setError('');
+    setLoading(true);
     try {
       const endpoint = authMode === 'login' ? '/auth/login' : '/auth/register';
       const payload = authMode === 'login' ? { phone, password } : { phone, name, password };
@@ -26,6 +28,8 @@ function App() {
       setToken(res.data.token);
     } catch (err) {
       setError(err.response?.data?.message || 'Ошибка авторизации');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -42,7 +46,11 @@ function App() {
   return (
     <div style={styles.authContainer}>
       <div style={styles.authBox}>
-        <h1 style={styles.title}>GovChat</h1>
+        <h1 style={styles.title}>
+          <span>🦆</span>
+          GovChat
+        </h1>
+        <p style={styles.subtitle}>Современный мессенджер</p>
         
         <div style={styles.tabs}>
           <button
@@ -63,7 +71,7 @@ function App() {
           {authMode === 'register' && (
             <input
               type="text"
-              placeholder="Имя"
+              placeholder="Ваше имя"
               value={name}
               onChange={(e) => setName(e.target.value)}
               style={styles.input}
@@ -91,8 +99,16 @@ function App() {
 
           {error && <div style={styles.error}>{error}</div>}
           
-          <button type="submit" style={styles.button}>
-            {authMode === 'login' ? 'Войти' : 'Зарегистрироваться'}
+          <button 
+            type="submit" 
+            style={{
+              ...styles.button,
+              opacity: loading ? 0.7 : 1,
+              cursor: loading ? 'not-allowed' : 'pointer'
+            }}
+            disabled={loading}
+          >
+            {loading ? 'Загрузка...' : (authMode === 'login' ? 'Войти' : 'Зарегистрироваться')}
           </button>
         </form>
       </div>

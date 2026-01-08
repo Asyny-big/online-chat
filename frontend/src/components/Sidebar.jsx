@@ -7,9 +7,12 @@ function Sidebar({ token, chats, selectedChat, onSelectChat, onCreateChat, onLog
     <div style={styles.sidebar}>
       {/* Заголовок и кнопка выхода */}
       <div style={styles.header}>
-        <h2 style={styles.title}>GovChat</h2>
-        <button onClick={onLogout} style={styles.logoutBtn}>
-          Выйти
+        <h2 style={styles.title}>
+          <span style={styles.logo}>🦆</span>
+          GovChat
+        </h2>
+        <button onClick={onLogout} style={styles.logoutBtn} title="Выйти">
+          ⎋
         </button>
       </div>
 
@@ -28,11 +31,13 @@ function Sidebar({ token, chats, selectedChat, onSelectChat, onCreateChat, onLog
 
 const styles = {
   sidebar: {
-    width: '320px',
+    width: '100%',
+    height: '100%',
     background: '#1e293b',
     display: 'flex',
     flexDirection: 'column',
     borderRight: '1px solid #334155',
+    overflow: 'hidden',
   },
   header: {
     padding: '16px',
@@ -40,22 +45,32 @@ const styles = {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
+    flexShrink: 0,
   },
   title: {
     margin: 0,
     fontSize: '20px',
-    fontWeight: '600',
+    fontWeight: '700',
     color: '#fff',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  },
+  logo: {
+    fontSize: '24px',
   },
   logoutBtn: {
-    padding: '8px 16px',
-    background: '#ef4444',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '6px',
+    width: '36px',
+    height: '36px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'transparent',
+    color: '#ef4444',
+    border: '1px solid #ef4444',
+    borderRadius: '8px',
     cursor: 'pointer',
-    fontSize: '13px',
-    fontWeight: '500',
+    fontSize: '18px',
     transition: 'all 0.2s',
   },
 };

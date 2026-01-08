@@ -4,6 +4,7 @@ function ChatList({ chats, selectedChat, onSelectChat }) {
   if (chats.length === 0) {
     return (
       <div style={styles.empty}>
+        <div style={styles.emptyIcon}>💬</div>
         <div style={styles.emptyText}>Нет чатов</div>
         <div style={styles.emptyHint}>
           Найдите пользователя по номеру телефона
@@ -18,7 +19,18 @@ function ChatList({ chats, selectedChat, onSelectChat }) {
       {chats.map((chat) => {
         const isActive = selectedChat?._id === chat._id;
         const displayName = chat.displayName || chat.name || 'Чат';
-        const lastMessage = chat.lastMessage?.text || 'Нет сообщений';
+        const lastMsg = chat.lastMessage;
+        
+        let lastMessageText = 'Нет сообщений';
+        if (lastMsg) {
+          if (lastMsg.type === 'audio') lastMessageText = '🎤 Голосовое сообщение';
+          else if (lastMsg.type === 'image') lastMessageText = '📷 Изображение';
+          else if (lastMsg.type === 'video') lastMessageText = '🎥 Видео';
+          else if (lastMsg.type === 'file') lastMessageText = '📎 Файл';
+          else lastMessageText = lastMsg.text || 'Сообщение';
+        }
+
+        const initial = displayName.charAt(0).toUpperCase();
 
         return (
           <button
@@ -29,8 +41,11 @@ function ChatList({ chats, selectedChat, onSelectChat }) {
               ...(isActive ? styles.chatItemActive : {}),
             }}
           >
-            <div style={styles.chatName}>{displayName}</div>
-            <div style={styles.lastMessage}>{lastMessage}</div>
+            <div style={styles.avatar}>{initial}</div>
+            <div style={styles.chatInfo}>
+              <div style={styles.chatName}>{displayName}</div>
+              <div style={styles.lastMessage}>{lastMessageText}</div>
+            </div>
           </button>
         );
       })}
@@ -42,14 +57,16 @@ const styles = {
   container: {
     flex: 1,
     overflowY: 'auto',
-    padding: '16px',
+    padding: '12px',
   },
   label: {
-    fontSize: '12px',
-    color: '#94a3b8',
+    fontSize: '11px',
+    color: '#64748b',
     marginBottom: '12px',
     fontWeight: '600',
     textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+    padding: '0 4px',
   },
   empty: {
     flex: 1,
@@ -59,11 +76,15 @@ const styles = {
     justifyContent: 'center',
     padding: '32px',
   },
+  emptyIcon: {
+    fontSize: '40px',
+    marginBottom: '12px',
+  },
   emptyText: {
     fontSize: '16px',
     fontWeight: '600',
     color: '#94a3b8',
-    marginBottom: '8px',
+    marginBottom: '6px',
   },
   emptyHint: {
     fontSize: '13px',
@@ -72,23 +93,42 @@ const styles = {
   },
   chatItem: {
     width: '100%',
-    padding: '12px',
-    background: '#0f172a',
-    border: '1px solid #334155',
-    borderRadius: '8px',
+    padding: '10px 12px',
+    background: 'transparent',
+    border: 'none',
+    borderRadius: '12px',
     color: '#fff',
     cursor: 'pointer',
     textAlign: 'left',
-    marginBottom: '8px',
-    transition: 'all 0.2s',
+    marginBottom: '4px',
+    transition: 'all 0.15s ease',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
   },
   chatItemActive: {
-    background: '#1e40af',
-    borderColor: '#3b82f6',
+    background: 'linear-gradient(135deg, #3b82f6, #2563eb)',
+  },
+  avatar: {
+    width: '44px',
+    height: '44px',
+    borderRadius: '50%',
+    background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontWeight: '600',
+    fontSize: '16px',
+    flexShrink: 0,
+  },
+  chatInfo: {
+    flex: 1,
+    minWidth: 0,
   },
   chatName: {
     fontWeight: '600',
-    marginBottom: '4px',
+    marginBottom: '2px',
+    fontSize: '14px',
   },
   lastMessage: {
     fontSize: '12px',

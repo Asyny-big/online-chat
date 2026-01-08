@@ -198,6 +198,75 @@
         box-shadow: 0 0 12px #ff4757;
       }
     }
+    
+    /* Анимация мигания (для индикатора печати) */
+    @keyframes blink {
+      0%, 50%, 100% { opacity: 1; }
+      25%, 75% { opacity: 0.3; }
+    }
+    
+    /* Скроллбар */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    
+    ::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 3px;
+    }
+    
+    ::-webkit-scrollbar-thumb:hover {
+      background: #475569;
+    }
+    
+    /* Выделение текста */
+    ::selection {
+      background: rgba(59, 130, 246, 0.4);
+      color: #fff;
+    }
+    
+    /* Фокус на input */
+    input:focus, textarea:focus, button:focus {
+      outline: none;
+    }
+    
+    input:focus, textarea:focus {
+      border-color: #3b82f6 !important;
+    }
+    
+    /* Hover/active для кнопок */
+    button:hover:not(:disabled) {
+      filter: brightness(1.1);
+    }
+    
+    button:active:not(:disabled) {
+      transform: scale(0.98);
+    }
+    
+    /* Плавные переходы для всех интерактивных элементов */
+    button, input, textarea, a {
+      transition: all 0.15s ease;
+    }
+    
+    /* Отключенные элементы */
+    button:disabled, input:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    
+    /* Audio player стилизация */
+    audio {
+      filter: invert(1) hue-rotate(180deg);
+    }
+    
+    audio::-webkit-media-controls-panel {
+      background: #1e293b;
+    }
   </style>
 </head>
 <body>
