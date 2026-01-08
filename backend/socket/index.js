@@ -386,29 +386,34 @@ module.exports = function(io) {
 
   // Рассылка статуса
   async function broadcastUserStatus(io, odst, status) {
-    const userChats = await Chat.find({ 'participants.user': odst }).select('participants');
-    const contactIds = new Set();
+    try {
+      const userChats = await Chat.find({ 'participants.user': odst }).select('participants');
+      const contactIds = new Set();
 
-    userChats.forEach(chat => {
-      chat.participants.forEach(p => {
-        if (p.user.toString() !== odst) {
-          contactIds.add(p.user.toString());
+      userChats.forEach(chat => {
+        chat.participants.forEach(p => {
+          const oderId = p.user?.toString?.() || p.user;
+          if (oderId && oderId !== odst) {
+            contactIds.add(oderId);
+          }
+        });
+      });
+
+      contactIds.forEach(contactId => {
+        const contactSockets = userSockets.get(contactId);
+        if (contactSockets) {
+          contactSockets.forEach(socketId => {
+            io.to(socketId).emit('user:status', {
+              userId: odst,
+              status,
+              lastSeen: status === 'offline' ? new Date() : null
+            });
+          });
         }
       });
-    });
-
-    contactIds.forEach(contactId => {
-      const contactSockets = userSockets.get(contactId);
-      if (contactSockets) {
-        contactSockets.forEach(socketId => {
-          io.to(socketId).emit('user:status', {
-            userId: odst,
-            status,
-            lastSeen: status === 'offline' ? new Date() : null
-          });
-        });
-      }
-    });
+    } catch (err) {
+      console.error('broadcastUserStatus error:', err.message);
+    }
   }
 
   return { userSockets, activeCalls };

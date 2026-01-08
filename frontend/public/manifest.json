@@ -1,8 +1,8 @@
 {
-  "short_name": "ГоВЧат",
-  "name": "ГоВЧат 2.1 Beta - Групповой чат с видеозвонками",
+  "short_name": "GovChat",
+  "name": "GovChat - Современный мессенджер",
   "description": "Современное веб-приложение для группового общения",
-  "start_url": "https://frutin.me/",
+  "start_url": ".",
   "scope": "/",
   "display": "standalone",
   "theme_color": "#00c3ff",
