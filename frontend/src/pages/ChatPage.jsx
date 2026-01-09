@@ -371,6 +371,15 @@ function ChatPage({ token, onLogout }) {
     }
   };
 
+  // Добавление чата напрямую (для групповых чатов)
+  const handleAddChat = useCallback((chat) => {
+    setChats((prev) => {
+      const exists = prev.find((c) => c._id === chat._id);
+      if (exists) return prev;
+      return [chat, ...prev];
+    });
+  }, []);
+
   // === Удаление ===
   const handleDeleteMessage = useCallback(async (messageId) => {
     if (!selectedChat || !token) return;
@@ -528,6 +537,7 @@ function ChatPage({ token, onLogout }) {
           selectedChat={selectedChat}
           onSelectChat={handleSelectChat}
           onCreateChat={handleCreateChat}
+          onAddChat={handleAddChat}
           onLogout={onLogout}
           incomingCallChatId={incomingCallData?.chatId}
         />

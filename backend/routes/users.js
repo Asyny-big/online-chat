@@ -1,9 +1,44 @@
 const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
+const Chat = require('../models/Chat');
 const authMiddleware = require('../middleware/auth');
 
 router.use(authMiddleware);
+
+// Получение контактов (пользователи из существующих чатов)
+router.get('/contacts', async (req, res) => {
+  try {
+    // Находим все приватные чаты пользователя
+    const chats = await Chat.find({
+      'participants.user': req.userId,
+      isGroup: false
+    }).populate('participants.user', 'name phone avatarUrl status');
+
+    // Извлекаем уникальных пользователей (не себя)
+    const contactsMap = new Map();
+    
+    chats.forEach(chat => {
+      chat.participants.forEach(p => {
+        if (p.user && p.user._id.toString() !== req.userId) {
+          contactsMap.set(p.user._id.toString(), {
+            _id: p.user._id,
+            name: p.user.name,
+            phone: p.user.phone,
+            avatarUrl: p.user.avatarUrl,
+            status: p.user.status
+          });
+        }
+      });
+    });
+
+    const contacts = Array.from(contactsMap.values());
+    res.json(contacts);
+  } catch (error) {
+    console.error('Get contacts error:', error);
+    res.status(500).json({ error: 'Ошибка получения контактов' });
+  }
+});
 
 // Поиск пользователей по номеру телефона (частичное совпадение)
 router.get('/search', async (req, res) => {

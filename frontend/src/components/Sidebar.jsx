@@ -3,7 +3,7 @@ import UserSearch from './UserSearch';
 import ChatList from './ChatList';
 import CreateGroupModal from './CreateGroupModal';
 
-function Sidebar({ token, chats, selectedChat, onSelectChat, onCreateChat, onLogout, incomingCallChatId }) {
+function Sidebar({ token, chats, selectedChat, onSelectChat, onCreateChat, onAddChat, onLogout, incomingCallChatId }) {
   const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
   return (
     <div style={styles.sidebar}>
@@ -44,7 +44,8 @@ function Sidebar({ token, chats, selectedChat, onSelectChat, onCreateChat, onLog
           token={token}
           onClose={() => setShowCreateGroupModal(false)}
           onGroupCreated={(groupChat) => {
-            onCreateChat(groupChat);
+            onAddChat?.(groupChat);
+            onSelectChat?.(groupChat);
             setShowCreateGroupModal(false);
           }}
         />
