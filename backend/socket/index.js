@@ -7,6 +7,7 @@ const config = require('../config.local');
 
 const userSockets = new Map();
 const activeCalls = new Map();
+const activeGroupCalls = new Map(); // chatId -> { callId, type, participants:Set<userId> }
 
 module.exports = function(io) {
   // Авторизация сокетов
@@ -227,6 +228,182 @@ module.exports = function(io) {
       } catch (error) {
         console.error('call:start error:', error);
         callback?.({ error: 'Ошибка начала звонка' });
+      }
+    });
+
+    // === ГРУППОВЫЕ ЗВОНКИ ===
+    socket.on('group-call:start', async ({ chatId, type = 'video' }, callback) => {
+      try {
+        const chat = await Chat.findById(chatId).populate('participants.user', 'name');
+        if (!chat) return callback?.({ error: 'Чат не найден' });
+        if (chat.type !== 'group') return callback?.({ error: 'Не групповой чат' });
+        if (!chat.isParticipant(userId)) return callback?.({ error: 'Нет доступа' });
+
+        // Проверяем активный звонок
+        const existing = await Call.findOne({ chat: chatId, status: { $in: ['ringing', 'active'] } });
+        if (existing) {
+          return callback?.({ error: 'already_active', callId: existing._id.toString() });
+        }
+
+        const call = await Call.create({
+          chat: chatId,
+          initiator: userId,
+          type,
+          status: 'active',
+          participants: [{ user: userId }]
+        });
+
+        activeGroupCalls.set(chatId.toString(), {
+          callId: call._id.toString(),
+          type,
+          participants: new Set([userId])
+        });
+
+        // Уведомляем участников: баннер входящего и маркер в списке
+        chat.participants.forEach(({ user }) => {
+          const pid = user?._id?.toString?.() || user?.toString?.();
+          const sockets = userSockets.get(pid);
+          if (!sockets) return;
+          sockets.forEach(sid => {
+            if (pid !== userId) {
+              io.to(sid).emit('group-call:incoming', {
+                callId: call._id.toString(),
+                chatId: chatId.toString(),
+                chatName: chat.name,
+                initiator: { _id: userId, name: socket.user.name },
+                type,
+                participantCount: 1
+              });
+            }
+            io.to(sid).emit('group-call:started', {
+              callId: call._id.toString(),
+              chatId: chatId.toString(),
+              initiator: { _id: userId, name: socket.user.name },
+              type,
+              participantCount: 1
+            });
+          });
+        });
+
+        callback?.({ success: true, callId: call._id.toString() });
+      } catch (err) {
+        console.error('group-call:start error:', err);
+        callback?.({ error: 'Ошибка начала группового звонка' });
+      }
+    });
+
+    socket.on('group-call:join', async ({ callId, chatId }, callback) => {
+      try {
+        const call = await Call.findById(callId);
+        if (!call) return callback?.({ error: 'Звонок не найден' });
+        const chat = await Chat.findById(call.chat);
+        if (!chat || !chat.isParticipant(userId)) return callback?.({ error: 'Нет доступа' });
+
+        if (!call.isInCall(userId)) {
+          call.participants.push({ user: userId });
+        }
+        if (call.status === 'ringing') call.status = 'active';
+        await call.save();
+
+        const agc = activeGroupCalls.get(chat._id.toString());
+        if (agc) agc.participants.add(userId);
+
+        // Отправляем участнику текущий список для сигналинга
+        const existing = call.participants
+          .filter(p => !p.leftAt && p.user.toString() !== userId)
+          .map(p => ({ oderId: p.user.toString() }));
+
+        callback?.({ success: true, participants: existing });
+
+        // Уведомляем остальных участников
+        chat.participants.forEach(({ user }) => {
+          const pid = user?._id?.toString?.() || user?.toString?.();
+          const sockets = userSockets.get(pid);
+          if (!sockets) return;
+          sockets.forEach(sid => {
+            if (pid !== userId) {
+              io.to(sid).emit('group-call:participant-joined', {
+                callId: call._id.toString(),
+                chatId: chat._id.toString(),
+                oderId: userId,
+                userName: socket.user.name
+              });
+            }
+            io.to(sid).emit('group-call:updated', {
+              callId: call._id.toString(),
+              chatId: chat._id.toString(),
+              participantCount: call.participants.filter(p => !p.leftAt).length
+            });
+          });
+        });
+      } catch (err) {
+        console.error('group-call:join error:', err);
+        callback?.({ error: 'Ошибка присоединения' });
+      }
+    });
+
+    socket.on('group-call:signal', async ({ callId, oderId, signal }) => {
+      try {
+        const call = await Call.findById(callId);
+        if (!call) return;
+        const targetSockets = userSockets.get(oderId);
+        if (!targetSockets) return;
+        targetSockets.forEach(sid => {
+          io.to(sid).emit('group-call:signal', {
+            callId,
+            fromUserId: userId,
+            signal
+          });
+        });
+      } catch (err) {
+        console.error('group-call:signal error:', err);
+      }
+    });
+
+    socket.on('group-call:leave', async ({ callId }, callback) => {
+      try {
+        const call = await Call.findById(callId);
+        if (!call) return callback?.({ error: 'Звонок не найден' });
+        const chat = await Chat.findById(call.chat);
+        if (!chat) return callback?.({ error: 'Чат не найден' });
+
+        const participant = call.participants.find(p => p.user.toString() === userId && !p.leftAt);
+        if (participant) participant.leftAt = new Date();
+
+        const stillIn = call.participants.filter(p => !p.leftAt);
+        if (stillIn.length <= 0) {
+          call.status = 'ended';
+          call.endedAt = new Date();
+          call.endReason = 'completed';
+          activeGroupCalls.delete(chat._id.toString());
+        }
+        await call.save();
+
+        // Уведомляем комнату чата
+        io.to(`chat:${chat._id}`).emit('group-call:participant-left', {
+          callId: call._id.toString(),
+          chatId: chat._id.toString(),
+          oderId: userId
+        });
+
+        if (call.status === 'ended') {
+          io.to(`chat:${chat._id}`).emit('group-call:ended', {
+            callId: call._id.toString(),
+            chatId: chat._id.toString(),
+            reason: 'completed'
+          });
+        } else {
+          io.to(`chat:${chat._id}`).emit('group-call:updated', {
+            callId: call._id.toString(),
+            chatId: chat._id.toString(),
+            participantCount: stillIn.length
+          });
+        }
+
+        callback?.({ success: true });
+      } catch (err) {
+        console.error('group-call:leave error:', err);
+        callback?.({ error: 'Ошибка' });
       }
     });
 

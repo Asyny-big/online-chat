@@ -22,7 +22,7 @@ function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
       {chatList.map((chat) => {
         const isActive = selectedChat?._id === chat._id;
         const hasIncomingCall = incomingCallChatId === chat._id;
-        const isGroupChat = chat.isGroup === true;
+        const isGroupChat = chat.type === 'group' || chat.isGroup === true;
         const hasActiveGroupCall = chat.activeGroupCall !== null && chat.activeGroupCall !== undefined;
         const displayName = chat.displayName || chat.name || 'Чат';
         const lastMsg = chat.lastMessage;

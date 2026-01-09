@@ -81,7 +81,7 @@ function ChatWindow({
   const typingList = typingUsers?.filter(u => u.chatId === chat._id && u.userId !== currentUserId) || [];
   
   // Проверяем, групповой ли это чат
-  const isGroupChat = chat.isGroup === true;
+  const isGroupChat = chat.type === 'group' || chat.isGroup === true;
   const participantCount = chat.participants?.length || 0;
   
   // Проверяем есть ли входящий звонок для этого чата

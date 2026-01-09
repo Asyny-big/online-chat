@@ -133,7 +133,7 @@ router.post('/private', async (req, res) => {
 router.post('/group', async (req, res) => {
   try {
     const userId = req.userId;
-    const { name, participantPhones = [] } = req.body;
+    const { name, participantPhones = [], participantIds = [] } = req.body;
 
     if (!name || !name.trim()) {
       return res.status(400).json({ error: 'Укажите название группы' });
@@ -141,12 +141,24 @@ router.post('/group', async (req, res) => {
 
     const participants = [{ user: userId, role: 'admin' }];
 
+    // Добавляем участников по phone
     for (const phone of participantPhones) {
       const phoneNormalized = phone.replace(/[\s\-()]/g, '');
       const user = await User.findOne({ phoneNormalized });
-      
       if (user && user._id.toString() !== userId) {
-        participants.push({ user: user._id, role: 'member' });
+        if (!participants.find(p => p.user.toString() === user._id.toString())) {
+          participants.push({ user: user._id, role: 'member' });
+        }
+      }
+    }
+
+    // Добавляем участников по userId
+    for (const pid of participantIds) {
+      if (!pid) continue;
+      const uid = pid.toString();
+      if (uid === userId) continue;
+      if (!participants.find(p => p.user.toString() === uid)) {
+        participants.push({ user: uid, role: 'member' });
       }
     }
 
@@ -169,16 +181,24 @@ router.post('/group', async (req, res) => {
     const io = req.app.get('io');
     const socketData = req.app.get('socketData');
 
+    // Формируем объект для фронтенда (добавим displayName)
+    const chatPayload = {
+      ...chat.toObject(),
+      displayName: chat.name,
+      displayAvatar: chat.avatarUrl,
+      participantCount: chat.participants.length
+    };
+
     participants.forEach(p => {
       const participantId = p.user.toString();
-      if (participantId !== userId && socketData?.userSockets.has(participantId)) {
+      if (socketData?.userSockets.has(participantId)) {
         socketData.userSockets.get(participantId).forEach(socketId => {
-          io.to(socketId).emit('chat:new', chat);
+          io.to(socketId).emit('chat:new', chatPayload);
         });
       }
     });
 
-    res.status(201).json(chat);
+    res.status(201).json(chatPayload);
   } catch (error) {
     console.error('Create group chat error:', error);
     res.status(500).json({ error: 'Ошибка создания группы' });
