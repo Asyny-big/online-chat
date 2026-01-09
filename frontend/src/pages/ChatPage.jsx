@@ -5,6 +5,7 @@ import { API_URL, SOCKET_URL } from '../config';
 import Sidebar from '../components/Sidebar';
 import ChatWindow from '../components/ChatWindow';
 import CallModal from '../components/CallModal';
+import GroupCallModal from '../components/GroupCallModal';
 
 function ChatPage({ token, onLogout }) {
   const [chats, setChats] = useState([]);
@@ -13,7 +14,7 @@ function ChatPage({ token, onLogout }) {
   const [currentUserId, setCurrentUserId] = useState(null);
   const [typingUsers, setTypingUsers] = useState([]);
   
-  // Состояние звонка
+  // Состояние звонка (для 1-to-1)
   const [callState, setCallState] = useState('idle'); // idle | incoming | outgoing | active
   const [callType, setCallType] = useState(null);     // audio | video
   const [callId, setCallId] = useState(null);
@@ -21,6 +22,10 @@ function ChatPage({ token, onLogout }) {
   
   // Данные входящего звонка для отображения в UI (баннер и индикатор)
   const [incomingCallData, setIncomingCallData] = useState(null);
+
+  // Состояние группового звонка
+  const [groupCallState, setGroupCallState] = useState('idle'); // idle | incoming | active
+  const [groupCallData, setGroupCallData] = useState(null);
   
   const socketRef = useRef(null);
   
@@ -30,6 +35,8 @@ function ChatPage({ token, onLogout }) {
   const callStateRef = useRef(callState);
   const callIdRef = useRef(callId);
   const currentUserIdRef = useRef(currentUserId);
+  const groupCallStateRef = useRef(groupCallState);
+  const groupCallDataRef = useRef(groupCallData);
   
   // Обновляем refs при изменении состояния
   useEffect(() => { chatsRef.current = chats; }, [chats]);
@@ -37,6 +44,8 @@ function ChatPage({ token, onLogout }) {
   useEffect(() => { callStateRef.current = callState; }, [callState]);
   useEffect(() => { callIdRef.current = callId; }, [callId]);
   useEffect(() => { currentUserIdRef.current = currentUserId; }, [currentUserId]);
+  useEffect(() => { groupCallStateRef.current = groupCallState; }, [groupCallState]);
+  useEffect(() => { groupCallDataRef.current = groupCallData; }, [groupCallData]);
 
   // Получение текущего пользователя
   useEffect(() => {
@@ -226,6 +235,86 @@ function ChatPage({ token, onLogout }) {
       }
     });
 
+    // === ГРУППОВЫЕ ЗВОНКИ ===
+    socket.on('group-call:incoming', ({ callId, chatId, chatName, initiator, type, participantCount }) => {
+      console.log('[ChatPage] Incoming group call:', { callId, chatId, chatName, initiator });
+      
+      // Если уже в звонке - игнорируем
+      if (callStateRef.current !== 'idle' || groupCallStateRef.current !== 'idle') {
+        console.log('[ChatPage] Already in call, ignoring incoming group call');
+        return;
+      }
+
+      setGroupCallState('incoming');
+      setGroupCallData({
+        callId,
+        chatId,
+        chatName,
+        initiator,
+        type,
+        participantCount
+      });
+
+      // Переключаемся на чат если не выбран
+      const chat = chatsRef.current.find(c => c._id === chatId);
+      if (chat && (!selectedChatRef.current || selectedChatRef.current._id !== chatId)) {
+        setSelectedChat(chat);
+      }
+    });
+
+    socket.on('group-call:started', ({ callId, chatId, initiator, type, participantCount }) => {
+      console.log('[ChatPage] Group call started in chat:', chatId);
+      // Обновляем информацию о чате
+      setChats(prev => prev.map(chat => {
+        if (chat._id === chatId) {
+          return {
+            ...chat,
+            activeGroupCall: { callId, initiator, participantCount }
+          };
+        }
+        return chat;
+      }));
+    });
+
+    socket.on('group-call:updated', ({ callId, chatId, participantCount }) => {
+      console.log('[ChatPage] Group call updated:', { chatId, participantCount });
+      setChats(prev => prev.map(chat => {
+        if (chat._id === chatId && chat.activeGroupCall) {
+          return {
+            ...chat,
+            activeGroupCall: { ...chat.activeGroupCall, participantCount }
+          };
+        }
+        return chat;
+      }));
+    });
+
+    socket.on('group-call:ended', ({ callId, chatId, reason }) => {
+      console.log('[ChatPage] Group call ended:', { chatId, reason });
+      // Очищаем информацию о звонке в чате
+      setChats(prev => prev.map(chat => {
+        if (chat._id === chatId) {
+          return { ...chat, activeGroupCall: null };
+        }
+        return chat;
+      }));
+
+      // Если мы были в этом звонке - закрываем модал
+      if (groupCallDataRef.current?.chatId === chatId) {
+        resetGroupCallState();
+      }
+    });
+
+    // Обновление чата (название, аватар)
+    socket.on('chat:updated', ({ chatId, name, avatarUrl }) => {
+      setChats(prev => prev.map(chat => {
+        if (chat._id === chatId) {
+          return { ...chat, name, avatarUrl, displayName: name };
+        }
+        return chat;
+      }));
+    });
+
     socket.on('disconnect', () => {
       console.log('Socket.IO отключен');
     });
@@ -352,6 +441,56 @@ function ChatPage({ token, onLogout }) {
     setIncomingCallData(null);
   };
 
+  const resetGroupCallState = () => {
+    setGroupCallState('idle');
+    setGroupCallData(null);
+  };
+
+  // === ГРУППОВЫЕ ЗВОНКИ ===
+  const handleStartGroupCall = useCallback((type) => {
+    if (!selectedChat || !socketRef.current || selectedChat.type !== 'group') return;
+
+    socketRef.current.emit('group-call:start', {
+      chatId: selectedChat._id,
+      type
+    }, (response) => {
+      if (response.error === 'already_active') {
+        // Звонок уже активен - предлагаем присоединиться
+        if (window.confirm('В группе уже идёт звонок. Присоединиться?')) {
+          setGroupCallState('active');
+          setGroupCallData({
+            callId: response.callId,
+            chatId: selectedChat._id,
+            chatName: selectedChat.name || selectedChat.displayName,
+            type,
+            isJoining: true
+          });
+        }
+      } else if (response.error) {
+        alert(response.error);
+      } else {
+        // Успешно начали звонок
+        setGroupCallState('active');
+        setGroupCallData({
+          callId: response.callId,
+          chatId: selectedChat._id,
+          chatName: selectedChat.name || selectedChat.displayName,
+          type,
+          isInitiator: true
+        });
+      }
+    });
+  }, [selectedChat]);
+
+  const handleJoinGroupCall = useCallback(() => {
+    if (!groupCallData) return;
+    setGroupCallState('active');
+  }, [groupCallData]);
+
+  const handleDeclineGroupCall = useCallback(() => {
+    resetGroupCallState();
+  }, []);
+
   // Обработчик принятия звонка из баннера
   const handleAcceptCallFromBanner = useCallback((cId, type) => {
     console.log('[ChatPage] Accept call from banner:', cId, type);
@@ -406,18 +545,22 @@ function ChatPage({ token, onLogout }) {
           socket={socketRef.current}
           currentUserId={currentUserId}
           onStartCall={handleStartCall}
+          onStartGroupCall={handleStartGroupCall}
           typingUsers={typingUsers}
           incomingCall={incomingCallData}
+          incomingGroupCall={groupCallState === 'incoming' ? groupCallData : null}
           onAcceptCall={handleAcceptCallFromBanner}
           onDeclineCall={handleDeclineCallFromBanner}
+          onAcceptGroupCall={handleJoinGroupCall}
+          onDeclineGroupCall={handleDeclineGroupCall}
           onBack={() => setSelectedChat(null)}
           onDeleteMessage={handleDeleteMessage}
           onDeleteChat={handleDeleteChat}
         />
       </div>
 
-      {/* Модальное окно звонка */}
-      {callState !== 'idle' && (
+      {/* Модальное окно 1-to-1 звонка */}
+      {callState !== 'idle' && selectedChat?.type === 'private' && (
         <CallModal
           socket={socketRef.current}
           callState={callState}
@@ -429,6 +572,24 @@ function ChatPage({ token, onLogout }) {
           onCallAccepted={handleCallAccepted}
           currentUserId={currentUserId}
           token={token}
+        />
+      )}
+
+      {/* Модальное окно группового звонка */}
+      {groupCallState !== 'idle' && groupCallData && (
+        <GroupCallModal
+          socket={socketRef.current}
+          callId={groupCallData.callId}
+          chatId={groupCallData.chatId}
+          chatName={groupCallData.chatName}
+          callType={groupCallData.type}
+          isIncoming={groupCallState === 'incoming'}
+          initiator={groupCallData.initiator}
+          existingParticipants={groupCallData.existingParticipants || []}
+          currentUserId={currentUserId}
+          token={token}
+          onClose={resetGroupCallState}
+          onJoin={handleJoinGroupCall}
         />
       )}
     </div>

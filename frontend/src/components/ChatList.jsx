@@ -22,6 +22,8 @@ function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
       {chatList.map((chat) => {
         const isActive = selectedChat?._id === chat._id;
         const hasIncomingCall = incomingCallChatId === chat._id;
+        const isGroupChat = chat.isGroup === true;
+        const hasActiveGroupCall = chat.activeGroupCall !== null && chat.activeGroupCall !== undefined;
         const displayName = chat.displayName || chat.name || 'Чат';
         const lastMsg = chat.lastMessage;
         
@@ -34,7 +36,7 @@ function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
           else lastMessageText = lastMsg.text || 'Сообщение';
         }
 
-        const initial = displayName.charAt(0).toUpperCase();
+        const initial = isGroupChat ? '👥' : displayName.charAt(0).toUpperCase();
 
         return (
           <button
@@ -44,11 +46,17 @@ function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
               ...styles.chatItem,
               ...(isActive ? styles.chatItemActive : {}),
               ...(hasIncomingCall ? styles.chatItemCalling : {}),
+              ...(hasActiveGroupCall ? styles.chatItemActiveCall : {}),
             }}
           >
             <div style={styles.avatarWrapper}>
-              <div style={styles.avatar}>{initial}</div>
-              {hasIncomingCall && (
+              <div style={{
+                ...styles.avatar,
+                ...(isGroupChat ? styles.groupAvatar : {})
+              }}>
+                {initial}
+              </div>
+              {(hasIncomingCall || hasActiveGroupCall) && (
                 <div style={styles.callIndicator}>
                   <span style={styles.callIndicatorDot}></span>
                 </div>
@@ -57,12 +65,15 @@ function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
             <div style={styles.chatInfo}>
               <div style={styles.chatNameRow}>
                 <span style={styles.chatName}>{displayName}</span>
-                {hasIncomingCall && (
+                {isGroupChat && (
+                  <span style={styles.groupBadge}>👥</span>
+                )}
+                {(hasIncomingCall || hasActiveGroupCall) && (
                   <span style={styles.callBadge}>📞</span>
                 )}
               </div>
               <div style={styles.lastMessage}>
-                {hasIncomingCall ? '🔔 Входящий звонок...' : lastMessageText}
+                {hasActiveGroupCall ? '🎥 Идет групповой звонок...' : (hasIncomingCall ? '🔔 Входящий звонок...' : lastMessageText)}
               </div>
             </div>
           </button>
@@ -133,6 +144,11 @@ const styles = {
     border: '1px solid rgba(239, 68, 68, 0.3)',
     animation: 'pulse-call 1.5s infinite',
   },
+  chatItemActiveCall: {
+    background: 'rgba(168, 85, 247, 0.15)',
+    border: '1px solid rgba(168, 85, 247, 0.3)',
+    animation: 'pulse-group-call 1.5s infinite',
+  },
   avatarWrapper: {
     position: 'relative',
     flexShrink: 0,
@@ -148,6 +164,10 @@ const styles = {
     fontWeight: '600',
     fontSize: '16px',
     flexShrink: 0,
+  },
+  groupAvatar: {
+    background: 'linear-gradient(135deg, #a855f7, #7e22ce)',
+    fontSize: '18px',
   },
   callIndicator: {
     position: 'absolute',
@@ -187,6 +207,13 @@ const styles = {
     fontSize: '12px',
     animation: 'shake 0.5s infinite',
   },
+  groupBadge: {
+    fontSize: '11px',
+    background: 'rgba(168, 85, 247, 0.3)',
+    padding: '2px 6px',
+    borderRadius: '4px',
+    color: '#a855f7',
+  },
   lastMessage: {
     fontSize: '12px',
     color: '#94a3b8',
@@ -208,6 +235,16 @@ if (typeof document !== 'undefined') {
       50% { 
         background: rgba(239, 68, 68, 0.25);
         box-shadow: 0 0 0 4px rgba(239, 68, 68, 0);
+      }
+    }
+    @keyframes pulse-group-call {
+      0%, 100% { 
+        background: rgba(168, 85, 247, 0.15);
+        box-shadow: 0 0 0 0 rgba(168, 85, 247, 0.4);
+      }
+      50% { 
+        background: rgba(168, 85, 247, 0.25);
+        box-shadow: 0 0 0 4px rgba(168, 85, 247, 0);
       }
     }
     @keyframes pulse-dot {

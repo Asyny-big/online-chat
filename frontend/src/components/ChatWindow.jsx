@@ -2,7 +2,25 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import MessageInput from './MessageInput';
 import { API_URL } from '../config';
 
-function ChatWindow({ token, chat, messages, socket, currentUserId, onStartCall, typingUsers, incomingCall, onAcceptCall, onDeclineCall, onBack, onDeleteMessage, onDeleteChat }) {
+function ChatWindow({ 
+  token, 
+  chat, 
+  messages, 
+  socket, 
+  currentUserId, 
+  onStartCall, 
+  onStartGroupCall,  // Новый пропс для групповых звонков
+  typingUsers, 
+  incomingCall,
+  incomingGroupCall,  // Новый пропс для входящего группового звонка 
+  onAcceptCall, 
+  onDeclineCall, 
+  onAcceptGroupCall,  // Новый пропс
+  onDeclineGroupCall, // Новый пропс
+  onBack, 
+  onDeleteMessage, 
+  onDeleteChat 
+}) {
   const messagesEndRef = useRef(null);
   const containerRef = useRef(null);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -62,8 +80,15 @@ function ChatWindow({ token, chat, messages, socket, currentUserId, onStartCall,
   const displayName = chat.displayName || chat.name || 'Чат';
   const typingList = typingUsers?.filter(u => u.chatId === chat._id && u.userId !== currentUserId) || [];
   
+  // Проверяем, групповой ли это чат
+  const isGroupChat = chat.isGroup === true;
+  const participantCount = chat.participants?.length || 0;
+  
   // Проверяем есть ли входящий звонок для этого чата
   const hasIncomingCall = incomingCall && incomingCall.chatId === chat._id;
+  
+  // Проверяем есть ли входящий групповой звонок для этого чата
+  const hasIncomingGroupCall = incomingGroupCall && incomingGroupCall.chatId === chat._id;
 
   return (
     <div style={styles.container}>
@@ -99,6 +124,42 @@ function ChatWindow({ token, chat, messages, socket, currentUserId, onStartCall,
           </div>
         </div>
       )}
+
+      {/* Всплывающее уведомление о входящем групповом звонке */}
+      {hasIncomingGroupCall && (
+        <div style={styles.incomingGroupCallBanner}>
+          <div style={styles.callBannerContent}>
+            <div style={styles.callBannerIcon}>
+              {incomingGroupCall.type === 'video' ? '📹' : '📞'}
+            </div>
+            <div style={styles.callBannerInfo}>
+              <div style={styles.callBannerTitle}>Групповой звонок</div>
+              <div style={styles.callBannerSubtitle}>
+                {incomingGroupCall.initiator?.name || 'Участник'} начал звонок
+                {incomingGroupCall.participants?.length > 1 && 
+                  ` • ${incomingGroupCall.participants.length} участников`
+                }
+              </div>
+            </div>
+          </div>
+          <div style={styles.callBannerActions}>
+            <button 
+              onClick={() => onDeclineGroupCall?.(incomingGroupCall.callId)}
+              style={styles.callBannerDecline}
+              title="Отклонить"
+            >
+              ✕
+            </button>
+            <button 
+              onClick={() => onAcceptGroupCall?.(incomingGroupCall.callId, incomingGroupCall.type)}
+              style={styles.callBannerAccept}
+              title="Присоединиться"
+            >
+              {incomingGroupCall.type === 'video' ? '🎥' : '📞'}
+            </button>
+          </div>
+        </div>
+      )}
       
       {/* Шапка с кнопками звонков */}
       <div style={styles.header}>
@@ -113,11 +174,19 @@ function ChatWindow({ token, chat, messages, socket, currentUserId, onStartCall,
               ←
             </button>
           )}
-          <div style={styles.avatar}>
-            {displayName.charAt(0).toUpperCase()}
+          <div style={{
+            ...styles.avatar,
+            ...(isGroupChat ? styles.groupAvatar : {})
+          }}>
+            {isGroupChat ? '👥' : displayName.charAt(0).toUpperCase()}
           </div>
           <div>
             <h3 style={styles.chatName}>{displayName}</h3>
+            {isGroupChat && (
+              <div style={styles.participantCount}>
+                {participantCount} участников
+              </div>
+            )}
             {typingList.length > 0 && (
               <div style={styles.typingIndicator}>
                 печатает<span style={styles.typingDots}>...</span>
@@ -126,20 +195,46 @@ function ChatWindow({ token, chat, messages, socket, currentUserId, onStartCall,
           </div>
         </div>
         <div style={styles.headerActions}>
-          <button
-            onClick={() => onStartCall?.('audio')}
-            style={styles.callBtn}
-            title="Аудиозвонок"
-          >
-            📞
-          </button>
-          <button
-            onClick={() => onStartCall?.('video')}
-            style={styles.callBtn}
-            title="Видеозвонок"
-          >
-            🎥
-          </button>
+          {/* Кнопки для личных чатов */}
+          {!isGroupChat && (
+            <>
+              <button
+                onClick={() => onStartCall?.('audio')}
+                style={styles.callBtn}
+                title="Аудиозвонок"
+              >
+                📞
+              </button>
+              <button
+                onClick={() => onStartCall?.('video')}
+                style={styles.callBtn}
+                title="Видеозвонок"
+              >
+                🎥
+              </button>
+            </>
+          )}
+          {/* Кнопки для групповых чатов */}
+          {isGroupChat && (
+            <>
+              <button
+                onClick={() => onStartGroupCall?.('audio')}
+                style={styles.groupCallBtn}
+                title="Групповой аудиозвонок"
+              >
+                📞
+                <span style={styles.groupCallBadge}>👥</span>
+              </button>
+              <button
+                onClick={() => onStartGroupCall?.('video')}
+                style={styles.groupCallBtn}
+                title="Групповой видеозвонок"
+              >
+                🎥
+                <span style={styles.groupCallBadge}>👥</span>
+              </button>
+            </>
+          )}
           {/* Меню чата */}
           <div style={styles.menuContainer}>
             <button
@@ -476,6 +571,15 @@ const styles = {
     gap: '12px',
     animation: 'slideDown 0.3s ease, pulse-banner 1.5s infinite',
   },
+  incomingGroupCallBanner: {
+    background: 'linear-gradient(135deg, #a855f7, #7e22ce)',
+    padding: '12px 16px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '12px',
+    animation: 'slideDown 0.3s ease, pulse-banner 1.5s infinite',
+  },
   callBannerContent: {
     display: 'flex',
     alignItems: 'center',
@@ -555,11 +659,19 @@ const styles = {
     fontWeight: '600',
     fontSize: '16px',
   },
+  groupAvatar: {
+    background: 'linear-gradient(135deg, #a855f7, #7e22ce)',
+  },
   chatName: {
     margin: 0,
     fontSize: '16px',
     fontWeight: '600',
     color: '#fff',
+  },
+  participantCount: {
+    fontSize: '12px',
+    color: '#64748b',
+    marginTop: '2px',
   },
   typingIndicator: {
     fontSize: '12px',
@@ -600,6 +712,27 @@ const styles = {
     fontSize: '18px',
     cursor: 'pointer',
     transition: 'all 0.2s',
+  },
+  groupCallBtn: {
+    width: '40px',
+    height: '40px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'transparent',
+    border: '1px solid #a855f7',
+    borderRadius: '50%',
+    fontSize: '16px',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+    position: 'relative',
+    color: '#a855f7',
+  },
+  groupCallBadge: {
+    position: 'absolute',
+    fontSize: '10px',
+    bottom: '-2px',
+    right: '-2px',
   },
   // Messages
   messagesContainer: {
