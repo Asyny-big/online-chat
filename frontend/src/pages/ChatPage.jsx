@@ -269,7 +269,7 @@ function ChatPage({ token, onLogout }) {
         if (chat._id === chatId) {
           return {
             ...chat,
-            activeGroupCall: { callId, initiator, participantCount }
+            activeGroupCall: { callId, initiator, type, participantCount }
           };
         }
         return chat;
@@ -459,6 +459,23 @@ function ChatPage({ token, onLogout }) {
   const handleStartGroupCall = useCallback((type) => {
     if (!selectedChat || !socketRef.current || selectedChat.type !== 'group') return;
 
+    // Если мы уже знаем, что в чате идёт групповой звонок — просто присоединяемся.
+    // Почему так: пользователь может выйти/войти в звонок в любое время.
+    const knownActiveCallId = selectedChat.activeGroupCall?.callId;
+    const knownActiveType = selectedChat.activeGroupCall?.type;
+    if (knownActiveCallId) {
+      setGroupCallState('active');
+      setGroupCallData({
+        callId: knownActiveCallId,
+        chatId: selectedChat._id,
+        chatName: selectedChat.name || selectedChat.displayName,
+        type: knownActiveType || type,
+        autoJoin: true,
+        isExisting: true
+      });
+      return;
+    }
+
     socketRef.current.emit('group-call:start', {
       chatId: selectedChat._id,
       type
@@ -471,8 +488,9 @@ function ChatPage({ token, onLogout }) {
             callId: response.callId,
             chatId: selectedChat._id,
             chatName: selectedChat.name || selectedChat.displayName,
-            type,
-            isJoining: true
+            type: response.type || type,
+            autoJoin: true,
+            isExisting: true
           });
         }
       } else if (response.error) {
@@ -491,10 +509,28 @@ function ChatPage({ token, onLogout }) {
     });
   }, [selectedChat]);
 
-  const handleJoinGroupCall = useCallback(() => {
-    if (!groupCallData) return;
+  const handleJoinGroupCall = useCallback((callIdFromUi, typeFromUi) => {
+    // Присоединение может происходить из баннера входящего звонка.
+    // В этом кейсе важно сделать autoJoin, чтобы GroupCallModal отправил group-call:join.
+    const data = groupCallDataRef.current;
+    if (!data && (!callIdFromUi || !selectedChatRef.current?._id)) return;
+
+    const callId = callIdFromUi || data?.callId;
+    const chatId = data?.chatId || selectedChatRef.current?._id;
+    const chatName = data?.chatName || selectedChatRef.current?.name || selectedChatRef.current?.displayName;
+    const type = typeFromUi || data?.type || selectedChatRef.current?.activeGroupCall?.type || 'video';
+
     setGroupCallState('active');
-  }, [groupCallData]);
+    setGroupCallData({
+      ...(data || {}),
+      callId,
+      chatId,
+      chatName,
+      type,
+      autoJoin: true,
+      isExisting: true
+    });
+  }, []);
 
   const handleDeclineGroupCall = useCallback(() => {
     resetGroupCallState();
@@ -594,6 +630,7 @@ function ChatPage({ token, onLogout }) {
           chatName={groupCallData.chatName}
           callType={groupCallData.type}
           isIncoming={groupCallState === 'incoming'}
+          autoJoin={!!groupCallData.autoJoin}
           initiator={groupCallData.initiator}
           existingParticipants={groupCallData.existingParticipants || []}
           currentUserId={currentUserId}

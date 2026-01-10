@@ -242,7 +242,7 @@ module.exports = function(io) {
         // Проверяем активный звонок
         const existing = await Call.findOne({ chat: chatId, status: { $in: ['ringing', 'active'] } });
         if (existing) {
-          return callback?.({ error: 'already_active', callId: existing._id.toString() });
+          return callback?.({ error: 'already_active', callId: existing._id.toString(), type: existing.type });
         }
 
         const call = await Call.create({

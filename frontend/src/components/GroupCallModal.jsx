@@ -30,6 +30,7 @@ function GroupCallModal({
   chatName,
   callType,
   isIncoming,
+  autoJoin = false,
   initiator,
   existingParticipants = [],
   currentUserId,
@@ -58,7 +59,7 @@ function GroupCallModal({
   // Discord-like UX состояния
   // По умолчанию закрепляем локальное видео, чтобы убрать "прыжки" главного видео.
   // Пользователь может переключиться в Auto-режим (следовать active speaker).
-  const [pinnedUserId, setPinnedUserId] = useState(LOCAL_PIN_ID); // Закреплённый пользователь
+  const [pinnedUserId, setPinnedUserId] = useState(LOCAL_PIN_ID); // Закреплённый пользователь (manual)
   const [activeSpeakerId, setActiveSpeakerId] = useState(null); // Активный говорящий
   const [audioLevels, setAudioLevels] = useState({}); // { userId: volume }
 
@@ -66,6 +67,7 @@ function GroupCallModal({
   // Почему так: жёсткие потолки хорошо спасают от лагов, но на отличной сети
   // бессмысленно держать качество низким — можно подняться до HD/бОльшего битрейта.
   const [isAdaptiveQualityEnabled] = useState(true);
+  const [captureTierUi, setCaptureTierUi] = useState('SD'); // UI-индикатор (SD/HD)
 
   // ===== REFS =====
   const localVideoRef = useRef(null); // Для main video (локальное)
@@ -177,11 +179,8 @@ function GroupCallModal({
     if (pinnedUserId && remoteStreamsRef.current.has(pinnedUserId)) {
       return pinnedUserId;
     }
-    // Если есть активный говорящий с реальным stream
-    if (activeSpeakerId && activeSpeakerId !== currentUserId && remoteStreamsRef.current.has(activeSpeakerId)) {
-      return activeSpeakerId;
-    }
-    // По умолчанию показываем локальное видео (null = local)
+    // Раньше тут был auto-режим (active speaker). Теперь manual-only.
+    // По умолчанию показываем локальное видео (null = local).
     return null;
   }, [pinnedUserId, activeSpeakerId, currentUserId]);
 
@@ -260,6 +259,7 @@ function GroupCallModal({
         });
       }
       captureTierRef.current = tier;
+      setCaptureTierUi(tier === 'hd' ? 'HD' : 'SD');
       console.log('[GroupCall] Capture tier applied:', tier);
     } catch (e) {
       // Некоторые девайсы/браузеры не дают менять constraints на лету.
@@ -718,6 +718,9 @@ function GroupCallModal({
       
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
 
+      // Мы стартуем в SD по умолчанию (видео захват уже SD, но пусть UI тоже это отражает).
+      setCaptureTierUi('SD');
+
       // Подсказка кодеку/браузеру: для чата обычно важнее плавность движения,
       // чем идеальная детализация. Не везде поддерживается.
       try {
@@ -1067,10 +1070,19 @@ function GroupCallModal({
 
   // Автоматический запуск для не-входящих звонков
   useEffect(() => {
-    if (!isIncoming && callStatus === 'connecting') {
+    if (isIncoming) return;
+    if (callStatus !== 'connecting') return;
+
+    // ВАЖНО: join и start — это разные сценарии.
+    // - startCall(): только локальный поток (инициатор уже "в звонке" логически)
+    // - joinCall(): ОБЯЗАТЕЛЬНО делает socket.emit('group-call:join') и получает participants
+    // Если пропустить joinCall (как было раньше в кейсе already_active), пользователь окажется один.
+    if (autoJoin) {
+      joinCall();
+    } else {
       startCall();
     }
-  }, [isIncoming, callStatus, startCall]);
+  }, [isIncoming, callStatus, startCall, joinCall, autoJoin]);
 
   // ===== CLEANUP =====
   // ВАЖНО: cleanup должен быть объявлен ДО useEffect/socket handlers.
@@ -1169,7 +1181,7 @@ function GroupCallModal({
       
       // Сбрасываем pinned если это был он
       if (pinnedUserId === oderId) {
-        setPinnedUserId(null);
+        setPinnedUserId(LOCAL_PIN_ID);
       }
     };
 
@@ -1391,33 +1403,19 @@ function GroupCallModal({
             </div>
           </div>
           <div style={styles.headerRight}>
-            {/*
-              РЕЖИМ MAIN VIDEO:
-              - Auto: main = active speaker (как в Discord/Zoom)
-              - Я:   main = локальное видео (стабильно, ничего не "прыгает")
-              Почему так: это даёт ручной контроль без переписывания архитектуры.
-            */}
-            <div style={styles.headerActions}>
-              <button
-                onClick={() => setPinnedUserId(null)}
-                style={{
-                  ...styles.modeBtn,
-                  ...(pinnedUserId === null ? styles.modeBtnActive : {})
-                }}
-                title="Auto: главный экран следует за активным говорящим"
-              >
-                Auto
-              </button>
-              <button
-                onClick={() => setPinnedUserId(LOCAL_PIN_ID)}
-                style={{
-                  ...styles.modeBtn,
-                  ...(pinnedUserId === LOCAL_PIN_ID ? styles.modeBtnActive : {})
-                }}
-                title="Я: закрепить своё видео как главное"
-              >
-                Я
-              </button>
+            {/* SD/HD индикатор текущего capture tier */}
+            <div
+              style={{
+                ...styles.qualityPill,
+                ...(captureTierUi === 'HD' ? styles.qualityPillHd : styles.qualityPillSd)
+              }}
+              title={
+                captureTierUi === 'HD'
+                  ? 'Камера в HD (авто по stats)'
+                  : 'Камера в SD (авто по stats)'
+              }
+            >
+              {captureTierUi}
             </div>
             <div style={styles.callStatus}>
               {callStatus === 'connecting' ? '🔄 Подключение...' : '🟢 В звонке'}
@@ -1473,7 +1471,7 @@ function GroupCallModal({
               {/* Кнопка открепления */}
               {pinnedUserId === mainParticipant.oderId && (
                 <button 
-                  onClick={() => setPinnedUserId(null)}
+                  onClick={() => setPinnedUserId(LOCAL_PIN_ID)}
                   style={styles.unpinBtn}
                   title="Открепить"
                 >
@@ -1741,24 +1739,24 @@ const styles = {
     alignItems: 'center',
     gap: '12px',
   },
-  headerActions: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-  },
-  modeBtn: {
-    padding: '6px 10px',
-    borderRadius: '8px',
+  qualityPill: {
+    padding: '4px 10px',
+    borderRadius: '999px',
     border: '1px solid #2a2a2a',
-    background: '#151515',
-    color: '#d1d5db',
     fontSize: '12px',
-    cursor: 'pointer',
+    fontWeight: 700,
+    letterSpacing: '0.4px',
+    userSelect: 'none',
   },
-  modeBtnActive: {
-    background: '#2563eb',
-    borderColor: '#2563eb',
-    color: '#fff',
+  qualityPillSd: {
+    background: 'rgba(148, 163, 184, 0.15)',
+    color: '#cbd5e1',
+    borderColor: 'rgba(148, 163, 184, 0.35)',
+  },
+  qualityPillHd: {
+    background: 'rgba(34, 197, 94, 0.15)',
+    color: '#86efac',
+    borderColor: 'rgba(34, 197, 94, 0.45)',
   },
   headerInfo: {
     display: 'flex',
