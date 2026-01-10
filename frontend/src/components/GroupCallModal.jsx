@@ -69,6 +69,7 @@ function GroupCallModal({
   const peerConnectionsRef = useRef({}); // { oderId: RTCPeerConnection }
   const remoteStreamsRef = useRef(new Map()); // Map<oderId, MediaStream> - remote ТОЛЬКО
   const pendingCandidatesRef = useRef({}); // { oderId: ICECandidate[] }
+  const pcMetaRef = useRef({}); // { oderId: { isInitiator: boolean, lastIceRestartAt?: number } }
   const ringtoneRef = useRef(null);
   const callIdRef = useRef(callId);
   const localStreamRef = useRef(null); // Локальный поток - ОТДЕЛЬНО от remoteStreamsRef
@@ -79,6 +80,70 @@ function GroupCallModal({
   const activeSpeakerTimerRef = useRef(null);
   const lastActiveSpeakerRef = useRef(null);
   const lastMainUserIdRef = useRef(null);
+
+  // Добавление ICE кандидатов откладываем до момента, когда remoteDescription уже установлен.
+  // Почему так: addIceCandidate() с remoteDescription === null кидает InvalidStateError.
+  // Раньше мы пытались flush'ить кандидаты сразу при createPeerConnection(), теряли их и
+  // в итоге часть peer'ов уходила в failed → "у некоторых нет видео".
+  const flushPendingIceCandidates = useCallback(async (oderId, pc) => {
+    if (!pc || pc.signalingState === 'closed') return;
+    if (!pc.remoteDescription) return;
+
+    const pending = pendingCandidatesRef.current[oderId];
+    if (!pending || pending.length === 0) return;
+
+    const remaining = [];
+    for (const candidate of pending) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (err) {
+        // Если всё ещё рано — сохраняем кандидат, попробуем позже.
+        if (err?.name === 'InvalidStateError') {
+          remaining.push(candidate);
+        } else {
+          console.warn('[GroupCall] Failed to add ICE candidate, dropping:', err);
+        }
+      }
+    }
+
+    if (remaining.length > 0) {
+      pendingCandidatesRef.current[oderId] = remaining;
+    } else {
+      delete pendingCandidatesRef.current[oderId];
+    }
+  }, []);
+
+  const restartIceIfNeeded = useCallback(async (oderId) => {
+    const pc = peerConnectionsRef.current[oderId];
+    if (!pc || pc.signalingState === 'closed') return;
+
+    const meta = pcMetaRef.current[oderId];
+    if (!meta?.isInitiator) return; // ICE-restart инициирует только сторона, которая шлёт offer.
+
+    const now = Date.now();
+    const last = meta.lastIceRestartAt || 0;
+    if (now - last < 8000) return; // backoff, чтобы не зациклиться
+    meta.lastIceRestartAt = now;
+
+    try {
+      // ICE restart = новый offer с флагом iceRestart.
+      const offer = await pc.createOffer({ iceRestart: true });
+      await pc.setLocalDescription(offer);
+
+      socket.emit('group-call:signal', {
+        callId: callIdRef.current,
+        oderId,
+        signal: {
+          type: 'offer',
+          sdp: pc.localDescription,
+          iceRestart: true
+        }
+      });
+      console.log('[GroupCall] Sent ICE-restart offer to:', oderId);
+    } catch (err) {
+      console.warn('[GroupCall] ICE restart failed:', err);
+    }
+  }, [socket]);
 
   // ===== UTILITY FUNCTIONS =====
   
@@ -142,7 +207,7 @@ function GroupCallModal({
       if (sender.track?.kind === 'video') {
         if (isMainVideo) {
           // Главное видео: высокое качество
-          await setBitrate(sender, 900, 20); // 0.9 Mbps, 20 fps
+          await setBitrate(sender, 650, 18); // 0.65 Mbps, 18 fps
         } else {
           // Preview: низкое качество
           await setBitrate(sender, 250, 15); // 250 kbps, 15 fps
@@ -329,6 +394,16 @@ function GroupCallModal({
       };
       
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
+
+      // Подсказка кодеку/браузеру: для чата обычно важнее плавность движения,
+      // чем идеальная детализация. Не везде поддерживается.
+      try {
+        const vt = stream.getVideoTracks?.()?.[0];
+        if (vt && 'contentHint' in vt) {
+          vt.contentHint = 'motion';
+        }
+      } catch (e) {}
+
       setLocalStream(stream);
       localStreamRef.current = stream;
       
@@ -382,6 +457,9 @@ function GroupCallModal({
       iceCandidatePoolSize: typeof cfg.iceCandidatePoolSize === 'number' ? cfg.iceCandidatePoolSize : 10
     });
 
+    pcMetaRef.current[oderId] = pcMetaRef.current[oderId] || { isInitiator: !!isInitiator };
+    pcMetaRef.current[oderId].isInitiator = !!isInitiator;
+
     // Добавляем локальные треки
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(track => {
@@ -403,6 +481,18 @@ function GroupCallModal({
             candidate: event.candidate
           }
         });
+      }
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      const state = pc.iceConnectionState;
+      console.log('[GroupCall] ICE state for', oderId, ':', state);
+
+      // Минимальная самовосстановляемость без смены архитектуры.
+      // Почему так: в реальных сетях часть кандидатов может стать невалидной,
+      // ICE-restart часто спасает failed соединения в mesh.
+      if (state === 'failed') {
+        restartIceIfNeeded(oderId);
       }
     };
 
@@ -464,18 +554,8 @@ function GroupCallModal({
 
     peerConnectionsRef.current[oderId] = pc;
 
-    // Применяем отложенные ICE кандидаты
-    if (pendingCandidatesRef.current[oderId]) {
-      pendingCandidatesRef.current[oderId].forEach(candidate => {
-        pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(err => {
-          console.error('[GroupCall] Error adding pending ICE candidate:', err);
-        });
-      });
-      delete pendingCandidatesRef.current[oderId];
-    }
-
     return pc;
-  }, [iceServers, socket, applyBitrateSettings, setupAudioAnalyser]);
+  }, [iceServers, socket, applyBitrateSettings, setupAudioAnalyser, restartIceIfNeeded]);
 
   // ===== BITRATE OPTIMIZATION =====
   
@@ -539,6 +619,7 @@ function GroupCallModal({
       
       try {
         await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+        await flushPendingIceCandidates(fromUserId, pc);
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         
@@ -559,6 +640,7 @@ function GroupCallModal({
       if (pc && pc.signalingState !== 'stable') {
         try {
           await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+          await flushPendingIceCandidates(fromUserId, pc);
           console.log('[GroupCall] Set remote answer from:', fromUserId);
         } catch (err) {
           console.error('[GroupCall] Error setting remote answer:', err);
@@ -570,7 +652,11 @@ function GroupCallModal({
         try {
           await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
         } catch (err) {
-          console.error('[GroupCall] Error adding ICE candidate:', err);
+          // Если рано (remoteDescription может быть уже сброшен из-за glare/restart) — кладём обратно.
+          if (!pendingCandidatesRef.current[fromUserId]) {
+            pendingCandidatesRef.current[fromUserId] = [];
+          }
+          pendingCandidatesRef.current[fromUserId].push(signal.candidate);
         }
       } else {
         // Откладываем кандидата до установки remote description
@@ -580,7 +666,7 @@ function GroupCallModal({
         pendingCandidatesRef.current[fromUserId].push(signal.candidate);
       }
     }
-  }, [createPeerConnection, socket, ensureIceConfig]);
+  }, [createPeerConnection, socket, ensureIceConfig, flushPendingIceCandidates]);
 
   // Присоединение к звонку
   const joinCall = useCallback(async () => {
