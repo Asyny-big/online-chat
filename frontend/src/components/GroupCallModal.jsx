@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { API_URL } from '../config';
 
 /**
@@ -10,6 +10,12 @@ import { API_URL } from '../config';
  * - Active speaker detection через AudioContext (клиентская сторона)
  * - Bitrate control для оптимизации mesh до 10 участников
  * - Android WebView compatible
+ * 
+ * АРХИТЕКТУРА СТРИМОВ (streams-first):
+ * - localStreamRef: ТОЛЬКО локальный поток (никогда не в общей map)
+ * - remoteStreamsRef: Map<userId, MediaStream> — ТОЛЬКО remote потоки
+ * - UI рендерится по наличию MediaStream, НЕ по participants
+ * - ontrack использует addTrack паттерн, а не замену стрима
  */
 function GroupCallModal({
   socket,
@@ -27,6 +33,7 @@ function GroupCallModal({
 }) {
   // ===== СОСТОЯНИЯ =====
   const [callStatus, setCallStatus] = useState(isIncoming ? 'incoming' : 'connecting');
+  // participants хранит ТОЛЬКО метаданные (userId, userName), БЕЗ stream
   const [participants, setParticipants] = useState([]);
   const [localStream, setLocalStream] = useState(null);
   const [isMuted, setIsMuted] = useState(false);
@@ -34,6 +41,8 @@ function GroupCallModal({
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [screenStream, setScreenStream] = useState(null);
   const [iceServers, setIceServers] = useState([]);
+  // Счётчик обновлений стримов для trigger ререндера
+  const [streamUpdateCounter, setStreamUpdateCounter] = useState(0);
   
   // Discord-like UX состояния
   const [pinnedUserId, setPinnedUserId] = useState(null); // Закреплённый пользователь
@@ -41,14 +50,15 @@ function GroupCallModal({
   const [audioLevels, setAudioLevels] = useState({}); // { userId: volume }
 
   // ===== REFS =====
-  const localVideoRef = useRef(null);
-  const mainVideoRef = useRef(null); // Главное видео
+  const localVideoRef = useRef(null); // Для main video (локальное)
+  const localPreviewVideoRef = useRef(null); // Для preview strip (локальное) - ОТДЕЛЬНЫЙ ref!
+  const mainVideoRef = useRef(null); // Главное видео (remote)
   const peerConnectionsRef = useRef({}); // { oderId: RTCPeerConnection }
-  const remoteStreamsRef = useRef({}); // { oderId: MediaStream }
+  const remoteStreamsRef = useRef(new Map()); // Map<oderId, MediaStream> - remote ТОЛЬКО
   const pendingCandidatesRef = useRef({}); // { oderId: ICECandidate[] }
   const ringtoneRef = useRef(null);
   const callIdRef = useRef(callId);
-  const localStreamRef = useRef(null);
+  const localStreamRef = useRef(null); // Локальный поток - ОТДЕЛЬНО от remoteStreamsRef
   
   // Active speaker detection refs
   const audioContextRef = useRef(null);
@@ -64,11 +74,19 @@ function GroupCallModal({
   }, [callId]);
 
   // Определение главного видео (pinned или active speaker)
+  // ВАЖНО: возвращает userId ТОЛЬКО если у него есть реальный stream
   const getMainUserId = useCallback(() => {
-    if (pinnedUserId) return pinnedUserId;
-    if (activeSpeakerId) return activeSpeakerId;
-    return null; // Локальное видео по умолчанию
-  }, [pinnedUserId, activeSpeakerId]);
+    // Если закреплён пользователь И у него есть stream — показываем его
+    if (pinnedUserId && remoteStreamsRef.current.has(pinnedUserId)) {
+      return pinnedUserId;
+    }
+    // Если есть активный говорящий с реальным stream
+    if (activeSpeakerId && activeSpeakerId !== currentUserId && remoteStreamsRef.current.has(activeSpeakerId)) {
+      return activeSpeakerId;
+    }
+    // По умолчанию показываем локальное видео (null = local)
+    return null;
+  }, [pinnedUserId, activeSpeakerId, currentUserId]);
 
   // Установка bitrate для sender'а
   const setBitrate = useCallback(async (sender, maxBitrate, maxFramerate) => {
@@ -256,8 +274,12 @@ function GroupCallModal({
       // Настраиваем анализатор для локального аудио
       setupAudioAnalyser(stream, currentUserId);
       
+      // Привязываем к ОБОИМ video refs (main и preview)
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
+      }
+      if (localPreviewVideoRef.current) {
+        localPreviewVideoRef.current.srcObject = stream;
       }
       
       return stream;
@@ -267,6 +289,18 @@ function GroupCallModal({
       return null;
     }
   }, [callType, currentUserId, setupAudioAnalyser]);
+
+  // Синхронизация localStream с video refs при изменении layout
+  useEffect(() => {
+    if (localStream) {
+      if (localVideoRef.current && !localVideoRef.current.srcObject) {
+        localVideoRef.current.srcObject = localStream;
+      }
+      if (localPreviewVideoRef.current && !localPreviewVideoRef.current.srcObject) {
+        localPreviewVideoRef.current.srcObject = localStream;
+      }
+    }
+  }, [localStream, isLocalMain]);
 
   // ===== PEER CONNECTION =====
   
@@ -305,27 +339,42 @@ function GroupCallModal({
       }
     };
 
-    // Получение удалённого потока
+    // Получение удалённого потока (addTrack паттерн)
     pc.ontrack = (event) => {
-      console.log('[GroupCall] Received remote track from:', oderId);
-      if (event.streams && event.streams[0]) {
-        remoteStreamsRef.current[oderId] = event.streams[0];
-        
-        // Настраиваем анализатор аудио
-        setupAudioAnalyser(event.streams[0], oderId);
-        
-        setParticipants(prev => {
-          const exists = prev.find(p => p.oderId === oderId);
-          if (exists) {
-            return prev.map(p => 
-              p.oderId === oderId 
-                ? { ...p, stream: event.streams[0] }
-                : p
-            );
-          }
-          return [...prev, { oderId, stream: event.streams[0] }];
-        });
+      console.log('[GroupCall] Received remote track from:', oderId, 'kind:', event.track?.kind);
+      
+      // Получаем или создаём MediaStream для этого пользователя
+      let remoteStream = remoteStreamsRef.current.get(oderId);
+      if (!remoteStream) {
+        remoteStream = new MediaStream();
+        remoteStreamsRef.current.set(oderId, remoteStream);
+        console.log('[GroupCall] Created new MediaStream for:', oderId);
       }
+      
+      // Добавляем трек в существующий стрим (не заменяем стрим целиком!)
+      const track = event.track;
+      if (track) {
+        // Проверяем, нет ли уже такого трека
+        const existingTrack = remoteStream.getTracks().find(t => t.id === track.id);
+        if (!existingTrack) {
+          remoteStream.addTrack(track);
+          console.log('[GroupCall] Added track to stream:', oderId, track.kind);
+        }
+        
+        // Обработка удаления трека
+        track.onended = () => {
+          console.log('[GroupCall] Track ended:', oderId, track.kind);
+          remoteStream.removeTrack(track);
+        };
+      }
+      
+      // Настраиваем анализатор аудио (только один раз для audio)
+      if (event.track?.kind === 'audio' && !analysersRef.current[oderId]) {
+        setupAudioAnalyser(remoteStream, oderId);
+      }
+      
+      // Trigger ререндер UI
+      setStreamUpdateCounter(prev => prev + 1);
     };
 
     // Состояние соединения
@@ -512,10 +561,11 @@ function GroupCallModal({
     const handleParticipantJoined = ({ oderId, userName }) => {
       console.log('[GroupCall] Participant joined:', oderId, userName);
       if (oderId !== currentUserId && callStatus === 'active') {
-        // Ждём offer от нового участника
+        // Добавляем в participants ТОЛЬКО метаданные (БЕЗ stream)
+        // Stream будет получен через ontrack
         setParticipants(prev => {
           if (!prev.find(p => p.oderId === oderId)) {
-            return [...prev, { oderId, userName, stream: null }];
+            return [...prev, { oderId, userName }];
           }
           return prev;
         });
@@ -533,9 +583,26 @@ function GroupCallModal({
         delete peerConnectionsRef.current[oderId];
       }
       
+      // Удаляем stream
+      const stream = remoteStreamsRef.current.get(oderId);
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        remoteStreamsRef.current.delete(oderId);
+      }
+      
+      // Удаляем audio analyser
+      delete analysersRef.current[oderId];
+      
       // Удаляем из участников
       setParticipants(prev => prev.filter(p => p.oderId !== oderId));
-      delete remoteStreamsRef.current[oderId];
+      
+      // Trigger ререндер
+      setStreamUpdateCounter(prev => prev + 1);
+      
+      // Сбрасываем pinned если это был он
+      if (pinnedUserId === oderId) {
+        setPinnedUserId(null);
+      }
     };
 
     // Входящий сигнал
@@ -565,7 +632,7 @@ function GroupCallModal({
       socket.off('group-call:signal', handleIncomingSignal);
       socket.off('group-call:ended', handleCallEnded);
     };
-  }, [socket, currentUserId, callStatus, handleSignal, onClose]);
+  }, [socket, currentUserId, callStatus, handleSignal, onClose, cleanup, pinnedUserId]);
 
   // ===== CLEANUP =====
   
@@ -587,7 +654,12 @@ function GroupCallModal({
       pc.close();
     });
     peerConnectionsRef.current = {};
-    remoteStreamsRef.current = {};
+    
+    // Останавливаем и очищаем все remote streams
+    remoteStreamsRef.current.forEach((stream) => {
+      stream.getTracks().forEach(track => track.stop());
+    });
+    remoteStreamsRef.current = new Map();
 
     // Очищаем audio analysers
     analysersRef.current = {};
@@ -748,19 +820,39 @@ function GroupCallModal({
 
   // ===== DISCORD-LIKE LAYOUT =====
   
-  // Определяем главного участника
+  // Получаем список remote участников с РЕАЛЬНЫМИ стримами
+  // useMemo + streamUpdateCounter для ререндера при обновлении стримов
+  const remoteParticipantsWithStreams = useMemo(() => {
+    // Триггер зависимости от streamUpdateCounter (не используется напрямую)
+    void streamUpdateCounter;
+    
+    return participants
+      .filter(p => p.oderId !== currentUserId)
+      .map(p => ({
+        ...p,
+        stream: remoteStreamsRef.current.get(p.oderId) || null,
+        hasStream: remoteStreamsRef.current.has(p.oderId)
+      }));
+  }, [participants, currentUserId, streamUpdateCounter]);
+  
+  // Определяем главного участника (ТОЛЬКО если есть реальный stream)
   const mainUserId = getMainUserId();
-  const mainParticipant = participants.find(p => p.oderId === mainUserId);
+  const mainRemoteStream = mainUserId ? remoteStreamsRef.current.get(mainUserId) : null;
+  const mainParticipant = mainUserId 
+    ? remoteParticipantsWithStreams.find(p => p.oderId === mainUserId) 
+    : null;
   const isLocalMain = mainUserId === null; // Если null - показываем локальное видео
   
-  // Все остальные участники для preview strip
-  const previewParticipants = participants.filter(p => p.oderId !== mainUserId);
+  // Все remote участники для preview strip (кроме главного)
+  const remotePreviewParticipants = remoteParticipantsWithStreams.filter(p => p.oderId !== mainUserId);
   
-  // Добавляем локальное видео в preview, если оно не главное
-  const allPreviews = isLocalMain ? previewParticipants : [
-    { oderId: currentUserId, stream: localStream, isLocal: true },
-    ...previewParticipants
-  ];
+  // Формируем preview list
+  // Если локальное видео главное - показываем только remote в превью
+  // Если remote главное - добавляем локальное видео в превью
+  const showLocalInPreview = !isLocalMain && localStream;
+  
+  // Общее количество участников (для UI)
+  const totalParticipants = remoteParticipantsWithStreams.filter(p => p.hasStream).length + 1;
 
   // Рендер активного звонка (Discord UX)
   return (
@@ -773,7 +865,7 @@ function GroupCallModal({
             <div>
               <h3 style={styles.chatName}>{chatName}</h3>
               <p style={styles.participantCount}>
-                {participants.length + 1} участник(ов)
+                {totalParticipants} участник(ов)
               </p>
             </div>
           </div>
@@ -785,7 +877,7 @@ function GroupCallModal({
         {/* MAIN VIDEO - Главное видео (60-75% экрана) */}
         <div style={styles.mainVideoContainer}>
           {isLocalMain ? (
-            // Локальное видео как главное
+            // Локальное видео как главное (ВСЕГДА показываем, если мы одни или выбраны)
             <div style={styles.mainVideoWrapper}>
               <video
                 ref={localVideoRef}
@@ -808,8 +900,8 @@ function GroupCallModal({
               </div>
               {isMuted && <div style={styles.mainMutedIndicator}>🔇</div>}
             </div>
-          ) : mainParticipant ? (
-            // Удалённое видео как главное
+          ) : mainRemoteStream && mainParticipant ? (
+            // Удалённое видео как главное (ТОЛЬКО если есть реальный stream)
             <div 
               style={{
                 ...styles.mainVideoWrapper,
@@ -817,7 +909,7 @@ function GroupCallModal({
               }}
             >
               <MainVideoPlayer 
-                stream={mainParticipant.stream} 
+                stream={mainRemoteStream} 
                 ref={mainVideoRef}
               />
               <div style={styles.mainVideoLabel}>
@@ -839,18 +931,70 @@ function GroupCallModal({
               )}
             </div>
           ) : (
-            <div style={styles.mainVideoPlaceholder}>
-              <span style={styles.mainVideoAvatar}>👤</span>
-              <p style={styles.mainVideoName}>Ожидание участников...</p>
+            // Fallback: показываем локальное видео если remote недоступен
+            <div style={styles.mainVideoWrapper}>
+              <video
+                ref={localVideoRef}
+                autoPlay
+                playsInline
+                muted
+                style={{
+                  ...styles.mainVideo,
+                  ...(isVideoOff ? styles.videoHidden : {})
+                }}
+              />
+              {isVideoOff && (
+                <div style={styles.mainVideoPlaceholder}>
+                  <span style={styles.mainVideoAvatar}>👤</span>
+                  <p style={styles.mainVideoName}>Вы</p>
+                </div>
+              )}
+              <div style={styles.mainVideoLabel}>
+                Вы {isScreenSharing && '(Демонстрация экрана)'}
+              </div>
+              {isMuted && <div style={styles.mainMutedIndicator}>🔇</div>}
             </div>
           )}
         </div>
 
         {/* PREVIEW STRIP - Горизонтальная лента превью */}
-        {allPreviews.length > 0 && (
+        {(showLocalInPreview || remotePreviewParticipants.length > 0) && (
           <div style={styles.previewStrip}>
             <div style={styles.previewScrollContainer}>
-              {allPreviews.map((participant) => {
+              {/* Локальное видео в preview (если remote на главном экране) */}
+              {showLocalInPreview && (
+                <div
+                  key="local-preview"
+                  style={{
+                    ...styles.previewItem,
+                    ...(currentUserId === activeSpeakerId ? styles.previewItemActive : {})
+                  }}
+                  onClick={() => setPinnedUserId(null)} // null = показать локальное как main
+                  title="Нажмите, чтобы показать своё видео"
+                >
+                  <video
+                    ref={localPreviewVideoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    style={{
+                      ...styles.previewVideo,
+                      ...(isVideoOff ? styles.videoHidden : {})
+                    }}
+                  />
+                  {isVideoOff && (
+                    <div style={styles.previewPlaceholder}>
+                      <span>👤</span>
+                    </div>
+                  )}
+                  <div style={styles.previewLabel}>Вы</div>
+                  {isMuted && <div style={styles.previewMuted}>🔇</div>}
+                  {currentUserId === activeSpeakerId && <div style={styles.previewActiveBorder} />}
+                </div>
+              )}
+              
+              {/* Remote участники в preview */}
+              {remotePreviewParticipants.map((participant) => {
                 const isActive = participant.oderId === activeSpeakerId;
                 const volume = audioLevels[participant.oderId] || 0;
                 
@@ -864,45 +1008,21 @@ function GroupCallModal({
                     onClick={() => setPinnedUserId(participant.oderId)}
                     title="Нажмите, чтобы закрепить"
                   >
-                    {participant.isLocal ? (
-                      // Локальное видео в preview
-                      <>
-                        <video
-                          ref={localVideoRef}
-                          autoPlay
-                          playsInline
-                          muted
-                          style={{
-                            ...styles.previewVideo,
-                            ...(isVideoOff ? styles.videoHidden : {})
-                          }}
-                        />
-                        {isVideoOff && (
-                          <div style={styles.previewPlaceholder}>
-                            <span>👤</span>
-                          </div>
-                        )}
-                        <div style={styles.previewLabel}>Вы</div>
-                        {isMuted && <div style={styles.previewMuted}>🔇</div>}
-                      </>
+                    {/* Показываем видео ТОЛЬКО если есть реальный stream */}
+                    {participant.hasStream && participant.stream ? (
+                      <PreviewVideoPlayer stream={participant.stream} />
                     ) : (
-                      // Удалённое видео в preview
-                      <>
-                        {participant.stream ? (
-                          <PreviewVideoPlayer stream={participant.stream} />
-                        ) : (
-                          <div style={styles.previewPlaceholder}>
-                            <span>👤</span>
-                          </div>
-                        )}
-                        <div style={styles.previewLabel}>
-                          {participant.userName || 'Участник'}
-                        </div>
-                        {/* Индикатор громкости */}
-                        {volume > 20 && (
-                          <div style={styles.volumeIndicator}>🔊</div>
-                        )}
-                      </>
+                      <div style={styles.previewPlaceholder}>
+                        <span>👤</span>
+                        <small style={styles.connectingText}>⏳</small>
+                      </div>
+                    )}
+                    <div style={styles.previewLabel}>
+                      {participant.userName || 'Участник'}
+                    </div>
+                    {/* Индикатор громкости */}
+                    {volume > 20 && (
+                      <div style={styles.volumeIndicator}>🔊</div>
                     )}
                     {/* Визуальная рамка active speaker */}
                     {isActive && <div style={styles.previewActiveBorder} />}
@@ -1233,6 +1353,12 @@ const styles = {
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
+  },
+  connectingText: {
+    display: 'block',
+    fontSize: '10px',
+    marginTop: '4px',
+    opacity: 0.7,
   },
   previewMuted: {
     position: 'absolute',
