@@ -2,8 +2,14 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { API_URL } from '../config';
 
 /**
- * GroupCallModal - Компонент для групповых видео/аудио звонков
+ * GroupCallModal - Компонент для групповых видео/аудио звонков (Discord-like UX)
  * Использует mesh-топологию WebRTC (каждый участник соединён с каждым)
+ * 
+ * Основные особенности:
+ * - Main video (pinned/active speaker) + preview strip
+ * - Active speaker detection через AudioContext (клиентская сторона)
+ * - Bitrate control для оптимизации mesh до 10 участников
+ * - Android WebView compatible
  */
 function GroupCallModal({
   socket,
@@ -19,7 +25,7 @@ function GroupCallModal({
   onClose,
   onJoin
 }) {
-  // Состояния
+  // ===== СОСТОЯНИЯ =====
   const [callStatus, setCallStatus] = useState(isIncoming ? 'incoming' : 'connecting');
   const [participants, setParticipants] = useState([]);
   const [localStream, setLocalStream] = useState(null);
@@ -28,21 +34,164 @@ function GroupCallModal({
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [screenStream, setScreenStream] = useState(null);
   const [iceServers, setIceServers] = useState([]);
+  
+  // Discord-like UX состояния
+  const [pinnedUserId, setPinnedUserId] = useState(null); // Закреплённый пользователь
+  const [activeSpeakerId, setActiveSpeakerId] = useState(null); // Активный говорящий
+  const [audioLevels, setAudioLevels] = useState({}); // { userId: volume }
 
-  // Refs
+  // ===== REFS =====
   const localVideoRef = useRef(null);
+  const mainVideoRef = useRef(null); // Главное видео
   const peerConnectionsRef = useRef({}); // { oderId: RTCPeerConnection }
   const remoteStreamsRef = useRef({}); // { oderId: MediaStream }
   const pendingCandidatesRef = useRef({}); // { oderId: ICECandidate[] }
   const ringtoneRef = useRef(null);
   const callIdRef = useRef(callId);
   const localStreamRef = useRef(null);
+  
+  // Active speaker detection refs
+  const audioContextRef = useRef(null);
+  const analysersRef = useRef({}); // { userId: AnalyserNode }
+  const activeSpeakerTimerRef = useRef(null);
+  const lastActiveSpeakerRef = useRef(null);
 
+  // ===== UTILITY FUNCTIONS =====
+  
   // Обновляем ref при изменении callId
   useEffect(() => {
     callIdRef.current = callId;
   }, [callId]);
 
+  // Определение главного видео (pinned или active speaker)
+  const getMainUserId = useCallback(() => {
+    if (pinnedUserId) return pinnedUserId;
+    if (activeSpeakerId) return activeSpeakerId;
+    return null; // Локальное видео по умолчанию
+  }, [pinnedUserId, activeSpeakerId]);
+
+  // Установка bitrate для sender'а
+  const setBitrate = useCallback(async (sender, maxBitrate, maxFramerate) => {
+    const parameters = sender.getParameters();
+    
+    if (!parameters.encodings || parameters.encodings.length === 0) {
+      parameters.encodings = [{}];
+    }
+    
+    parameters.encodings[0].maxBitrate = maxBitrate * 1000; // kbps -> bps
+    if (maxFramerate) {
+      parameters.encodings[0].maxFramerate = maxFramerate;
+    }
+    
+    try {
+      await sender.setParameters(parameters);
+    } catch (err) {
+      console.warn('[GroupCall] Failed to set bitrate:', err);
+    }
+  }, []);
+
+  // Применение bitrate к PeerConnection
+  const applyBitrateSettings = useCallback(async (pc, isMainVideo = false) => {
+    const senders = pc.getSenders();
+    
+    for (const sender of senders) {
+      if (sender.track?.kind === 'video') {
+        if (isMainVideo) {
+          // Главное видео: высокое качество
+          await setBitrate(sender, 2000, 30); // 2 Mbps, 30 fps
+        } else {
+          // Preview: низкое качество
+          await setBitrate(sender, 300, 15); // 300 kbps, 15 fps
+        }
+      }
+    }
+  }, [setBitrate]);
+
+  // ===== ACTIVE SPEAKER DETECTION =====
+  
+  // Инициализация анализатора аудио для потока
+  const setupAudioAnalyser = useCallback((stream, userId) => {
+    if (!audioContextRef.current) {
+      // Создаём AudioContext (совместимо с Android WebView)
+      audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    
+    const audioContext = audioContextRef.current;
+    const analyser = audioContext.createAnalyser();
+    analyser.fftSize = 512;
+    analyser.smoothingTimeConstant = 0.8;
+    
+    const audioTracks = stream.getAudioTracks();
+    if (audioTracks.length > 0) {
+      const source = audioContext.createMediaStreamSource(stream);
+      source.connect(analyser);
+      analysersRef.current[userId] = analyser;
+    }
+  }, []);
+
+  // Подсчёт громкости (RMS)
+  const getAudioVolume = useCallback((analyser) => {
+    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+    analyser.getByteFrequencyData(dataArray);
+    
+    let sum = 0;
+    for (let i = 0; i < dataArray.length; i++) {
+      sum += dataArray[i];
+    }
+    return sum / dataArray.length;
+  }, []);
+
+  // Обновление активного говорящего (throttled)
+  useEffect(() => {
+    if (callStatus !== 'active') return;
+    
+    const interval = setInterval(() => {
+      const volumes = {};
+      
+      // Проверяем локальное аудио
+      if (analysersRef.current[currentUserId] && !isMuted) {
+        volumes[currentUserId] = getAudioVolume(analysersRef.current[currentUserId]);
+      }
+      
+      // Проверяем удалённые потоки
+      Object.keys(analysersRef.current).forEach(userId => {
+        if (userId !== currentUserId) {
+          volumes[userId] = getAudioVolume(analysersRef.current[userId]);
+        }
+      });
+      
+      setAudioLevels(volumes);
+      
+      // Определяем самого громкого (порог > 20)
+      let maxVolume = 20;
+      let loudestUser = null;
+      
+      Object.entries(volumes).forEach(([userId, volume]) => {
+        if (volume > maxVolume) {
+          maxVolume = volume;
+          loudestUser = userId;
+        }
+      });
+      
+      // Обновляем активного говорящего только если изменился
+      if (loudestUser && loudestUser !== lastActiveSpeakerRef.current) {
+        lastActiveSpeakerRef.current = loudestUser;
+        setActiveSpeakerId(loudestUser);
+      } else if (!loudestUser && lastActiveSpeakerRef.current) {
+        // Сбрасываем через 2 секунды молчания
+        clearTimeout(activeSpeakerTimerRef.current);
+        activeSpeakerTimerRef.current = setTimeout(() => {
+          lastActiveSpeakerRef.current = null;
+          setActiveSpeakerId(null);
+        }, 2000);
+      }
+    }, 400); // Обновление каждые 400ms
+    
+    return () => clearInterval(interval);
+  }, [callStatus, currentUserId, isMuted, getAudioVolume]);
+
+  // ===== ICE SERVERS =====
+  
   // Получение ICE серверов
   useEffect(() => {
     const fetchIceServers = async () => {
@@ -81,14 +230,21 @@ function GroupCallModal({
     };
   }, [isIncoming, callStatus]);
 
+  // ===== LOCAL STREAM =====
+  
   // Получение локального медиа-потока
   const getLocalStream = useCallback(async () => {
     try {
       const constraints = {
-        audio: true,
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        },
         video: callType === 'video' ? { 
-          width: { ideal: 640 }, 
-          height: { ideal: 480 },
+          width: { ideal: 1280, max: 1920 },
+          height: { ideal: 720, max: 1080 },
+          frameRate: { ideal: 30, max: 30 },
           facingMode: 'user'
         } : false
       };
@@ -96,6 +252,9 @@ function GroupCallModal({
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       setLocalStream(stream);
       localStreamRef.current = stream;
+      
+      // Настраиваем анализатор для локального аудио
+      setupAudioAnalyser(stream, currentUserId);
       
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
@@ -107,8 +266,10 @@ function GroupCallModal({
       alert('Не удалось получить доступ к камере/микрофону');
       return null;
     }
-  }, [callType]);
+  }, [callType, currentUserId, setupAudioAnalyser]);
 
+  // ===== PEER CONNECTION =====
+  
   // Создание PeerConnection для участника
   const createPeerConnection = useCallback((oderId, isInitiator = false) => {
     if (peerConnectionsRef.current[oderId]) {
@@ -126,6 +287,9 @@ function GroupCallModal({
         pc.addTrack(track, localStreamRef.current);
       });
     }
+
+    // Применяем начальные bitrate настройки (preview quality)
+    setTimeout(() => applyBitrateSettings(pc, false), 100);
 
     // ICE кандидаты
     pc.onicecandidate = (event) => {
@@ -146,6 +310,10 @@ function GroupCallModal({
       console.log('[GroupCall] Received remote track from:', oderId);
       if (event.streams && event.streams[0]) {
         remoteStreamsRef.current[oderId] = event.streams[0];
+        
+        // Настраиваем анализатор аудио
+        setupAudioAnalyser(event.streams[0], oderId);
+        
         setParticipants(prev => {
           const exists = prev.find(p => p.oderId === oderId);
           if (exists) {
@@ -164,7 +332,6 @@ function GroupCallModal({
     pc.onconnectionstatechange = () => {
       console.log('[GroupCall] Connection state for', oderId, ':', pc.connectionState);
       if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
-        // Попробуем переподключиться
         console.log('[GroupCall] Connection failed/disconnected for:', oderId);
       }
     };
@@ -182,8 +349,22 @@ function GroupCallModal({
     }
 
     return pc;
-  }, [iceServers, socket]);
+  }, [iceServers, socket, applyBitrateSettings, setupAudioAnalyser]);
 
+  // ===== BITRATE OPTIMIZATION =====
+  
+  // Обновление bitrate при изменении главного видео
+  useEffect(() => {
+    const mainUserId = getMainUserId();
+    
+    Object.entries(peerConnectionsRef.current).forEach(([oderId, pc]) => {
+      const isMain = oderId === mainUserId;
+      applyBitrateSettings(pc, isMain);
+    });
+  }, [pinnedUserId, activeSpeakerId, getMainUserId, applyBitrateSettings]);
+
+  // ===== SIGNALING =====
+  
   // Отправка offer новому участнику
   const sendOffer = useCallback(async (oderId) => {
     const pc = createPeerConnection(oderId, true);
@@ -386,6 +567,8 @@ function GroupCallModal({
     };
   }, [socket, currentUserId, callStatus, handleSignal, onClose]);
 
+  // ===== CLEANUP =====
+  
   // Очистка ресурсов
   const cleanup = useCallback(() => {
     // Останавливаем локальный поток
@@ -406,10 +589,24 @@ function GroupCallModal({
     peerConnectionsRef.current = {};
     remoteStreamsRef.current = {};
 
+    // Очищаем audio analysers
+    analysersRef.current = {};
+    
+    // Закрываем AudioContext
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+
     // Останавливаем рингтон
     if (ringtoneRef.current) {
       ringtoneRef.current.pause();
       ringtoneRef.current = null;
+    }
+    
+    // Очищаем таймеры
+    if (activeSpeakerTimerRef.current) {
+      clearTimeout(activeSpeakerTimerRef.current);
     }
   }, [screenStream]);
 
@@ -520,6 +717,8 @@ function GroupCallModal({
     };
   }, [cleanup]);
 
+  // ===== RENDER =====
+  
   // Рендер входящего звонка
   if (callStatus === 'incoming') {
     return (
@@ -547,7 +746,23 @@ function GroupCallModal({
     );
   }
 
-  // Рендер активного звонка
+  // ===== DISCORD-LIKE LAYOUT =====
+  
+  // Определяем главного участника
+  const mainUserId = getMainUserId();
+  const mainParticipant = participants.find(p => p.oderId === mainUserId);
+  const isLocalMain = mainUserId === null; // Если null - показываем локальное видео
+  
+  // Все остальные участники для preview strip
+  const previewParticipants = participants.filter(p => p.oderId !== mainUserId);
+  
+  // Добавляем локальное видео в preview, если оно не главное
+  const allPreviews = isLocalMain ? previewParticipants : [
+    { oderId: currentUserId, stream: localStream, isLocal: true },
+    ...previewParticipants
+  ];
+
+  // Рендер активного звонка (Discord UX)
   return (
     <div style={styles.overlay}>
       <div style={styles.modal}>
@@ -567,47 +782,136 @@ function GroupCallModal({
           </div>
         </div>
 
-        {/* Сетка видео */}
-        <div style={styles.videoGrid}>
-          {/* Локальное видео */}
-          <div style={styles.videoContainer}>
-            <video
-              ref={localVideoRef}
-              autoPlay
-              playsInline
-              muted
-              style={{
-                ...styles.video,
-                ...(isVideoOff ? styles.videoOff : {})
-              }}
-            />
-            <div style={styles.videoLabel}>
-              Вы {isScreenSharing && '(Демонстрация экрана)'}
-            </div>
-            {isVideoOff && (
-              <div style={styles.avatarPlaceholder}>
-                <span>👤</span>
-              </div>
-            )}
-            {isMuted && <div style={styles.mutedIndicator}>🔇</div>}
-          </div>
-
-          {/* Видео участников */}
-          {participants.map(participant => (
-            <div key={participant.oderId} style={styles.videoContainer}>
-              {participant.stream ? (
-                <VideoPlayer stream={participant.stream} />
-              ) : (
-                <div style={styles.avatarPlaceholder}>
-                  <span>👤</span>
+        {/* MAIN VIDEO - Главное видео (60-75% экрана) */}
+        <div style={styles.mainVideoContainer}>
+          {isLocalMain ? (
+            // Локальное видео как главное
+            <div style={styles.mainVideoWrapper}>
+              <video
+                ref={localVideoRef}
+                autoPlay
+                playsInline
+                muted
+                style={{
+                  ...styles.mainVideo,
+                  ...(isVideoOff ? styles.videoHidden : {})
+                }}
+              />
+              {isVideoOff && (
+                <div style={styles.mainVideoPlaceholder}>
+                  <span style={styles.mainVideoAvatar}>👤</span>
+                  <p style={styles.mainVideoName}>Вы</p>
                 </div>
               )}
-              <div style={styles.videoLabel}>
-                {participant.userName || 'Участник'}
+              <div style={styles.mainVideoLabel}>
+                Вы {isScreenSharing && '(Демонстрация экрана)'}
               </div>
+              {isMuted && <div style={styles.mainMutedIndicator}>🔇</div>}
             </div>
-          ))}
+          ) : mainParticipant ? (
+            // Удалённое видео как главное
+            <div 
+              style={{
+                ...styles.mainVideoWrapper,
+                ...(mainParticipant.oderId === activeSpeakerId ? styles.activeSpeaker : {})
+              }}
+            >
+              <MainVideoPlayer 
+                stream={mainParticipant.stream} 
+                ref={mainVideoRef}
+              />
+              <div style={styles.mainVideoLabel}>
+                {mainParticipant.userName || 'Участник'}
+                {mainParticipant.oderId === pinnedUserId && ' 📌'}
+              </div>
+              {mainParticipant.oderId === activeSpeakerId && (
+                <div style={styles.activeSpeakerBorder} />
+              )}
+              {/* Кнопка открепления */}
+              {pinnedUserId === mainParticipant.oderId && (
+                <button 
+                  onClick={() => setPinnedUserId(null)}
+                  style={styles.unpinBtn}
+                  title="Открепить"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          ) : (
+            <div style={styles.mainVideoPlaceholder}>
+              <span style={styles.mainVideoAvatar}>👤</span>
+              <p style={styles.mainVideoName}>Ожидание участников...</p>
+            </div>
+          )}
         </div>
+
+        {/* PREVIEW STRIP - Горизонтальная лента превью */}
+        {allPreviews.length > 0 && (
+          <div style={styles.previewStrip}>
+            <div style={styles.previewScrollContainer}>
+              {allPreviews.map((participant) => {
+                const isActive = participant.oderId === activeSpeakerId;
+                const volume = audioLevels[participant.oderId] || 0;
+                
+                return (
+                  <div
+                    key={participant.oderId}
+                    style={{
+                      ...styles.previewItem,
+                      ...(isActive ? styles.previewItemActive : {})
+                    }}
+                    onClick={() => setPinnedUserId(participant.oderId)}
+                    title="Нажмите, чтобы закрепить"
+                  >
+                    {participant.isLocal ? (
+                      // Локальное видео в preview
+                      <>
+                        <video
+                          ref={localVideoRef}
+                          autoPlay
+                          playsInline
+                          muted
+                          style={{
+                            ...styles.previewVideo,
+                            ...(isVideoOff ? styles.videoHidden : {})
+                          }}
+                        />
+                        {isVideoOff && (
+                          <div style={styles.previewPlaceholder}>
+                            <span>👤</span>
+                          </div>
+                        )}
+                        <div style={styles.previewLabel}>Вы</div>
+                        {isMuted && <div style={styles.previewMuted}>🔇</div>}
+                      </>
+                    ) : (
+                      // Удалённое видео в preview
+                      <>
+                        {participant.stream ? (
+                          <PreviewVideoPlayer stream={participant.stream} />
+                        ) : (
+                          <div style={styles.previewPlaceholder}>
+                            <span>👤</span>
+                          </div>
+                        )}
+                        <div style={styles.previewLabel}>
+                          {participant.userName || 'Участник'}
+                        </div>
+                        {/* Индикатор громкости */}
+                        {volume > 20 && (
+                          <div style={styles.volumeIndicator}>🔊</div>
+                        )}
+                      </>
+                    )}
+                    {/* Визуальная рамка active speaker */}
+                    {isActive && <div style={styles.previewActiveBorder} />}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Панель управления */}
         <div style={styles.controls}>
@@ -661,8 +965,10 @@ function GroupCallModal({
   );
 }
 
-// Компонент для отображения удалённого видео
-function VideoPlayer({ stream }) {
+// ===== VIDEO PLAYER COMPONENTS =====
+
+// Главное видео (высокое качество)
+const MainVideoPlayer = React.forwardRef(({ stream }, ref) => {
   const videoRef = useRef(null);
 
   useEffect(() => {
@@ -676,10 +982,35 @@ function VideoPlayer({ stream }) {
       ref={videoRef}
       autoPlay
       playsInline
-      style={styles.video}
+      muted // Android WebView требует muted для autoplay
+      style={styles.mainVideo}
+    />
+  );
+});
+
+// Preview видео (низкое качество)
+function PreviewVideoPlayer({ stream }) {
+  const videoRef = useRef(null);
+
+  useEffect(() => {
+    if (videoRef.current && stream) {
+      videoRef.current.srcObject = stream;
+    }
+  }, [stream]);
+
+  return (
+    <video
+      ref={videoRef}
+      autoPlay
+      playsInline
+      muted // Android WebView требует muted для autoplay
+      style={styles.previewVideo}
     />
   );
 }
+
+// ===== STYLES (Discord-like) =====
+// ===== STYLES (Discord-like) =====
 
 const styles = {
   overlay: {
@@ -688,7 +1019,7 @@ const styles = {
     left: 0,
     right: 0,
     bottom: 0,
-    background: 'rgba(0, 0, 0, 0.9)',
+    background: 'rgba(0, 0, 0, 0.95)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -697,22 +1028,23 @@ const styles = {
   modal: {
     width: '100%',
     height: '100%',
-    maxWidth: '1200px',
-    maxHeight: '800px',
-    background: '#1e293b',
-    borderRadius: '16px',
+    maxWidth: '1920px',
+    maxHeight: '1080px',
+    background: '#1e1e1e',
+    borderRadius: '12px',
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',
     margin: '16px',
   },
   header: {
-    padding: '16px 20px',
-    background: '#0f172a',
+    padding: '12px 20px',
+    background: '#0f0f0f',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    borderBottom: '1px solid #334155',
+    borderBottom: '1px solid #2a2a2a',
+    flexShrink: 0,
   },
   headerInfo: {
     display: 'flex',
@@ -730,92 +1062,232 @@ const styles = {
   },
   participantCount: {
     margin: 0,
-    color: '#94a3b8',
+    color: '#b3b3b3',
     fontSize: '13px',
   },
   callStatus: {
     color: '#22c55e',
     fontSize: '14px',
   },
-  videoGrid: {
+  
+  // ===== MAIN VIDEO (Discord style) =====
+  mainVideoContainer: {
     flex: 1,
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-    gap: '12px',
     padding: '16px',
-    overflow: 'auto',
-  },
-  videoContainer: {
-    position: 'relative',
-    background: '#0f172a',
-    borderRadius: '12px',
-    overflow: 'hidden',
-    minHeight: '200px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
+    minHeight: 0, // Важно для flex
   },
-  video: {
+  mainVideoWrapper: {
+    position: 'relative',
+    width: '100%',
+    height: '100%',
+    maxHeight: '75vh',
+    background: '#0f0f0f',
+    borderRadius: '12px',
+    overflow: 'hidden',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transition: 'box-shadow 0.2s ease',
+  },
+  mainVideo: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'contain', // Сохраняем пропорции
+  },
+  mainVideoPlaceholder: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '16px',
+    color: '#666',
+  },
+  mainVideoAvatar: {
+    fontSize: '120px',
+  },
+  mainVideoName: {
+    fontSize: '20px',
+    color: '#999',
+    margin: 0,
+  },
+  mainVideoLabel: {
+    position: 'absolute',
+    bottom: '16px',
+    left: '16px',
+    background: 'rgba(0, 0, 0, 0.8)',
+    color: '#fff',
+    padding: '8px 12px',
+    borderRadius: '8px',
+    fontSize: '14px',
+    fontWeight: '500',
+  },
+  mainMutedIndicator: {
+    position: 'absolute',
+    top: '16px',
+    right: '16px',
+    background: 'rgba(239, 68, 68, 0.9)',
+    borderRadius: '50%',
+    width: '36px',
+    height: '36px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '18px',
+  },
+  unpinBtn: {
+    position: 'absolute',
+    top: '16px',
+    right: '16px',
+    background: 'rgba(0, 0, 0, 0.7)',
+    border: 'none',
+    borderRadius: '50%',
+    width: '32px',
+    height: '32px',
+    color: '#fff',
+    fontSize: '16px',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transition: 'background 0.2s',
+  },
+  videoHidden: {
+    display: 'none',
+  },
+  
+  // Active speaker визуальная рамка
+  activeSpeaker: {
+    boxShadow: '0 0 0 3px #22c55e, 0 0 20px rgba(34, 197, 94, 0.5)',
+  },
+  activeSpeakerBorder: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    border: '3px solid #22c55e',
+    borderRadius: '12px',
+    pointerEvents: 'none',
+    animation: 'pulse 2s infinite',
+  },
+  
+  // ===== PREVIEW STRIP (Горизонтальная лента) =====
+  previewStrip: {
+    padding: '0 16px 12px 16px',
+    background: '#1e1e1e',
+    borderTop: '1px solid #2a2a2a',
+    flexShrink: 0,
+  },
+  previewScrollContainer: {
+    display: 'flex',
+    gap: '12px',
+    overflowX: 'auto',
+    overflowY: 'hidden',
+    paddingBottom: '4px',
+    // Стилизация scrollbar (WebKit)
+    scrollbarWidth: 'thin',
+    scrollbarColor: '#3a3a3a #1e1e1e',
+  },
+  previewItem: {
+    position: 'relative',
+    minWidth: '180px',
+    width: '180px',
+    height: '120px',
+    background: '#0f0f0f',
+    borderRadius: '8px',
+    overflow: 'hidden',
+    cursor: 'pointer',
+    transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+    flexShrink: 0,
+  },
+  previewItemActive: {
+    boxShadow: '0 0 0 2px #22c55e',
+  },
+  previewVideo: {
     width: '100%',
     height: '100%',
     objectFit: 'cover',
   },
-  videoOff: {
-    opacity: 0,
-  },
-  videoLabel: {
-    position: 'absolute',
-    bottom: '8px',
-    left: '8px',
-    background: 'rgba(0, 0, 0, 0.6)',
-    color: '#fff',
-    padding: '4px 8px',
-    borderRadius: '4px',
-    fontSize: '12px',
-  },
-  avatarPlaceholder: {
+  previewPlaceholder: {
     position: 'absolute',
     top: '50%',
     left: '50%',
     transform: 'translate(-50%, -50%)',
-    fontSize: '64px',
-    color: '#64748b',
+    fontSize: '48px',
+    color: '#444',
   },
-  mutedIndicator: {
+  previewLabel: {
     position: 'absolute',
-    top: '8px',
-    right: '8px',
-    background: 'rgba(239, 68, 68, 0.8)',
+    bottom: '6px',
+    left: '6px',
+    background: 'rgba(0, 0, 0, 0.7)',
+    color: '#fff',
+    padding: '4px 8px',
+    borderRadius: '4px',
+    fontSize: '11px',
+    fontWeight: '500',
+    maxWidth: 'calc(100% - 12px)',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  previewMuted: {
+    position: 'absolute',
+    top: '6px',
+    right: '6px',
+    background: 'rgba(239, 68, 68, 0.9)',
     borderRadius: '50%',
-    width: '28px',
-    height: '28px',
+    width: '24px',
+    height: '24px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    fontSize: '14px',
+    fontSize: '12px',
   },
+  volumeIndicator: {
+    position: 'absolute',
+    top: '6px',
+    right: '6px',
+    fontSize: '16px',
+  },
+  previewActiveBorder: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    border: '2px solid #22c55e',
+    borderRadius: '8px',
+    pointerEvents: 'none',
+  },
+  
+  // ===== CONTROLS =====
   controls: {
     padding: '16px',
-    background: '#0f172a',
+    background: '#0f0f0f',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     gap: '16px',
-    borderTop: '1px solid #334155',
+    borderTop: '1px solid #2a2a2a',
+    flexShrink: 0,
   },
   controlBtn: {
     width: '56px',
     height: '56px',
     borderRadius: '50%',
     border: 'none',
-    background: '#334155',
+    background: '#3a3a3a',
     color: '#fff',
     fontSize: '24px',
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    transition: 'all 0.2s',
+    transition: 'all 0.2s ease',
   },
   controlBtnActive: {
     background: '#ef4444',
@@ -836,11 +1308,12 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'center',
     transform: 'rotate(135deg)',
-    transition: 'all 0.2s',
+    transition: 'all 0.2s ease',
   },
-  // Входящий звонок
+  
+  // ===== INCOMING CALL =====
   incomingModal: {
-    background: '#1e293b',
+    background: '#1e1e1e',
     borderRadius: '24px',
     padding: '32px',
     textAlign: 'center',
@@ -863,7 +1336,7 @@ const styles = {
     margin: '0 0 8px 0',
   },
   incomingCaller: {
-    color: '#94a3b8',
+    color: '#b3b3b3',
     fontSize: '14px',
     margin: '0 0 24px 0',
   },
@@ -905,5 +1378,94 @@ const styles = {
     fontWeight: '500',
   },
 };
+
+// ===== CSS ANIMATIONS (inject to document.head) =====
+if (typeof document !== 'undefined') {
+  const styleId = 'group-call-animations';
+  
+  if (!document.getElementById(styleId)) {
+    const styleTag = document.createElement('style');
+    styleTag.id = styleId;
+    styleTag.textContent = `
+      /* Fade in animation */
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: scale(0.95);
+        }
+        to {
+          opacity: 1;
+          transform: scale(1);
+        }
+      }
+      
+      /* Pulse animation for active speaker */
+      @keyframes pulse {
+        0%, 100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.7;
+        }
+      }
+      
+      /* Preview hover effect */
+      .preview-item:hover {
+        transform: scale(1.05);
+      }
+      
+      /* Scrollbar styling (WebKit) */
+      .preview-scroll-container::-webkit-scrollbar {
+        height: 6px;
+      }
+      
+      .preview-scroll-container::-webkit-scrollbar-track {
+        background: #1e1e1e;
+      }
+      
+      .preview-scroll-container::-webkit-scrollbar-thumb {
+        background: #3a3a3a;
+        border-radius: 3px;
+      }
+      
+      .preview-scroll-container::-webkit-scrollbar-thumb:hover {
+        background: #4a4a4a;
+      }
+      
+      /* Mobile adaptations */
+      @media (max-width: 768px) {
+        .group-call-modal {
+          margin: 0 !important;
+          border-radius: 0 !important;
+          max-width: 100% !important;
+          max-height: 100% !important;
+        }
+        
+        .preview-item {
+          min-width: 140px !important;
+          width: 140px !important;
+          height: 100px !important;
+        }
+        
+        .main-video-label {
+          font-size: 12px !important;
+          padding: 6px 10px !important;
+        }
+      }
+      
+      /* Android WebView optimizations */
+      @media (hover: none) and (pointer: coarse) {
+        .control-btn:active {
+          transform: scale(0.95);
+        }
+        
+        .preview-item:active {
+          transform: scale(0.98);
+        }
+      }
+    `;
+    document.head.appendChild(styleTag);
+  }
+}
 
 export default GroupCallModal;
