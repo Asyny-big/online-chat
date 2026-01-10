@@ -1,6 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { API_URL } from '../config';
 
+// Спец-id для «закрепить своё видео» без переписывания всей логики pinnedUserId.
+// Почему так: pinnedUserId раньше принимал только remote userId, из-за чего
+// пользователь не мог стабильно удерживать локальное видео главным (оно "прыгало"
+// из-за active speaker). Mongo ObjectId никогда не совпадёт с таким значением.
+const LOCAL_PIN_ID = '__local__';
+
 /**
  * GroupCallModal - Компонент для групповых видео/аудио звонков (Discord-like UX)
  * Использует mesh-топологию WebRTC (каждый участник соединён с каждым)
@@ -40,12 +46,19 @@ function GroupCallModal({
   const [isVideoOff, setIsVideoOff] = useState(callType === 'audio');
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [screenStream, setScreenStream] = useState(null);
+  // ВАЖНО: backend отдаёт не только iceServers, но и iceCandidatePoolSize.
+  // Для ускорения первого подключения нам нужно иметь этот конфиг ДО создания RTCPeerConnection.
   const [iceServers, setIceServers] = useState([]);
+  const iceConfigRef = useRef({ iceServers: [], iceCandidatePoolSize: 10 });
+  const iceReadyRef = useRef(false);
+  const iceLoadPromiseRef = useRef(null);
   // Счётчик обновлений стримов для trigger ререндера
   const [streamUpdateCounter, setStreamUpdateCounter] = useState(0);
   
   // Discord-like UX состояния
-  const [pinnedUserId, setPinnedUserId] = useState(null); // Закреплённый пользователь
+  // По умолчанию закрепляем локальное видео, чтобы убрать "прыжки" главного видео.
+  // Пользователь может переключиться в Auto-режим (следовать active speaker).
+  const [pinnedUserId, setPinnedUserId] = useState(LOCAL_PIN_ID); // Закреплённый пользователь
   const [activeSpeakerId, setActiveSpeakerId] = useState(null); // Активный говорящий
   const [audioLevels, setAudioLevels] = useState({}); // { userId: volume }
 
@@ -65,6 +78,7 @@ function GroupCallModal({
   const analysersRef = useRef({}); // { userId: AnalyserNode }
   const activeSpeakerTimerRef = useRef(null);
   const lastActiveSpeakerRef = useRef(null);
+  const lastMainUserIdRef = useRef(null);
 
   // ===== UTILITY FUNCTIONS =====
   
@@ -76,6 +90,10 @@ function GroupCallModal({
   // Определение главного видео (pinned или active speaker)
   // ВАЖНО: возвращает userId ТОЛЬКО если у него есть реальный stream
   const getMainUserId = useCallback(() => {
+    // LOCAL_PIN_ID означает "покажи локальное как главное".
+    if (pinnedUserId === LOCAL_PIN_ID) {
+      return null;
+    }
     // Если закреплён пользователь И у него есть stream — показываем его
     if (pinnedUserId && remoteStreamsRef.current.has(pinnedUserId)) {
       return pinnedUserId;
@@ -96,10 +114,18 @@ function GroupCallModal({
       parameters.encodings = [{}];
     }
     
+    // Почему так: в mesh (группа) каждый аплинк умножается на N-1,
+    // поэтому дефолтные битрейты должны быть консервативными, иначе
+    // получаем "раскачку" (адаптация качества/пакетные потери/рост задержки).
     parameters.encodings[0].maxBitrate = maxBitrate * 1000; // kbps -> bps
     if (maxFramerate) {
       parameters.encodings[0].maxFramerate = maxFramerate;
     }
+
+    // Не у всех браузеров поле поддерживается, поэтому в try/catch.
+    try {
+      parameters.degradationPreference = parameters.degradationPreference || 'balanced';
+    } catch (e) {}
     
     try {
       await sender.setParameters(parameters);
@@ -116,10 +142,10 @@ function GroupCallModal({
       if (sender.track?.kind === 'video') {
         if (isMainVideo) {
           // Главное видео: высокое качество
-          await setBitrate(sender, 2000, 30); // 2 Mbps, 30 fps
+          await setBitrate(sender, 900, 20); // 0.9 Mbps, 20 fps
         } else {
           // Preview: низкое качество
-          await setBitrate(sender, 300, 15); // 300 kbps, 15 fps
+          await setBitrate(sender, 250, 15); // 250 kbps, 15 fps
         }
       }
     }
@@ -210,26 +236,58 @@ function GroupCallModal({
 
   // ===== ICE SERVERS =====
   
-  // Получение ICE серверов
-  useEffect(() => {
-    const fetchIceServers = async () => {
-      try {
-        const res = await fetch(`${API_URL}/webrtc/ice`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        const data = await res.json();
-        setIceServers(data.iceServers || []);
-      } catch (err) {
-        console.error('[GroupCall] Failed to fetch ICE servers:', err);
-        // Fallback к публичным STUN серверам
-        setIceServers([
+  const loadIceConfig = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/webrtc/ice`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+
+      const nextConfig = {
+        iceServers: data.iceServers || [],
+        iceCandidatePoolSize: typeof data.iceCandidatePoolSize === 'number' ? data.iceCandidatePoolSize : 10
+      };
+
+      iceConfigRef.current = nextConfig;
+      iceReadyRef.current = true;
+      setIceServers(nextConfig.iceServers);
+      return nextConfig;
+    } catch (err) {
+      console.error('[GroupCall] Failed to fetch ICE servers:', err);
+
+      // Fallback к публичным STUN серверам
+      const fallback = {
+        iceServers: [
           { urls: 'stun:stun.l.google.com:19302' },
           { urls: 'stun:stun1.l.google.com:19302' }
-        ]);
-      }
-    };
-    fetchIceServers();
+        ],
+        iceCandidatePoolSize: 10
+      };
+      iceConfigRef.current = fallback;
+      iceReadyRef.current = true;
+      setIceServers(fallback.iceServers);
+      return fallback;
+    }
   }, [token]);
+
+  // Prefetch: не ждём join/start, подготавливаем TURN заранее.
+  useEffect(() => {
+    iceLoadPromiseRef.current = loadIceConfig();
+  }, [loadIceConfig]);
+
+  // Гарантируем, что ICE конфиг загружен до любых RTCPeerConnection.
+  // Почему так: если создать PC с пустым iceServers, потом обновить state уже поздно —
+  // connection стартует без TURN и часто даёт долгую установку/обрывы.
+  const ensureIceConfig = useCallback(async () => {
+    if (iceReadyRef.current) return iceConfigRef.current;
+    if (!iceLoadPromiseRef.current) {
+      iceLoadPromiseRef.current = loadIceConfig();
+    }
+    try {
+      await iceLoadPromiseRef.current;
+    } catch (e) {}
+    return iceConfigRef.current;
+  }, [loadIceConfig]);
 
   // Воспроизведение рингтона для входящего звонка
   useEffect(() => {
@@ -260,9 +318,12 @@ function GroupCallModal({
           autoGainControl: true
         },
         video: callType === 'video' ? { 
-          width: { ideal: 1280, max: 1920 },
-          height: { ideal: 720, max: 1080 },
-          frameRate: { ideal: 30, max: 30 },
+          // Требование: дефолт 640x480 + сниженная частота кадров для меньшей задержки.
+          // Почему так: в mesh каждый участник отправляет видео всем — лишние пиксели/FPS
+          // дают рост jitter/latency и деградацию у всех.
+          width: { ideal: 640, max: 1280 },
+          height: { ideal: 480, max: 720 },
+          frameRate: { ideal: 20, max: 24 },
           facingMode: 'user'
         } : false
       };
@@ -313,7 +374,13 @@ function GroupCallModal({
 
     console.log('[GroupCall] Creating PeerConnection for:', oderId, 'isInitiator:', isInitiator);
     
-    const pc = new RTCPeerConnection({ iceServers });
+    // Берём ICE конфиг из ref, а не из state:
+    // state может обновиться позже, а RTCPeerConnection уже создан.
+    const cfg = iceConfigRef.current || { iceServers: iceServers || [], iceCandidatePoolSize: 10 };
+    const pc = new RTCPeerConnection({
+      iceServers: cfg.iceServers || [],
+      iceCandidatePoolSize: typeof cfg.iceCandidatePoolSize === 'number' ? cfg.iceCandidatePoolSize : 10
+    });
 
     // Добавляем локальные треки
     if (localStreamRef.current) {
@@ -415,7 +482,11 @@ function GroupCallModal({
   // Обновление bitrate при изменении главного видео
   useEffect(() => {
     const mainUserId = getMainUserId();
-    
+    if (lastMainUserIdRef.current === mainUserId) return;
+    lastMainUserIdRef.current = mainUserId;
+
+    // Почему так: частые setParameters() (особенно на Android/WebView) могут
+    // провоцировать нестабильность и задержку. Обновляем только когда main реально сменился.
     Object.entries(peerConnectionsRef.current).forEach(([oderId, pc]) => {
       const isMain = oderId === mainUserId;
       applyBitrateSettings(pc, isMain);
@@ -426,6 +497,7 @@ function GroupCallModal({
   
   // Отправка offer новому участнику
   const sendOffer = useCallback(async (oderId) => {
+    await ensureIceConfig();
     const pc = createPeerConnection(oderId, true);
     
     try {
@@ -444,10 +516,11 @@ function GroupCallModal({
     } catch (err) {
       console.error('[GroupCall] Error creating offer:', err);
     }
-  }, [createPeerConnection, socket]);
+  }, [createPeerConnection, socket, ensureIceConfig]);
 
   // Обработка входящего сигнала
   const handleSignal = useCallback(async ({ fromUserId, signal }) => {
+    await ensureIceConfig();
     console.log('[GroupCall] Received signal from:', fromUserId, signal.type);
 
     // Если это существующий участник (инициатор/раньше подключившийся), но мы не получили
@@ -507,11 +580,14 @@ function GroupCallModal({
         pendingCandidatesRef.current[fromUserId].push(signal.candidate);
       }
     }
-  }, [createPeerConnection, socket]);
+  }, [createPeerConnection, socket, ensureIceConfig]);
 
   // Присоединение к звонку
   const joinCall = useCallback(async () => {
     setCallStatus('connecting');
+
+    // ВАЖНО: ICE конфиг грузим ДО любого signaling/PeerConnection.
+    await ensureIceConfig();
     
     // Останавливаем рингтон
     if (ringtoneRef.current) {
@@ -566,11 +642,14 @@ function GroupCallModal({
         });
       }
     });
-  }, [getLocalStream, socket, chatId, currentUserId, sendOffer, onClose]);
+  }, [getLocalStream, socket, chatId, currentUserId, sendOffer, onClose, ensureIceConfig]);
 
   // Начало звонка (для инициатора)
   const startCall = useCallback(async () => {
     setCallStatus('connecting');
+
+    // Инициатор тоже должен иметь ICE конфиг заранее.
+    await ensureIceConfig();
 
     const stream = await getLocalStream();
     if (!stream) {
@@ -580,7 +659,7 @@ function GroupCallModal({
 
     setCallStatus('active');
     onJoin?.();
-  }, [getLocalStream, onClose, onJoin]);
+  }, [getLocalStream, onClose, onJoin, ensureIceConfig]);
 
   // Автоматический запуск для не-входящих звонков
   useEffect(() => {
@@ -907,8 +986,38 @@ function GroupCallModal({
               </p>
             </div>
           </div>
-          <div style={styles.callStatus}>
-            {callStatus === 'connecting' ? '🔄 Подключение...' : '🟢 В звонке'}
+          <div style={styles.headerRight}>
+            {/*
+              РЕЖИМ MAIN VIDEO:
+              - Auto: main = active speaker (как в Discord/Zoom)
+              - Я:   main = локальное видео (стабильно, ничего не "прыгает")
+              Почему так: это даёт ручной контроль без переписывания архитектуры.
+            */}
+            <div style={styles.headerActions}>
+              <button
+                onClick={() => setPinnedUserId(null)}
+                style={{
+                  ...styles.modeBtn,
+                  ...(pinnedUserId === null ? styles.modeBtnActive : {})
+                }}
+                title="Auto: главный экран следует за активным говорящим"
+              >
+                Auto
+              </button>
+              <button
+                onClick={() => setPinnedUserId(LOCAL_PIN_ID)}
+                style={{
+                  ...styles.modeBtn,
+                  ...(pinnedUserId === LOCAL_PIN_ID ? styles.modeBtnActive : {})
+                }}
+                title="Я: закрепить своё видео как главное"
+              >
+                Я
+              </button>
+            </div>
+            <div style={styles.callStatus}>
+              {callStatus === 'connecting' ? '🔄 Подключение...' : '🟢 В звонке'}
+            </div>
           </div>
         </div>
 
@@ -1007,7 +1116,7 @@ function GroupCallModal({
                     ...styles.previewItem,
                     ...(currentUserId === activeSpeakerId ? styles.previewItemActive : {})
                   }}
-                  onClick={() => setPinnedUserId(null)} // null = показать локальное как main
+                  onClick={() => setPinnedUserId(LOCAL_PIN_ID)} // закрепляем локальное как main
                   title="Нажмите, чтобы показать своё видео"
                 >
                   <video
@@ -1043,6 +1152,7 @@ function GroupCallModal({
                       ...styles.previewItem,
                       ...(isActive ? styles.previewItemActive : {})
                     }}
+                    // "Swap" механика: клик по плитке делает её main.
                     onClick={() => setPinnedUserId(participant.oderId)}
                     title="Нажмите, чтобы закрепить"
                   >
@@ -1126,21 +1236,35 @@ function GroupCallModal({
 // ===== VIDEO PLAYER COMPONENTS =====
 
 // Главное видео (высокое качество)
-const MainVideoPlayer = React.forwardRef(({ stream }, ref) => {
-  const videoRef = useRef(null);
+const MainVideoPlayer = React.forwardRef(({ stream }, forwardedRef) => {
+  const innerRef = useRef(null);
+
+  const setRef = useCallback((node) => {
+    innerRef.current = node;
+    if (!forwardedRef) return;
+    if (typeof forwardedRef === 'function') forwardedRef(node);
+    else forwardedRef.current = node;
+  }, [forwardedRef]);
 
   useEffect(() => {
-    if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
-    }
+    const el = innerRef.current;
+    if (!el) return;
+
+    // ВАЖНО: для удалённых stream НЕЛЬЗЯ ставить muted,
+    // иначе звук у всех участников пропадёт полностью.
+    el.srcObject = stream || null;
+
+    // Autoplay с аудио требует жеста пользователя. Join/Start — это клик,
+    // но на некоторых WebView всё равно полезно явно дёрнуть play().
+    const p = el.play?.();
+    if (p && typeof p.catch === 'function') p.catch(() => {});
   }, [stream]);
 
   return (
     <video
-      ref={videoRef}
+      ref={setRef}
       autoPlay
       playsInline
-      muted // Android WebView требует muted для autoplay
       style={styles.mainVideo}
     />
   );
@@ -1151,9 +1275,14 @@ function PreviewVideoPlayer({ stream }) {
   const videoRef = useRef(null);
 
   useEffect(() => {
-    if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
-    }
+    const el = videoRef.current;
+    if (!el) return;
+
+    // Preview тоже должен воспроизводить аудио (каждый участник слышен независимо от того,
+    // в main он или в preview). Локальные элементы остаются muted в основном рендере.
+    el.srcObject = stream || null;
+    const p = el.play?.();
+    if (p && typeof p.catch === 'function') p.catch(() => {});
   }, [stream]);
 
   return (
@@ -1161,7 +1290,6 @@ function PreviewVideoPlayer({ stream }) {
       ref={videoRef}
       autoPlay
       playsInline
-      muted // Android WebView требует muted для autoplay
       style={styles.previewVideo}
     />
   );
@@ -1203,6 +1331,30 @@ const styles = {
     justifyContent: 'space-between',
     borderBottom: '1px solid #2a2a2a',
     flexShrink: 0,
+  },
+  headerRight: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+  },
+  headerActions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+  },
+  modeBtn: {
+    padding: '6px 10px',
+    borderRadius: '8px',
+    border: '1px solid #2a2a2a',
+    background: '#151515',
+    color: '#d1d5db',
+    fontSize: '12px',
+    cursor: 'pointer',
+  },
+  modeBtnActive: {
+    background: '#2563eb',
+    borderColor: '#2563eb',
+    color: '#fff',
   },
   headerInfo: {
     display: 'flex',
