@@ -372,6 +372,47 @@ function GroupCallModal({
   }, [isIncoming, callStatus]);
 
   // ===== LOCAL STREAM =====
+
+  // Надёжная привязка MediaStream к <video>.
+  // Почему так: при переключении main/preview React размонтирует/монтирует video-элементы.
+  // На некоторых браузерах (особенно Android WebView) одного autoPlay недостаточно —
+  // видео остаётся "чёрным" пока явно не вызвать play() после назначения srcObject.
+  const attachStreamToVideo = useCallback((videoEl, stream, { muted } = {}) => {
+    if (!videoEl) return;
+
+    if (typeof muted === 'boolean') {
+      videoEl.muted = muted;
+    }
+
+    if (videoEl.srcObject !== stream) {
+      videoEl.srcObject = stream || null;
+    }
+
+    // Принудительно запускаем воспроизведение. Ошибки игнорируем (autoplay policy).
+    const safePlay = () => {
+      try {
+        const p = videoEl.play?.();
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+      } catch (e) {}
+    };
+
+    if (!stream) return;
+
+    // Если метаданные уже готовы — можно сразу.
+    if (videoEl.readyState >= 1) {
+      safePlay();
+      return;
+    }
+
+    // Иначе ждём метаданные (это часто и есть причина "чёрного" кадра после swap).
+    const prevHandler = videoEl.onloadedmetadata;
+    videoEl.onloadedmetadata = (ev) => {
+      try {
+        if (typeof prevHandler === 'function') prevHandler(ev);
+      } catch (e) {}
+      safePlay();
+    };
+  }, []);
   
   // Получение локального медиа-потока
   const getLocalStream = useCallback(async () => {
@@ -410,13 +451,9 @@ function GroupCallModal({
       // Настраиваем анализатор для локального аудио
       setupAudioAnalyser(stream, currentUserId);
       
-      // Привязываем к ОБОИМ video refs (main и preview)
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
-      }
-      if (localPreviewVideoRef.current) {
-        localPreviewVideoRef.current.srcObject = stream;
-      }
+      // Привязываем к ОБОИМ video refs (main и preview) + гарантируем play().
+      attachStreamToVideo(localVideoRef.current, stream, { muted: true });
+      attachStreamToVideo(localPreviewVideoRef.current, stream, { muted: true });
       
       return stream;
     } catch (err) {
@@ -424,19 +461,18 @@ function GroupCallModal({
       alert('Не удалось получить доступ к камере/микрофону');
       return null;
     }
-  }, [callType, currentUserId, setupAudioAnalyser]);
+  }, [callType, currentUserId, setupAudioAnalyser, attachStreamToVideo]);
 
   // Синхронизация localStream с video refs при изменении layout
   useEffect(() => {
     if (localStream) {
-      if (localVideoRef.current && !localVideoRef.current.srcObject) {
-        localVideoRef.current.srcObject = localStream;
-      }
-      if (localPreviewVideoRef.current && !localPreviewVideoRef.current.srcObject) {
-        localPreviewVideoRef.current.srcObject = localStream;
-      }
+      // ВАЖНО: не проверяем "!srcObject".
+      // После swap может остаться старый srcObject или paused state —
+      // поэтому каждый раз переустанавливаем и вызываем play().
+      attachStreamToVideo(localVideoRef.current, localStream, { muted: true });
+      attachStreamToVideo(localPreviewVideoRef.current, localStream, { muted: true });
     }
-  }, [localStream, streamUpdateCounter]); // используем streamUpdateCounter для триггера ререндера вместо isLocalMain
+  }, [localStream, streamUpdateCounter, pinnedUserId, attachStreamToVideo]);
 
   // ===== PEER CONNECTION =====
   
