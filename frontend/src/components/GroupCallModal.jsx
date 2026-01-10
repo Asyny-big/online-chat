@@ -791,6 +791,41 @@ function GroupCallModal({
   }, [cleanup]);
 
   // ===== RENDER =====
+
+  // Получаем список remote участников с РЕАЛЬНЫМИ стримами
+  // useMemo + streamUpdateCounter для ререндера при обновлении стримов
+  // ВАЖНО: этот hook должен вызываться всегда (иначе React #310 при смене callStatus)
+  const remoteParticipantsWithStreams = useMemo(() => {
+    // Триггер зависимости от streamUpdateCounter (не используется напрямую)
+    void streamUpdateCounter;
+
+    return participants
+      .filter(p => p.oderId !== currentUserId)
+      .map(p => ({
+        ...p,
+        stream: remoteStreamsRef.current.get(p.oderId) || null,
+        hasStream: remoteStreamsRef.current.has(p.oderId)
+      }));
+  }, [participants, currentUserId, streamUpdateCounter]);
+
+  // Определяем главного участника (ТОЛЬКО если есть реальный stream)
+  const mainUserId = getMainUserId();
+  const mainRemoteStream = mainUserId ? remoteStreamsRef.current.get(mainUserId) : null;
+  const mainParticipant = mainUserId
+    ? remoteParticipantsWithStreams.find(p => p.oderId === mainUserId)
+    : null;
+  const isLocalMain = mainUserId === null; // Если null - показываем локальное видео
+
+  // Все remote участники для preview strip (кроме главного)
+  const remotePreviewParticipants = remoteParticipantsWithStreams.filter(p => p.oderId !== mainUserId);
+
+  // Формируем preview list
+  // Если локальное видео главное - показываем только remote в превью
+  // Если remote главное - добавляем локальное видео в превью
+  const showLocalInPreview = !isLocalMain && localStream;
+
+  // Общее количество участников (для UI)
+  const totalParticipants = remoteParticipantsWithStreams.filter(p => p.hasStream).length + 1;
   
   // Рендер входящего звонка
   if (callStatus === 'incoming') {
@@ -820,40 +855,6 @@ function GroupCallModal({
   }
 
   // ===== DISCORD-LIKE LAYOUT =====
-  
-  // Получаем список remote участников с РЕАЛЬНЫМИ стримами
-  // useMemo + streamUpdateCounter для ререндера при обновлении стримов
-  const remoteParticipantsWithStreams = useMemo(() => {
-    // Триггер зависимости от streamUpdateCounter (не используется напрямую)
-    void streamUpdateCounter;
-    
-    return participants
-      .filter(p => p.oderId !== currentUserId)
-      .map(p => ({
-        ...p,
-        stream: remoteStreamsRef.current.get(p.oderId) || null,
-        hasStream: remoteStreamsRef.current.has(p.oderId)
-      }));
-  }, [participants, currentUserId, streamUpdateCounter]);
-  
-  // Определяем главного участника (ТОЛЬКО если есть реальный stream)
-  const mainUserId = getMainUserId();
-  const mainRemoteStream = mainUserId ? remoteStreamsRef.current.get(mainUserId) : null;
-  const mainParticipant = mainUserId 
-    ? remoteParticipantsWithStreams.find(p => p.oderId === mainUserId) 
-    : null;
-  const isLocalMain = mainUserId === null; // Если null - показываем локальное видео
-  
-  // Все remote участники для preview strip (кроме главного)
-  const remotePreviewParticipants = remoteParticipantsWithStreams.filter(p => p.oderId !== mainUserId);
-  
-  // Формируем preview list
-  // Если локальное видео главное - показываем только remote в превью
-  // Если remote главное - добавляем локальное видео в превью
-  const showLocalInPreview = !isLocalMain && localStream;
-  
-  // Общее количество участников (для UI)
-  const totalParticipants = remoteParticipantsWithStreams.filter(p => p.hasStream).length + 1;
 
   // Рендер активного звонка (Discord UX)
   return (
