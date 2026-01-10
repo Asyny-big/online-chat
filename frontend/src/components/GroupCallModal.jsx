@@ -342,6 +342,16 @@ function GroupCallModal({
     // Получение удалённого потока (addTrack паттерн)
     pc.ontrack = (event) => {
       console.log('[GroupCall] Received remote track from:', oderId, 'kind:', event.track?.kind);
+
+      // Гарантируем метаданные участника для UI (иначе stream есть, но не рендерится)
+      if (oderId !== currentUserId) {
+        setParticipants(prev => {
+          if (!prev.find(p => p.oderId === oderId)) {
+            return [...prev, { oderId, userName: 'Участник' }];
+          }
+          return prev;
+        });
+      }
       
       // Получаем или создаём MediaStream для этого пользователя
       let remoteStream = remoteStreamsRef.current.get(oderId);
@@ -440,6 +450,17 @@ function GroupCallModal({
   const handleSignal = useCallback(async ({ fromUserId, signal }) => {
     console.log('[GroupCall] Received signal from:', fromUserId, signal.type);
 
+    // Если это существующий участник (инициатор/раньше подключившийся), но мы не получили
+    // group-call:participant-joined, добавляем его в participants, иначе UI не покажет stream.
+    if (fromUserId && fromUserId !== currentUserId) {
+      setParticipants(prev => {
+        if (!prev.find(p => p.oderId === fromUserId)) {
+          return [...prev, { oderId: fromUserId, userName: 'Участник' }];
+        }
+        return prev;
+      });
+    }
+
     if (signal.type === 'offer') {
       const pc = createPeerConnection(fromUserId, false);
       
@@ -519,6 +540,21 @@ function GroupCallModal({
 
       console.log('[GroupCall] Joined call, existing participants:', response.participants);
       setCallStatus('active');
+
+      // ВАЖНО: заполняем participants существующими участниками, иначе поздно вошедший
+      // будет видеть только себя (streams приходят, но не рендерятся без метаданных).
+      if (response.participants && response.participants.length > 0) {
+        setParticipants(prev => {
+          const merged = [...prev];
+          response.participants.forEach(p => {
+            if (!p?.oderId || p.oderId === currentUserId) return;
+            if (!merged.find(x => x.oderId === p.oderId)) {
+              merged.push({ oderId: p.oderId, userName: p.userName || 'Участник' });
+            }
+          });
+          return merged;
+        });
+      }
       
       // Создаём соединения с существующими участниками
       if (response.participants && response.participants.length > 0) {
@@ -609,7 +645,7 @@ function GroupCallModal({
     // Новый участник присоединился
     const handleParticipantJoined = ({ oderId, userName }) => {
       console.log('[GroupCall] Participant joined:', oderId, userName);
-      if (oderId !== currentUserId && callStatus === 'active') {
+      if (oderId !== currentUserId) {
         // Добавляем в participants ТОЛЬКО метаданные (БЕЗ stream)
         // Stream будет получен через ontrack
         setParticipants(prev => {

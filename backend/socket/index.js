@@ -305,13 +305,21 @@ module.exports = function(io) {
         if (call.status === 'ringing') call.status = 'active';
         await call.save();
 
+        // Нужны имена для корректного отображения существующих участников на клиенте
+        await call.populate('participants.user', 'name');
+
         const agc = activeGroupCalls.get(chat._id.toString());
         if (agc) agc.participants.add(userId);
 
         // Отправляем участнику текущий список для сигналинга
         const existing = call.participants
-          .filter(p => !p.leftAt && p.user.toString() !== userId)
-          .map(p => ({ oderId: p.user.toString() }));
+          .filter(p => !p.leftAt && (p.user?._id?.toString?.() || p.user?.toString?.()) !== userId)
+          .map(p => {
+            const pid = p.user?._id?.toString?.() || p.user?.toString?.();
+            const userName = p.user?.name;
+            return { oderId: pid, userName };
+          })
+          .filter(p => !!p.oderId);
 
         callback?.({ success: true, participants: existing });
 
