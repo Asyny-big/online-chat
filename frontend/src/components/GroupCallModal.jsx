@@ -62,6 +62,11 @@ function GroupCallModal({
   const [activeSpeakerId, setActiveSpeakerId] = useState(null); // Активный говорящий
   const [audioLevels, setAudioLevels] = useState({}); // { userId: volume }
 
+  // Адаптивное качество (по умолчанию включено).
+  // Почему так: жёсткие потолки хорошо спасают от лагов, но на отличной сети
+  // бессмысленно держать качество низким — можно подняться до HD/бОльшего битрейта.
+  const [isAdaptiveQualityEnabled] = useState(true);
+
   // ===== REFS =====
   const localVideoRef = useRef(null); // Для main video (локальное)
   const localPreviewVideoRef = useRef(null); // Для preview strip (локальное) - ОТДЕЛЬНЫЙ ref!
@@ -70,6 +75,15 @@ function GroupCallModal({
   const remoteStreamsRef = useRef(new Map()); // Map<oderId, MediaStream> - remote ТОЛЬКО
   const pendingCandidatesRef = useRef({}); // { oderId: ICECandidate[] }
   const pcMetaRef = useRef({}); // { oderId: { isInitiator: boolean, lastIceRestartAt?: number } }
+  const qualityRef = useRef({});
+  // qualityRef.current[oderId] = {
+  //   targetKbps, targetFps,
+  //   lastJitterMs, goodStreak, badStreak,
+  //   lastAppliedAt
+  // }
+  const captureTierRef = useRef('sd'); // 'sd' | 'hd'
+  const captureGoodStreakRef = useRef(0);
+  const captureBadStreakRef = useRef(0);
   const ringtoneRef = useRef(null);
   const callIdRef = useRef(callId);
   const localStreamRef = useRef(null); // Локальный поток - ОТДЕЛЬНО от remoteStreamsRef
@@ -199,6 +213,60 @@ function GroupCallModal({
     }
   }, []);
 
+  const getVideoSender = useCallback((pc) => {
+    try {
+      return pc?.getSenders?.().find(s => s.track?.kind === 'video') || null;
+    } catch (e) {
+      return null;
+    }
+  }, []);
+
+  const setSenderCapsIfChanged = useCallback(async (sender, nextKbps, nextFps) => {
+    if (!sender) return;
+    const params = sender.getParameters?.() || {};
+    const current = params.encodings?.[0] || {};
+    const currentKbps = typeof current.maxBitrate === 'number' ? Math.round(current.maxBitrate / 1000) : null;
+    const currentFps = typeof current.maxFramerate === 'number' ? current.maxFramerate : null;
+
+    // Не трогаем параметры слишком часто (Android/WebView может "дергаться").
+    // Также избегаем микродрожания: меняем только при заметной разнице.
+    const kbpsDelta = currentKbps === null ? 9999 : Math.abs(currentKbps - nextKbps);
+    const fpsDelta = currentFps === null ? 9999 : Math.abs(currentFps - nextFps);
+    if (kbpsDelta < 60 && fpsDelta < 1) return;
+
+    await setBitrate(sender, nextKbps, nextFps);
+  }, [setBitrate]);
+
+  const applyCaptureTier = useCallback(async (tier) => {
+    const stream = localStreamRef.current;
+    if (!stream) return;
+    const vt = stream.getVideoTracks?.()?.[0];
+    if (!vt) return;
+
+    // applyConstraints влияет на ВСЕ peer'ы сразу, потому что это один источник камеры.
+    // Поэтому делаем это редко, с гистерезисом и только когда участников мало.
+    try {
+      if (tier === 'hd') {
+        await vt.applyConstraints({
+          width: { ideal: 1280, max: 1920 },
+          height: { ideal: 720, max: 1080 },
+          frameRate: { ideal: 24, max: 30 }
+        });
+      } else {
+        await vt.applyConstraints({
+          width: { ideal: 640, max: 1280 },
+          height: { ideal: 480, max: 720 },
+          frameRate: { ideal: 18, max: 24 }
+        });
+      }
+      captureTierRef.current = tier;
+      console.log('[GroupCall] Capture tier applied:', tier);
+    } catch (e) {
+      // Некоторые девайсы/браузеры не дают менять constraints на лету.
+      console.warn('[GroupCall] Failed to apply capture constraints:', e);
+    }
+  }, []);
+
   // Применение bitrate к PeerConnection
   const applyBitrateSettings = useCallback(async (pc, isMainVideo = false) => {
     const senders = pc.getSenders();
@@ -215,6 +283,220 @@ function GroupCallModal({
       }
     }
   }, [setBitrate]);
+
+  // ===== ADAPTIVE QUALITY (stats-driven) =====
+  useEffect(() => {
+    if (!isAdaptiveQualityEnabled) return;
+    if (callStatus !== 'active') return;
+    if (!localStreamRef.current) return;
+
+    let stopped = false;
+
+    const intervalId = setInterval(async () => {
+      if (stopped) return;
+
+      const pcEntries = Object.entries(peerConnectionsRef.current);
+      if (pcEntries.length === 0) return;
+
+      // Для capture-tier решения используем агрегат по всем peer'ам.
+      let worstRttMs = 0;
+      let worstJitterMs = 0;
+      let worstLoss = 0;
+      let minAvailOutKbps = Infinity;
+
+      const mainUserId = getMainUserId();
+      const participantCount = pcEntries.length + 1; // мы + количество peerConnections
+
+      for (const [oderId, pc] of pcEntries) {
+        if (!pc || pc.signalingState === 'closed') continue;
+
+        // Текущая базовая цель (на случай если stats недоступны).
+        const isMainPeer = !!mainUserId && oderId === mainUserId;
+        const baseMinKbps = isMainPeer ? 500 : 160;
+        const baseMaxKbps = isMainPeer
+          ? (participantCount <= 3 ? 2500 : participantCount <= 5 ? 1600 : 1100)
+          : (participantCount <= 3 ? 900 : participantCount <= 5 ? 650 : 450);
+        const baseMinFps = isMainPeer ? 15 : 10;
+        const baseMaxFps = isMainPeer ? 30 : 18;
+
+        const state = (qualityRef.current[oderId] ||= {
+          targetKbps: isMainPeer ? 650 : 250,
+          targetFps: isMainPeer ? 18 : 15,
+          lastJitterMs: null,
+          goodStreak: 0,
+          badStreak: 0,
+          lastAppliedAt: 0,
+        });
+
+        let rttMs = null;
+        let jitterMs = null;
+        let lossRatio = null;
+        let availOutKbps = null;
+
+        try {
+          const stats = await pc.getStats();
+
+          // 1) Candidate pair: доступная пропускная способность и RTT.
+          for (const rep of stats.values()) {
+            if (rep.type !== 'candidate-pair') continue;
+            const selected = rep.selected || rep.nominated;
+            if (!selected) continue;
+            if (rep.state && rep.state !== 'succeeded') continue;
+
+            if (typeof rep.currentRoundTripTime === 'number') {
+              rttMs = Math.round(rep.currentRoundTripTime * 1000);
+            }
+            if (typeof rep.availableOutgoingBitrate === 'number') {
+              availOutKbps = Math.round(rep.availableOutgoingBitrate / 1000);
+            }
+            break;
+          }
+
+          // 2) outbound-rtp video + remote-inbound-rtp video (RTT/jitter/loss глазами получателя).
+          let outboundVideoId = null;
+          for (const rep of stats.values()) {
+            if (rep.type === 'outbound-rtp' && (rep.kind === 'video' || rep.mediaType === 'video') && !rep.isRemote) {
+              outboundVideoId = rep.id;
+              break;
+            }
+          }
+
+          if (outboundVideoId) {
+            for (const rep of stats.values()) {
+              if (rep.type !== 'remote-inbound-rtp') continue;
+              if ((rep.kind !== 'video' && rep.mediaType !== 'video')) continue;
+              if (rep.localId && rep.localId !== outboundVideoId) continue;
+
+              if (typeof rep.roundTripTime === 'number') {
+                // remote-inbound RTT обычно точнее выбранной пары.
+                rttMs = Math.round(rep.roundTripTime * 1000);
+              }
+              if (typeof rep.jitter === 'number') {
+                jitterMs = Math.round(rep.jitter * 1000);
+              }
+              if (typeof rep.packetsLost === 'number' && typeof rep.packetsReceived === 'number') {
+                const total = rep.packetsLost + rep.packetsReceived;
+                if (total > 0) {
+                  lossRatio = rep.packetsLost / total;
+                }
+              }
+              break;
+            }
+          }
+        } catch (e) {
+          // getStats может падать на некоторых WebView.
+        }
+
+        // Fallback значений
+        if (rttMs == null) rttMs = 999;
+        if (jitterMs == null) jitterMs = state.lastJitterMs ?? 0;
+        if (lossRatio == null) lossRatio = 0;
+        if (availOutKbps == null) availOutKbps = 0;
+
+        // Агрегируем для capture-tier решения.
+        worstRttMs = Math.max(worstRttMs, rttMs);
+        worstJitterMs = Math.max(worstJitterMs, jitterMs);
+        worstLoss = Math.max(worstLoss, lossRatio);
+        if (availOutKbps > 0) minAvailOutKbps = Math.min(minAvailOutKbps, availOutKbps);
+
+        // Условие "хорошо" vs "плохо".
+        const jitterGrowth = state.lastJitterMs != null ? (jitterMs - state.lastJitterMs) : 0;
+        state.lastJitterMs = jitterMs;
+
+        const good =
+          availOutKbps >= Math.max(600, state.targetKbps * 2) &&
+          rttMs <= 140 &&
+          jitterMs <= 25 &&
+          jitterGrowth <= 6 &&
+          lossRatio <= 0.02;
+
+        const bad =
+          (availOutKbps > 0 && availOutKbps < Math.max(300, state.targetKbps * 1.1)) ||
+          rttMs >= 220 ||
+          jitterMs >= 45 ||
+          jitterGrowth >= 10 ||
+          lossRatio >= 0.05;
+
+        if (good) {
+          state.goodStreak += 1;
+          state.badStreak = 0;
+        } else if (bad) {
+          state.badStreak += 1;
+          state.goodStreak = 0;
+        } else {
+          // нейтрально: чуть затухаем, чтобы не залипать в streak
+          state.goodStreak = Math.max(0, state.goodStreak - 1);
+          state.badStreak = Math.max(0, state.badStreak - 1);
+        }
+
+        // Шаги изменения качества (плавно вверх, быстрее вниз).
+        const upStepKbps = isMainPeer ? 180 : 90;
+        const downStepKbps = isMainPeer ? 260 : 140;
+        const upStepFps = isMainPeer ? 2 : 1;
+        const downStepFps = isMainPeer ? 3 : 2;
+
+        if (state.goodStreak >= 2) {
+          state.targetKbps = Math.min(baseMaxKbps, state.targetKbps + upStepKbps);
+          state.targetFps = Math.min(baseMaxFps, state.targetFps + upStepFps);
+        } else if (state.badStreak >= 1) {
+          state.targetKbps = Math.max(baseMinKbps, state.targetKbps - downStepKbps);
+          state.targetFps = Math.max(baseMinFps, state.targetFps - downStepFps);
+        }
+
+        // Применяем caps к sender'у (outgoing).
+        const sender = getVideoSender(pc);
+        const now = Date.now();
+        if (now - state.lastAppliedAt >= 1800) {
+          state.lastAppliedAt = now;
+          await setSenderCapsIfChanged(sender, state.targetKbps, state.targetFps);
+        }
+      }
+
+      // ===== Capture SD ↔ HD =====
+      // Решаем по худшему peer'у (если хотя бы одному плохо — держим SD).
+      // И поднимаем только в маленьких группах, иначе mesh быстро съедает upload.
+      const canTryHd = (peerConnectionsRef.current && Object.keys(peerConnectionsRef.current).length + 1) <= 3;
+      const overallGood =
+        canTryHd &&
+        minAvailOutKbps !== Infinity &&
+        minAvailOutKbps >= 2500 &&
+        worstRttMs <= 120 &&
+        worstJitterMs <= 20 &&
+        worstLoss <= 0.02;
+
+      const overallBad =
+        !canTryHd ||
+        worstRttMs >= 220 ||
+        worstJitterMs >= 45 ||
+        worstLoss >= 0.05;
+
+      if (overallGood) {
+        captureGoodStreakRef.current += 1;
+        captureBadStreakRef.current = 0;
+      } else if (overallBad) {
+        captureBadStreakRef.current += 1;
+        captureGoodStreakRef.current = 0;
+      } else {
+        captureGoodStreakRef.current = Math.max(0, captureGoodStreakRef.current - 1);
+        captureBadStreakRef.current = Math.max(0, captureBadStreakRef.current - 1);
+      }
+
+      // Гистерезис: повышаем после ~7.5s стабильного good, понижаем после ~5s bad.
+      if (captureTierRef.current === 'sd' && captureGoodStreakRef.current >= 3) {
+        await applyCaptureTier('hd');
+        captureGoodStreakRef.current = 0;
+      }
+      if (captureTierRef.current === 'hd' && captureBadStreakRef.current >= 2) {
+        await applyCaptureTier('sd');
+        captureBadStreakRef.current = 0;
+      }
+    }, 2500);
+
+    return () => {
+      stopped = true;
+      clearInterval(intervalId);
+    };
+  }, [callStatus, isAdaptiveQualityEnabled, getMainUserId, getVideoSender, setSenderCapsIfChanged, applyCaptureTier]);
 
   // ===== ACTIVE SPEAKER DETECTION =====
   
