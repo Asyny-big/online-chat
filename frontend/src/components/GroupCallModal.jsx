@@ -553,6 +553,55 @@ function GroupCallModal({
     }
   }, [isIncoming, callStatus, startCall]);
 
+  // ===== CLEANUP =====
+  // ВАЖНО: cleanup должен быть объявлен ДО useEffect/socket handlers.
+  // Иначе ссылка на cleanup в dependency array попадает в TDZ и в production build падает
+  // с ошибкой вида: "Cannot access '<minified>' before initialization".
+  const cleanup = useCallback(() => {
+    // Останавливаем локальный поток
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => track.stop());
+      localStreamRef.current = null;
+    }
+    
+    // Останавливаем screen sharing
+    if (screenStream) {
+      screenStream.getTracks().forEach(track => track.stop());
+    }
+
+    // Закрываем все peer connections
+    Object.values(peerConnectionsRef.current).forEach(pc => {
+      pc.close();
+    });
+    peerConnectionsRef.current = {};
+    
+    // Останавливаем и очищаем все remote streams
+    remoteStreamsRef.current.forEach((stream) => {
+      stream.getTracks().forEach(track => track.stop());
+    });
+    remoteStreamsRef.current = new Map();
+
+    // Очищаем audio analysers
+    analysersRef.current = {};
+    
+    // Закрываем AudioContext
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+
+    // Останавливаем рингтон
+    if (ringtoneRef.current) {
+      ringtoneRef.current.pause();
+      ringtoneRef.current = null;
+    }
+    
+    // Очищаем таймеры
+    if (activeSpeakerTimerRef.current) {
+      clearTimeout(activeSpeakerTimerRef.current);
+    }
+  }, [screenStream]);
+
   // Socket обработчики
   useEffect(() => {
     if (!socket) return;
@@ -633,54 +682,6 @@ function GroupCallModal({
       socket.off('group-call:ended', handleCallEnded);
     };
   }, [socket, currentUserId, callStatus, handleSignal, onClose, cleanup, pinnedUserId]);
-
-  // ===== CLEANUP =====
-  
-  // Очистка ресурсов
-  const cleanup = useCallback(() => {
-    // Останавливаем локальный поток
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach(track => track.stop());
-      localStreamRef.current = null;
-    }
-    
-    // Останавливаем screen sharing
-    if (screenStream) {
-      screenStream.getTracks().forEach(track => track.stop());
-    }
-
-    // Закрываем все peer connections
-    Object.values(peerConnectionsRef.current).forEach(pc => {
-      pc.close();
-    });
-    peerConnectionsRef.current = {};
-    
-    // Останавливаем и очищаем все remote streams
-    remoteStreamsRef.current.forEach((stream) => {
-      stream.getTracks().forEach(track => track.stop());
-    });
-    remoteStreamsRef.current = new Map();
-
-    // Очищаем audio analysers
-    analysersRef.current = {};
-    
-    // Закрываем AudioContext
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
-    }
-
-    // Останавливаем рингтон
-    if (ringtoneRef.current) {
-      ringtoneRef.current.pause();
-      ringtoneRef.current = null;
-    }
-    
-    // Очищаем таймеры
-    if (activeSpeakerTimerRef.current) {
-      clearTimeout(activeSpeakerTimerRef.current);
-    }
-  }, [screenStream]);
 
   // Завершение звонка
   const handleEndCall = useCallback(() => {
