@@ -300,7 +300,7 @@ function GroupCallModal({
         localPreviewVideoRef.current.srcObject = localStream;
       }
     }
-  }, [localStream, isLocalMain]);
+  }, [localStream, streamUpdateCounter]); // используем streamUpdateCounter для триггера ререндера вместо isLocalMain
 
   // ===== PEER CONNECTION =====
   
