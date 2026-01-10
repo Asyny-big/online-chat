@@ -87,6 +87,7 @@ function GroupCallModal({
   const captureGoodStreakRef = useRef(0);
   const captureBadStreakRef = useRef(0);
   const ringtoneRef = useRef(null);
+  const leaveSentRef = useRef(false);
   const callIdRef = useRef(callId);
   const localStreamRef = useRef(null); // Локальный поток - ОТДЕЛЬНО от remoteStreamsRef
   
@@ -1216,10 +1217,32 @@ function GroupCallModal({
 
   // Завершение звонка
   const handleEndCall = useCallback(() => {
-    socket.emit('group-call:leave', { callId: callIdRef.current });
+    if (!leaveSentRef.current) {
+      leaveSentRef.current = true;
+      socket.emit('group-call:leave', { callId: callIdRef.current });
+    }
     cleanup();
     onClose();
   }, [socket, cleanup, onClose]);
+
+  // Если модалка закрывается/размонтируется не через кнопку "Выйти",
+  // всё равно сообщаем серверу что пользователь покинул звонок.
+  useEffect(() => {
+    return () => {
+      try {
+        const cid = callIdRef.current;
+        if (!cid) return;
+        if (leaveSentRef.current) return;
+
+        // Шлём leave только если реально были в процессе звонка
+        // (иначе при неудачном getUserMedia будет лишний запрос, но он безопасен).
+        leaveSentRef.current = true;
+        socket.emit('group-call:leave', { callId: cid });
+      } catch (e) {
+        // no-op
+      }
+    };
+  }, [socket]);
 
   // Отклонение входящего звонка
   const handleDecline = useCallback(() => {

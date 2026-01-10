@@ -9,6 +9,70 @@ const userSockets = new Map();
 const activeCalls = new Map();
 const activeGroupCalls = new Map(); // chatId -> { callId, type, participants:Set<userId> }
 
+async function forceLeaveUserFromCall({ io, userId, call }) {
+  // Помечаем пользователя вышедшим из звонка (на случай закрытия вкладки/потери сети)
+  let changed = false;
+  call.participants.forEach((p) => {
+    if (p.user?.toString?.() === userId && !p.leftAt) {
+      p.leftAt = new Date();
+      changed = true;
+    }
+  });
+  if (!changed) return;
+
+  const chat = await Chat.findById(call.chat).select('_id type');
+  if (!chat) {
+    await call.save();
+    return;
+  }
+
+  const stillIn = call.participants.filter(p => !p.leftAt);
+
+  if (chat.type === 'group') {
+    if (stillIn.length <= 0) {
+      call.status = 'ended';
+      call.endedAt = new Date();
+      call.endReason = 'completed';
+      activeGroupCalls.delete(chat._id.toString());
+    }
+    await call.save();
+
+    io.to(`chat:${chat._id}`).emit('group-call:participant-left', {
+      callId: call._id.toString(),
+      chatId: chat._id.toString(),
+      oderId: userId
+    });
+
+    if (call.status === 'ended') {
+      io.to(`chat:${chat._id}`).emit('group-call:ended', {
+        callId: call._id.toString(),
+        chatId: chat._id.toString(),
+        reason: 'completed'
+      });
+    } else {
+      io.to(`chat:${chat._id}`).emit('group-call:updated', {
+        callId: call._id.toString(),
+        chatId: chat._id.toString(),
+        participantCount: stillIn.length
+      });
+    }
+  } else {
+    if (stillIn.length <= 1) {
+      call.status = 'ended';
+      call.endedAt = new Date();
+      call.endReason = 'completed';
+      activeCalls.delete(chat._id.toString());
+    }
+    await call.save();
+
+    io.to(`chat:${chat._id}`).emit('call:participant_left', {
+      callId: call._id.toString(),
+      userId,
+      callEnded: call.status === 'ended'
+    });
+  }
+}
+
 module.exports = function(io) {
   // Авторизация сокетов
   io.use(async (socket, next) => {
@@ -575,6 +639,22 @@ module.exports = function(io) {
         sockets.delete(socket.id);
         if (sockets.size === 0) {
           userSockets.delete(userId);
+
+          // ВАЖНО: если пользователь потерял соединение/закрыл вкладку во время звонка,
+          // нужно принудительно вывести его из активных звонков, иначе Call остаётся active
+          // и при повторной попытке сервер отвечает already_active.
+          try {
+            const activeUserCalls = await Call.find({
+              status: { $in: ['ringing', 'active'] },
+              participants: { $elemMatch: { user: userId, leftAt: null } }
+            });
+
+            for (const call of activeUserCalls) {
+              await forceLeaveUserFromCall({ io, userId, call });
+            }
+          } catch (err) {
+            console.error('[Socket] disconnect cleanup error:', err);
+          }
           
           await User.findByIdAndUpdate(userId, {
             status: 'offline',
