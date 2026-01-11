@@ -90,6 +90,9 @@ function GroupCallModal({
   const leaveSentRef = useRef(false);
   const callIdRef = useRef(callId);
   const localStreamRef = useRef(null); // Локальный поток - ОТДЕЛЬНО от remoteStreamsRef
+  const screenStreamRef = useRef(null);
+  const isScreenSharingRef = useRef(false);
+  const videoOffBeforeScreenRef = useRef(null);
   
   // Active speaker detection refs
   const audioContextRef = useRef(null);
@@ -97,6 +100,14 @@ function GroupCallModal({
   const activeSpeakerTimerRef = useRef(null);
   const lastActiveSpeakerRef = useRef(null);
   const lastMainUserIdRef = useRef(null);
+
+  useEffect(() => {
+    isScreenSharingRef.current = isScreenSharing;
+  }, [isScreenSharing]);
+
+  useEffect(() => {
+    screenStreamRef.current = screenStream;
+  }, [screenStream]);
 
   // Добавление ICE кандидатов откладываем до момента, когда remoteDescription уже установлен.
   // Почему так: addIceCandidate() с remoteDescription === null кидает InvalidStateError.
@@ -751,14 +762,15 @@ function GroupCallModal({
 
   // Синхронизация localStream с video refs при изменении layout
   useEffect(() => {
-    if (localStream) {
+    const streamToShow = (isScreenSharing && screenStream) ? screenStream : localStream;
+    if (streamToShow) {
       // ВАЖНО: не проверяем "!srcObject".
       // После swap может остаться старый srcObject или paused state —
       // поэтому каждый раз переустанавливаем и вызываем play().
-      attachStreamToVideo(localVideoRef.current, localStream, { muted: true });
-      attachStreamToVideo(localPreviewVideoRef.current, localStream, { muted: true });
+      attachStreamToVideo(localVideoRef.current, streamToShow, { muted: true });
+      attachStreamToVideo(localPreviewVideoRef.current, streamToShow, { muted: true });
     }
-  }, [localStream, streamUpdateCounter, pinnedUserId, attachStreamToVideo]);
+  }, [localStream, screenStream, isScreenSharing, streamUpdateCounter, pinnedUserId, attachStreamToVideo]);
 
   // ===== PEER CONNECTION =====
   
@@ -782,11 +794,34 @@ function GroupCallModal({
     pcMetaRef.current[oderId] = pcMetaRef.current[oderId] || { isInitiator: !!isInitiator };
     pcMetaRef.current[oderId].isInitiator = !!isInitiator;
 
-    // Добавляем локальные треки
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach(track => {
-        pc.addTrack(track, localStreamRef.current);
-      });
+    // Добавляем локальные треки.
+    // ВАЖНО: для screen share нам нужен video sender даже в audio-call.
+    // Поэтому если локального видеотрека нет — создаём video transceiver заранее,
+    // чтобы потом можно было сделать sender.replaceTrack(screenTrack) без renegotiation.
+    const localStream = localStreamRef.current;
+    const localAudioTracks = localStream?.getAudioTracks?.() || [];
+    localAudioTracks.forEach((track) => {
+      try { pc.addTrack(track, localStream); } catch (e) {}
+    });
+
+    const screenTrack = screenStreamRef.current?.getVideoTracks?.()?.[0] || null;
+    const cameraTrack = localStream?.getVideoTracks?.()?.[0] || null;
+    const outgoingVideoTrack = (isScreenSharingRef.current && screenTrack) ? screenTrack : cameraTrack;
+    const outgoingVideoStream = (isScreenSharingRef.current && screenStreamRef.current && screenTrack)
+      ? screenStreamRef.current
+      : localStream;
+
+    if (outgoingVideoTrack) {
+      try { pc.addTrack(outgoingVideoTrack, outgoingVideoStream || localStream); } catch (e) {}
+    } else {
+      try {
+        const vt = pc.addTransceiver('video', { direction: 'sendrecv' });
+        pcMetaRef.current[oderId] = pcMetaRef.current[oderId] || { isInitiator: !!isInitiator };
+        pcMetaRef.current[oderId].videoTransceiver = vt;
+      } catch (e) {
+        // Браузер не поддерживает transceiver API — screen share в audio-call не будет работать,
+        // но video-call остаётся штатным.
+      }
     }
 
     // Применяем начальные bitrate настройки (preview quality)
@@ -877,7 +912,7 @@ function GroupCallModal({
     peerConnectionsRef.current[oderId] = pc;
 
     return pc;
-  }, [iceServers, socket, applyBitrateSettings, setupAudioAnalyser, restartIceIfNeeded]);
+  }, [iceServers, socket, applyBitrateSettings, setupAudioAnalyser, restartIceIfNeeded, callType]);
 
   // ===== BITRATE OPTIMIZATION =====
   
@@ -1275,67 +1310,159 @@ function GroupCallModal({
     }
   }, []);
 
+  const getVideoSenderForPc = useCallback((oderId, pc) => {
+    if (!pc) return null;
+    try {
+      // 1) Обычный кейс: sender уже имеет video track
+      const sender = pc.getSenders?.().find(s => s.track?.kind === 'video');
+      if (sender) return sender;
+
+      // 2) Audio-call: есть transceiver с video sender, но track ещё null
+      const meta = pcMetaRef.current?.[oderId];
+      const mt = meta?.videoTransceiver;
+      if (mt?.sender) return mt.sender;
+
+      // 3) Фолбэк: попробуем найти video transceiver по receiver.track.kind
+      const tr = pc.getTransceivers?.()?.find(t => t?.receiver?.track?.kind === 'video');
+      return tr?.sender || null;
+    } catch (e) {
+      return null;
+    }
+  }, []);
+
+  const stopScreenShare = useCallback(async () => {
+    if (!isScreenSharingRef.current) return;
+
+    const stream = screenStreamRef.current;
+    try {
+      stream?.getTracks?.()?.forEach(t => {
+        try { t.stop(); } catch (e) {}
+      });
+    } catch (e) {}
+
+    screenStreamRef.current = null;
+    setScreenStream(null);
+
+    // Возвращаем исходящий видеотрек.
+    // В video-call — на камеру (если есть). В audio-call — убираем видео (null).
+    const restoreTrack = callType === 'audio'
+      ? null
+      : (localStreamRef.current?.getVideoTracks?.()?.[0] || null);
+
+    const pcs = peerConnectionsRef.current;
+    await Promise.all(Object.entries(pcs).map(async ([oderId, pc]) => {
+      const sender = getVideoSenderForPc(oderId, pc);
+      if (!sender) return;
+      try {
+        await sender.replaceTrack(restoreTrack);
+      } catch (e) {
+        console.warn('[GroupCall] Failed to restore video track:', e);
+      }
+    }));
+
+    isScreenSharingRef.current = false;
+    setIsScreenSharing(false);
+
+    // Восстанавливаем UI-состояние видео.
+    if (videoOffBeforeScreenRef.current !== null) {
+      setIsVideoOff(!!videoOffBeforeScreenRef.current);
+      videoOffBeforeScreenRef.current = null;
+    } else if (callType === 'audio') {
+      setIsVideoOff(true);
+    }
+
+    try {
+      socket.emit('group-call:screen-share', {
+        callId: callIdRef.current,
+        isSharing: false
+      });
+    } catch (e) {}
+  }, [socket, callType, getVideoSenderForPc]);
+
+  const startScreenShare = useCallback(async () => {
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      alert('Демонстрация экрана не поддерживается в этом браузере');
+      return;
+    }
+
+    // На некоторых окружениях (не HTTPS) getDisplayMedia будет запрещён.
+    // Камера/микрофон могли работать на localhost, но на IP/домене без HTTPS — нет.
+    if (!window.isSecureContext) {
+      console.warn('[GroupCall] getDisplayMedia требует HTTPS (или localhost)');
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          cursor: 'always',
+          frameRate: { ideal: 15, max: 30 }
+        },
+        audio: false
+      });
+
+      const screenTrack = stream.getVideoTracks?.()?.[0] || null;
+      if (!screenTrack) {
+        stream.getTracks?.()?.forEach(t => { try { t.stop(); } catch (e) {} });
+        throw new Error('Не удалось получить video track для демонстрации');
+      }
+
+      // Подсказка оптимизации кодеку (не везде поддерживается)
+      try {
+        if ('contentHint' in screenTrack) {
+          screenTrack.contentHint = 'detail';
+        }
+      } catch (e) {}
+
+      // Запоминаем текущий UI-режим видео, чтобы корректно восстановить после stop.
+      if (videoOffBeforeScreenRef.current === null) {
+        videoOffBeforeScreenRef.current = isVideoOff;
+      }
+
+      screenStreamRef.current = stream;
+      setScreenStream(stream);
+      isScreenSharingRef.current = true;
+      setIsScreenSharing(true);
+
+      // Когда шэрим экран — локально «видео включено», иначе UI прячет <video>.
+      setIsVideoOff(false);
+
+      // Заменяем video sender во всех соединениях
+      const pcs = peerConnectionsRef.current;
+      await Promise.all(Object.entries(pcs).map(async ([oderId, pc]) => {
+        const sender = getVideoSenderForPc(oderId, pc);
+        if (!sender) return;
+        try {
+          await sender.replaceTrack(screenTrack);
+        } catch (e) {
+          console.warn('[GroupCall] Failed to replaceTrack(screen):', e);
+        }
+      }));
+
+      // Пользователь остановил демонстрацию в системном UI браузера
+      screenTrack.onended = () => {
+        stopScreenShare();
+      };
+
+      try {
+        socket.emit('group-call:screen-share', {
+          callId: callIdRef.current,
+          isSharing: true
+        });
+      } catch (e) {}
+    } catch (err) {
+      console.error('[GroupCall] Screen share error:', err);
+      alert('Не удалось запустить демонстрацию экрана. Проверьте, что сайт открыт по HTTPS (или localhost) и вы дали разрешение.');
+    }
+  }, [socket, getVideoSenderForPc, stopScreenShare, isVideoOff]);
+
   // Screen sharing
   const toggleScreenShare = useCallback(async () => {
-    if (isScreenSharing) {
-      // Останавливаем screen sharing
-      if (screenStream) {
-        screenStream.getTracks().forEach(track => track.stop());
-        setScreenStream(null);
-      }
-      
-      // Возвращаем видео с камеры
-      if (localStreamRef.current) {
-        const videoTrack = localStreamRef.current.getVideoTracks()[0];
-        if (videoTrack) {
-          Object.values(peerConnectionsRef.current).forEach(pc => {
-            const sender = pc.getSenders().find(s => s.track?.kind === 'video');
-            if (sender) {
-              sender.replaceTrack(videoTrack);
-            }
-          });
-        }
-      }
-      
-      setIsScreenSharing(false);
-      socket.emit('group-call:screen-share', { 
-        callId: callIdRef.current, 
-        isSharing: false 
-      });
+    if (isScreenSharingRef.current) {
+      await stopScreenShare();
     } else {
-      // Начинаем screen sharing
-      try {
-        const stream = await navigator.mediaDevices.getDisplayMedia({
-          video: { cursor: 'always' },
-          audio: false
-        });
-        
-        setScreenStream(stream);
-        const screenTrack = stream.getVideoTracks()[0];
-        
-        // Заменяем видео трек во всех соединениях
-        Object.values(peerConnectionsRef.current).forEach(pc => {
-          const sender = pc.getSenders().find(s => s.track?.kind === 'video');
-          if (sender) {
-            sender.replaceTrack(screenTrack);
-          }
-        });
-        
-        // Обработка завершения screen sharing пользователем
-        screenTrack.onended = () => {
-          toggleScreenShare();
-        };
-        
-        setIsScreenSharing(true);
-        socket.emit('group-call:screen-share', { 
-          callId: callIdRef.current, 
-          isSharing: true 
-        });
-      } catch (err) {
-        console.error('[GroupCall] Screen share error:', err);
-      }
+      await startScreenShare();
     }
-  }, [isScreenSharing, screenStream, socket]);
+  }, [startScreenShare, stopScreenShare]);
 
   // Cleanup при unmount
   useEffect(() => {
