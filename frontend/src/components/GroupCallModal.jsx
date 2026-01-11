@@ -1132,8 +1132,13 @@ function GroupCallModal({
     }
     
     // Останавливаем screen sharing
-    if (screenStream) {
-      screenStream.getTracks().forEach(track => track.stop());
+    if (screenStreamRef.current) {
+      try {
+        screenStreamRef.current.getTracks().forEach(track => track.stop());
+      } catch (e) {
+        // no-op
+      }
+      screenStreamRef.current = null;
     }
 
     // Закрываем все peer connections
@@ -1167,7 +1172,7 @@ function GroupCallModal({
     if (activeSpeakerTimerRef.current) {
       clearTimeout(activeSpeakerTimerRef.current);
     }
-  }, [screenStream]);
+  }, []);
 
   // Socket обработчики
   useEffect(() => {
@@ -1333,16 +1338,6 @@ function GroupCallModal({
   const stopScreenShare = useCallback(async () => {
     if (!isScreenSharingRef.current) return;
 
-    const stream = screenStreamRef.current;
-    try {
-      stream?.getTracks?.()?.forEach(t => {
-        try { t.stop(); } catch (e) {}
-      });
-    } catch (e) {}
-
-    screenStreamRef.current = null;
-    setScreenStream(null);
-
     // Возвращаем исходящий видеотрек.
     // В video-call — на камеру (если есть). В audio-call — убираем видео (null).
     const restoreTrack = callType === 'audio'
@@ -1359,6 +1354,17 @@ function GroupCallModal({
         console.warn('[GroupCall] Failed to restore video track:', e);
       }
     }));
+
+    // Теперь безопасно останавливаем демонстрацию (чтобы sender не остался на ended-треке)
+    const stream = screenStreamRef.current;
+    try {
+      stream?.getTracks?.()?.forEach(t => {
+        try { t.stop(); } catch (e) {}
+      });
+    } catch (e) {}
+
+    screenStreamRef.current = null;
+    setScreenStream(null);
 
     isScreenSharingRef.current = false;
     setIsScreenSharing(false);
