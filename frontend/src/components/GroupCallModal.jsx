@@ -45,8 +45,6 @@ function GroupCallModal({
   const [localStream, setLocalStream] = useState(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(callType === 'audio');
-  const [isScreenSharing, setIsScreenSharing] = useState(false);
-  const [screenStream, setScreenStream] = useState(null);
   // ВАЖНО: backend отдаёт не только iceServers, но и iceCandidatePoolSize.
   // Для ускорения первого подключения нам нужно иметь этот конфиг ДО создания RTCPeerConnection.
   const [iceServers, setIceServers] = useState([]);
@@ -90,9 +88,6 @@ function GroupCallModal({
   const leaveSentRef = useRef(false);
   const callIdRef = useRef(callId);
   const localStreamRef = useRef(null); // Локальный поток - ОТДЕЛЬНО от remoteStreamsRef
-  const screenStreamRef = useRef(null);
-  const isScreenSharingRef = useRef(false);
-  const videoOffBeforeScreenRef = useRef(null);
   
   // Active speaker detection refs
   const audioContextRef = useRef(null);
@@ -104,14 +99,6 @@ function GroupCallModal({
   const pendingPlayElementsRef = useRef(new Set());
   const pendingPeersToConnectRef = useRef(new Set());
   const [capacityWarning, setCapacityWarning] = useState(null);
-
-  useEffect(() => {
-    isScreenSharingRef.current = isScreenSharing;
-  }, [isScreenSharing]);
-
-  useEffect(() => {
-    screenStreamRef.current = screenStream;
-  }, [screenStream]);
 
   // Добавление ICE кандидатов откладываем до момента, когда remoteDescription уже установлен.
   // Почему так: addIceCandidate() с remoteDescription === null кидает InvalidStateError.
@@ -197,38 +184,9 @@ function GroupCallModal({
   }, [retryPendingPlays, tryPlayElement]);
 
   const restartIceIfNeeded = useCallback(async (oderId) => {
-    // В стабильном mesh режиме не делаем auto iceRestart без явного согласования.
-    return;
-
-    const pc = peerConnectionsRef.current[oderId];
-    if (!pc || pc.signalingState === 'closed') return;
-
-    const meta = pcMetaRef.current[oderId];
-    if (!meta?.isInitiator) return; // ICE-restart инициирует только сторона, которая шлёт offer.
-
-    const now = Date.now();
-    const last = meta.lastIceRestartAt || 0;
-    if (now - last < 8000) return; // backoff, чтобы не зациклиться
-    meta.lastIceRestartAt = now;
-
-    try {
-      // ICE restart = новый offer с флагом iceRestart.
-      const offer = await pc.createOffer({ iceRestart: true });
-      await pc.setLocalDescription(offer);
-
-      socket.emit('group-call:signal', {
-        callId: callIdRef.current,
-        oderId,
-        signal: {
-          type: 'offer',
-          sdp: pc.localDescription,
-          iceRestart: true
-        }
-      });
-      console.log('[GroupCall] Sent ICE-restart offer to:', oderId);
-    } catch (err) {
-      console.warn('[GroupCall] ICE restart failed:', err);
-    }
+    // iceRestart запрещён для этой реализации.
+    // Оставлено как no-op для совместимости вызовов.
+    void oderId;
   }, [socket]);
 
   // ===== UTILITY FUNCTIONS =====
@@ -826,7 +784,7 @@ function GroupCallModal({
 
   // Синхронизация localStream с video refs при изменении layout
   useEffect(() => {
-    const streamToShow = (isScreenSharing && screenStream) ? screenStream : localStream;
+    const streamToShow = localStream;
     if (streamToShow) {
       // ВАЖНО: не проверяем "!srcObject".
       // После swap может остаться старый srcObject или paused state —
@@ -834,7 +792,7 @@ function GroupCallModal({
       attachStreamToVideo(localVideoRef.current, streamToShow, { muted: true });
       attachStreamToVideo(localPreviewVideoRef.current, streamToShow, { muted: true });
     }
-  }, [localStream, screenStream, isScreenSharing, streamUpdateCounter, pinnedUserId, attachStreamToVideo]);
+  }, [localStream, streamUpdateCounter, pinnedUserId, attachStreamToVideo]);
 
   // ===== PEER CONNECTION =====
 
@@ -843,12 +801,14 @@ function GroupCallModal({
   // - initiator: только одна сторона пары шлёт initial offer
   const isPolitePeer = useCallback((remoteUserId) => {
     if (!currentUserId || !remoteUserId) return true;
-    return String(currentUserId).localeCompare(String(remoteUserId)) > 0;
+    return String(currentUserId).localeCompare(String(remoteUserId)) < 0;
   }, [currentUserId]);
 
   const shouldInitiateOffer = useCallback((remoteUserId) => {
     if (!currentUserId || !remoteUserId) return false;
-    return String(currentUserId).localeCompare(String(remoteUserId)) < 0;
+    // Только одна сторона пары должна инициировать initial offer.
+    // При polite = current < remote, инициатором будет сторона current > remote.
+    return String(currentUserId).localeCompare(String(remoteUserId)) > 0;
   }, [currentUserId]);
   
   // Создание PeerConnection для участника
@@ -970,12 +930,6 @@ function GroupCallModal({
           remoteStream.addTrack(track);
           console.log('[GroupCall] Added track to stream:', oderId, track.kind);
         }
-        
-        // Обработка удаления трека
-        track.onended = () => {
-          console.log('[GroupCall] Track ended:', oderId, track.kind);
-          remoteStream.removeTrack(track);
-        };
       }
       
       // Настраиваем анализатор аудио (только один раз для audio)
@@ -1022,8 +976,8 @@ function GroupCallModal({
     if (!oderId || oderId === currentUserId) return;
 
     // Ограничение mesh до 5 участников (включая себя)
-    const activeRemoteCount = remoteStreamsRef.current.size;
-    if ((activeRemoteCount + 1) > 5) {
+    const projectedTotal = Object.keys(peerConnectionsRef.current).length + 2; // existing remotes + new + self
+    if (projectedTotal > 5) {
       setCapacityWarning('Лимит mesh: максимум 5 участников.');
       return;
     }
@@ -1232,21 +1186,9 @@ function GroupCallModal({
   // Иначе ссылка на cleanup в dependency array попадает в TDZ и в production build падает
   // с ошибкой вида: "Cannot access '<minified>' before initialization".
   const cleanup = useCallback(() => {
-    // Останавливаем локальный поток
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach(track => track.stop());
-      localStreamRef.current = null;
-    }
-    
-    // Останавливаем screen sharing
-    if (screenStreamRef.current) {
-      try {
-        screenStreamRef.current.getTracks().forEach(track => track.stop());
-      } catch (e) {
-        // no-op
-      }
-      screenStreamRef.current = null;
-    }
+    // ВАЖНО: по требованиям НЕ трогаем tracks (stop/remove/replace) —
+    // просто закрываем PC и очищаем ссылки.
+    localStreamRef.current = null;
 
     // Закрываем все peer connections
     Object.values(peerConnectionsRef.current).forEach(pc => {
@@ -1254,10 +1196,7 @@ function GroupCallModal({
     });
     peerConnectionsRef.current = {};
     
-    // Останавливаем и очищаем все remote streams
-    remoteStreamsRef.current.forEach((stream) => {
-      stream.getTracks().forEach(track => track.stop());
-    });
+    // Очищаем все remote streams (без stop())
     remoteStreamsRef.current = new Map();
 
     // Очищаем audio analysers
@@ -1324,7 +1263,6 @@ function GroupCallModal({
       // Удаляем stream
       const stream = remoteStreamsRef.current.get(oderId);
       if (stream) {
-        stream.getTracks().forEach(track => track.stop());
         remoteStreamsRef.current.delete(oderId);
       }
       
@@ -1452,136 +1390,7 @@ function GroupCallModal({
     }
   }, []);
 
-  const stopScreenShare = useCallback(async () => {
-    if (!isScreenSharingRef.current) return;
-
-    // Возвращаем исходящий видеотрек.
-    // В video-call — на камеру (если есть). В audio-call — убираем видео (null).
-    const restoreTrack = callType === 'audio'
-      ? null
-      : (localStreamRef.current?.getVideoTracks?.()?.[0] || null);
-
-    const pcs = peerConnectionsRef.current;
-    await Promise.all(Object.entries(pcs).map(async ([oderId, pc]) => {
-      const sender = getVideoSenderForPc(oderId, pc);
-      if (!sender) return;
-      try {
-        await sender.replaceTrack(restoreTrack);
-      } catch (e) {
-        console.warn('[GroupCall] Failed to restore video track:', e);
-      }
-    }));
-
-    // Теперь безопасно останавливаем демонстрацию (чтобы sender не остался на ended-треке)
-    const stream = screenStreamRef.current;
-    try {
-      stream?.getTracks?.()?.forEach(t => {
-        try { t.stop(); } catch (e) {}
-      });
-    } catch (e) {}
-
-    screenStreamRef.current = null;
-    setScreenStream(null);
-
-    isScreenSharingRef.current = false;
-    setIsScreenSharing(false);
-
-    // Восстанавливаем UI-состояние видео.
-    if (videoOffBeforeScreenRef.current !== null) {
-      setIsVideoOff(!!videoOffBeforeScreenRef.current);
-      videoOffBeforeScreenRef.current = null;
-    } else if (callType === 'audio') {
-      setIsVideoOff(true);
-    }
-
-    try {
-      socket.emit('group-call:screen-share', {
-        callId: callIdRef.current,
-        isSharing: false
-      });
-    } catch (e) {}
-  }, [socket, callType, getVideoSenderForPc]);
-
-  const startScreenShare = useCallback(async () => {
-    if (!navigator.mediaDevices?.getDisplayMedia) {
-      alert('Демонстрация экрана не поддерживается в этом браузере');
-      return;
-    }
-
-    // На некоторых окружениях (не HTTPS) getDisplayMedia будет запрещён.
-    // Камера/микрофон могли работать на localhost, но на IP/домене без HTTPS — нет.
-    if (!window.isSecureContext) {
-      console.warn('[GroupCall] getDisplayMedia требует HTTPS (или localhost)');
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: {
-          cursor: 'always',
-          frameRate: { ideal: 15, max: 30 }
-        },
-        audio: false
-      });
-
-      const screenTrack = stream.getVideoTracks?.()?.[0] || null;
-      if (!screenTrack) {
-        stream.getTracks?.()?.forEach(t => { try { t.stop(); } catch (e) {} });
-        throw new Error('Не удалось получить video track для демонстрации');
-      }
-
-      // Подсказка оптимизации кодеку (не везде поддерживается)
-      try {
-        if ('contentHint' in screenTrack) {
-          screenTrack.contentHint = 'detail';
-        }
-      } catch (e) {}
-
-      // Запоминаем текущий UI-режим видео, чтобы корректно восстановить после stop.
-      if (videoOffBeforeScreenRef.current === null) {
-        videoOffBeforeScreenRef.current = isVideoOff;
-      }
-
-      screenStreamRef.current = stream;
-      setScreenStream(stream);
-      isScreenSharingRef.current = true;
-      setIsScreenSharing(true);
-
-      // Когда шэрим экран — локально «видео включено», иначе UI прячет <video>.
-      setIsVideoOff(false);
-
-      // Заменяем video sender во всех соединениях
-      const pcs = peerConnectionsRef.current;
-      await Promise.all(Object.entries(pcs).map(async ([oderId, pc]) => {
-        const sender = getVideoSenderForPc(oderId, pc);
-        if (!sender) return;
-        try {
-          await sender.replaceTrack(screenTrack);
-        } catch (e) {
-          console.warn('[GroupCall] Failed to replaceTrack(screen):', e);
-        }
-      }));
-
-      // Пользователь остановил демонстрацию в системном UI браузера
-      screenTrack.onended = () => {
-        stopScreenShare();
-      };
-
-      try {
-        socket.emit('group-call:screen-share', {
-          callId: callIdRef.current,
-          isSharing: true
-        });
-      } catch (e) {}
-    } catch (err) {
-      console.error('[GroupCall] Screen share error:', err);
-      alert('Не удалось запустить демонстрацию экрана. Проверьте, что сайт открыт по HTTPS (или localhost) и вы дали разрешение.');
-    }
-  }, [socket, getVideoSenderForPc, stopScreenShare, isVideoOff]);
-
-  // Screen sharing
-  const toggleScreenShare = useCallback(async () => {
-    alert('Демонстрация экрана временно отключена для стабильного mesh WebRTC (без replaceTrack/renegotiation).');
-  }, []);
+  // Screen sharing removed: strict mesh mode forbids getDisplayMedia/replaceTrack.
 
   // Cleanup при unmount
   useEffect(() => {
@@ -1726,9 +1535,7 @@ function GroupCallModal({
                   <p style={styles.mainVideoName}>Вы</p>
                 </div>
               )}
-              <div style={styles.mainVideoLabel}>
-                Вы {isScreenSharing && '(Демонстрация экрана)'}
-              </div>
+              <div style={styles.mainVideoLabel}>Вы</div>
               {isMuted && <div style={styles.mainMutedIndicator}>🔇</div>}
             </div>
           ) : mainRemoteStream && mainParticipant ? (
@@ -1780,9 +1587,7 @@ function GroupCallModal({
                   <p style={styles.mainVideoName}>Вы</p>
                 </div>
               )}
-              <div style={styles.mainVideoLabel}>
-                Вы {isScreenSharing && '(Демонстрация экрана)'}
-              </div>
+              <div style={styles.mainVideoLabel}>Вы</div>
               {isMuted && <div style={styles.mainMutedIndicator}>🔇</div>}
             </div>
           )}
@@ -1888,22 +1693,6 @@ function GroupCallModal({
               title={isVideoOff ? 'Включить камеру' : 'Выключить камеру'}
             >
               {isVideoOff ? '📵' : '📹'}
-            </button>
-          )}
-
-          {callType === 'video' && (
-            <button
-              onClick={toggleScreenShare}
-              disabled
-              style={{
-                ...styles.controlBtn,
-                opacity: 0.5,
-                cursor: 'not-allowed',
-                ...(isScreenSharing ? styles.controlBtnScreen : {})
-              }}
-              title={'Демонстрация экрана отключена для стабильного mesh'}
-            >
-              🖥️
             </button>
           )}
 
