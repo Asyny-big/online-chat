@@ -76,7 +76,7 @@ function GroupCallModal({
   const peerConnectionsRef = useRef({}); // { oderId: RTCPeerConnection }
   const remoteStreamsRef = useRef(new Map()); // Map<oderId, MediaStream> - remote ТОЛЬКО
   const pendingCandidatesRef = useRef({}); // { oderId: ICECandidate[] }
-  const pcMetaRef = useRef({}); // { oderId: { isInitiator: boolean, lastIceRestartAt?: number } }
+  const pcMetaRef = useRef({}); // { oderId: { isInitiator?: boolean, isPolite?: boolean, shouldInitiate?: boolean, isMakingOffer?: boolean, ignoreOffer?: boolean } }
   const qualityRef = useRef({});
   // qualityRef.current[oderId] = {
   //   targetKbps, targetFps,
@@ -100,6 +100,10 @@ function GroupCallModal({
   const activeSpeakerTimerRef = useRef(null);
   const lastActiveSpeakerRef = useRef(null);
   const lastMainUserIdRef = useRef(null);
+  const mediaUnlockedRef = useRef(false);
+  const pendingPlayElementsRef = useRef(new Set());
+  const pendingPeersToConnectRef = useRef(new Set());
+  const [capacityWarning, setCapacityWarning] = useState(null);
 
   useEffect(() => {
     isScreenSharingRef.current = isScreenSharing;
@@ -141,7 +145,61 @@ function GroupCallModal({
     }
   }, []);
 
+  const tryPlayElement = useCallback((el) => {
+    if (!el) return;
+    try {
+      const p = el.play?.();
+      if (p && typeof p.catch === 'function') {
+        p.catch((err) => {
+          if (err?.name === 'NotAllowedError') {
+            pendingPlayElementsRef.current.add(el);
+          }
+        });
+      }
+    } catch (e) {
+      // no-op
+    }
+  }, []);
+
+  const retryPendingPlays = useCallback(() => {
+    const els = Array.from(pendingPlayElementsRef.current);
+    pendingPlayElementsRef.current.clear();
+    els.forEach((el) => tryPlayElement(el));
+  }, [tryPlayElement]);
+
+  // ВАЖНО: вызывать только из user gesture (Join/Accept/Start/клик по модалке),
+  // иначе браузер может заблокировать resume/play.
+  const unlockMediaPlayback = useCallback(async () => {
+    mediaUnlockedRef.current = true;
+
+    if (!audioContextRef.current) {
+      try {
+        audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
+      } catch (e) {
+        // no-op
+      }
+    }
+
+    try {
+      if (audioContextRef.current?.state === 'suspended') {
+        await audioContextRef.current.resume();
+      }
+    } catch (e) {
+      // Может быть заблокировано, если не из клика
+    }
+
+    // Пробуем «разбудить» все video/audio элементы на странице.
+    try {
+      document.querySelectorAll('video, audio').forEach((el) => tryPlayElement(el));
+    } catch (e) {}
+
+    retryPendingPlays();
+  }, [retryPendingPlays, tryPlayElement]);
+
   const restartIceIfNeeded = useCallback(async (oderId) => {
+    // В стабильном mesh режиме не делаем auto iceRestart без явного согласования.
+    return;
+
     const pc = peerConnectionsRef.current[oderId];
     if (!pc || pc.signalingState === 'closed') return;
 
@@ -514,12 +572,12 @@ function GroupCallModal({
   
   // Инициализация анализатора аудио для потока
   const setupAudioAnalyser = useCallback((stream, userId) => {
-    if (!audioContextRef.current) {
-      // Создаём AudioContext (совместимо с Android WebView)
-      audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
-    }
-    
+    // ВАЖНО: AudioContext создаём/резюмируем только после user gesture (Join/Accept).
+    // Если не разблокировано — пропускаем (это влияет только на active speaker, НЕ на сам звук).
+    if (!mediaUnlockedRef.current) return;
     const audioContext = audioContextRef.current;
+    if (!audioContext) return;
+
     const analyser = audioContext.createAnalyser();
     analyser.fftSize = 512;
     analyser.smoothingTimeConstant = 0.8;
@@ -684,10 +742,7 @@ function GroupCallModal({
 
     // Принудительно запускаем воспроизведение. Ошибки игнорируем (autoplay policy).
     const safePlay = () => {
-      try {
-        const p = videoEl.play?.();
-        if (p && typeof p.catch === 'function') p.catch(() => {});
-      } catch (e) {}
+      tryPlayElement(videoEl);
     };
 
     if (!stream) return;
@@ -706,10 +761,19 @@ function GroupCallModal({
       } catch (e) {}
       safePlay();
     };
-  }, []);
+  }, [tryPlayElement]);
   
   // Получение локального медиа-потока
   const getLocalStream = useCallback(async () => {
+    // Требование: localStream получать ОДИН РАЗ.
+    if (localStreamRef.current) {
+      const stream = localStreamRef.current;
+      setLocalStream(stream);
+      attachStreamToVideo(localVideoRef.current, stream, { muted: true });
+      attachStreamToVideo(localPreviewVideoRef.current, stream, { muted: true });
+      return stream;
+    }
+
     try {
       const constraints = {
         audio: {
@@ -773,6 +837,19 @@ function GroupCallModal({
   }, [localStream, screenStream, isScreenSharing, streamUpdateCounter, pinnedUserId, attachStreamToVideo]);
 
   // ===== PEER CONNECTION =====
+
+  // Perfect Negotiation roles:
+  // - polite: уступает при offer collision (glare)
+  // - initiator: только одна сторона пары шлёт initial offer
+  const isPolitePeer = useCallback((remoteUserId) => {
+    if (!currentUserId || !remoteUserId) return true;
+    return String(currentUserId).localeCompare(String(remoteUserId)) > 0;
+  }, [currentUserId]);
+
+  const shouldInitiateOffer = useCallback((remoteUserId) => {
+    if (!currentUserId || !remoteUserId) return false;
+    return String(currentUserId).localeCompare(String(remoteUserId)) < 0;
+  }, [currentUserId]);
   
   // Создание PeerConnection для участника
   const createPeerConnection = useCallback((oderId, isInitiator = false) => {
@@ -791,36 +868,25 @@ function GroupCallModal({
       iceCandidatePoolSize: typeof cfg.iceCandidatePoolSize === 'number' ? cfg.iceCandidatePoolSize : 10
     });
 
-    pcMetaRef.current[oderId] = pcMetaRef.current[oderId] || { isInitiator: !!isInitiator };
+    pcMetaRef.current[oderId] = pcMetaRef.current[oderId] || {};
     pcMetaRef.current[oderId].isInitiator = !!isInitiator;
+    pcMetaRef.current[oderId].isPolite = isPolitePeer(oderId);
+    pcMetaRef.current[oderId].shouldInitiate = shouldInitiateOffer(oderId);
+    pcMetaRef.current[oderId].isMakingOffer = false;
+    pcMetaRef.current[oderId].ignoreOffer = false;
 
-    // Добавляем локальные треки.
-    // ВАЖНО: для screen share нам нужен video sender даже в audio-call.
-    // Поэтому если локального видеотрека нет — создаём video transceiver заранее,
-    // чтобы потом можно было сделать sender.replaceTrack(screenTrack) без renegotiation.
+    // Добавляем локальные треки ТОЛЬКО при создании PeerConnection.
+    // Важно: не используем replaceTrack/addTrack после установления соединения.
     const localStream = localStreamRef.current;
     const localAudioTracks = localStream?.getAudioTracks?.() || [];
     localAudioTracks.forEach((track) => {
       try { pc.addTrack(track, localStream); } catch (e) {}
     });
 
-    const screenTrack = screenStreamRef.current?.getVideoTracks?.()?.[0] || null;
-    const cameraTrack = localStream?.getVideoTracks?.()?.[0] || null;
-    const outgoingVideoTrack = (isScreenSharingRef.current && screenTrack) ? screenTrack : cameraTrack;
-    const outgoingVideoStream = (isScreenSharingRef.current && screenStreamRef.current && screenTrack)
-      ? screenStreamRef.current
-      : localStream;
-
-    if (outgoingVideoTrack) {
-      try { pc.addTrack(outgoingVideoTrack, outgoingVideoStream || localStream); } catch (e) {}
-    } else {
-      try {
-        const vt = pc.addTransceiver('video', { direction: 'sendrecv' });
-        pcMetaRef.current[oderId] = pcMetaRef.current[oderId] || { isInitiator: !!isInitiator };
-        pcMetaRef.current[oderId].videoTransceiver = vt;
-      } catch (e) {
-        // Браузер не поддерживает transceiver API — screen share в audio-call не будет работать,
-        // но video-call остаётся штатным.
+    if (callType === 'video') {
+      const cameraTrack = localStream?.getVideoTracks?.()?.[0] || null;
+      if (cameraTrack) {
+        try { pc.addTrack(cameraTrack, localStream); } catch (e) {}
       }
     }
 
@@ -844,12 +910,32 @@ function GroupCallModal({
     pc.oniceconnectionstatechange = () => {
       const state = pc.iceConnectionState;
       console.log('[GroupCall] ICE state for', oderId, ':', state);
+    };
 
-      // Минимальная самовосстановляемость без смены архитектуры.
-      // Почему так: в реальных сетях часть кандидатов может стать невалидной,
-      // ICE-restart часто спасает failed соединения в mesh.
-      if (state === 'failed') {
-        restartIceIfNeeded(oderId);
+    // Perfect negotiation: инициируем offer только с одной стороны пары.
+    pc.onnegotiationneeded = async () => {
+      const meta = pcMetaRef.current?.[oderId];
+      if (!meta?.shouldInitiate) return;
+      if (pc.signalingState !== 'stable') return;
+
+      try {
+        meta.isMakingOffer = true;
+        const offer = await pc.createOffer();
+        if (pc.signalingState !== 'stable') return;
+        await pc.setLocalDescription(offer);
+
+        socket.emit('group-call:signal', {
+          callId: callIdRef.current,
+          oderId,
+          signal: {
+            type: 'offer',
+            sdp: pc.localDescription
+          }
+        });
+      } catch (err) {
+        console.warn('[GroupCall] negotiationneeded failed:', err);
+      } finally {
+        meta.isMakingOffer = false;
       }
     };
 
@@ -912,7 +998,7 @@ function GroupCallModal({
     peerConnectionsRef.current[oderId] = pc;
 
     return pc;
-  }, [iceServers, socket, applyBitrateSettings, setupAudioAnalyser, restartIceIfNeeded, callType]);
+  }, [iceServers, socket, applyBitrateSettings, setupAudioAnalyser, callType, isPolitePeer, shouldInitiateOffer]);
 
   // ===== BITRATE OPTIMIZATION =====
   
@@ -932,28 +1018,25 @@ function GroupCallModal({
 
   // ===== SIGNALING =====
   
-  // Отправка offer новому участнику
-  const sendOffer = useCallback(async (oderId) => {
+  const connectToPeerIfPossible = useCallback(async (oderId) => {
+    if (!oderId || oderId === currentUserId) return;
+
+    // Ограничение mesh до 5 участников (включая себя)
+    const activeRemoteCount = remoteStreamsRef.current.size;
+    if ((activeRemoteCount + 1) > 5) {
+      setCapacityWarning('Лимит mesh: максимум 5 участников.');
+      return;
+    }
+
+    if (!localStreamRef.current) {
+      pendingPeersToConnectRef.current.add(oderId);
+      return;
+    }
+
     await ensureIceConfig();
     const pc = createPeerConnection(oderId, true);
-    
-    try {
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      
-      socket.emit('group-call:signal', {
-        callId: callIdRef.current,
-        oderId,
-        signal: {
-          type: 'offer',
-          sdp: pc.localDescription
-        }
-      });
-      console.log('[GroupCall] Sent offer to:', oderId);
-    } catch (err) {
-      console.error('[GroupCall] Error creating offer:', err);
-    }
-  }, [createPeerConnection, socket, ensureIceConfig]);
+    if (!pc) return;
+  }, [createPeerConnection, currentUserId, ensureIceConfig]);
 
   // Обработка входящего сигнала
   const handleSignal = useCallback(async ({ fromUserId, signal }) => {
@@ -971,63 +1054,70 @@ function GroupCallModal({
       });
     }
 
-    if (signal.type === 'offer') {
+    if (signal.type === 'offer' || signal.type === 'answer') {
       const pc = createPeerConnection(fromUserId, false);
-      
+      if (!pc) return;
+
+      const meta = pcMetaRef.current?.[fromUserId] || {};
+      pcMetaRef.current[fromUserId] = meta;
+
       try {
-        await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+        const description = signal.sdp;
+        const isOffer = description?.type === 'offer';
+        const offerCollision = isOffer && (meta.isMakingOffer || pc.signalingState !== 'stable');
+
+        meta.ignoreOffer = !meta.isPolite && offerCollision;
+        if (meta.ignoreOffer) {
+          console.log('[GroupCall] Ignoring offer (glare) from:', fromUserId);
+          return;
+        }
+
+        if (offerCollision) {
+          // Политый peer откатывает локальный offer, чтобы принять удалённый.
+          try { await pc.setLocalDescription({ type: 'rollback' }); } catch (e) {}
+        }
+
+        await pc.setRemoteDescription(new RTCSessionDescription(description));
         await flushPendingIceCandidates(fromUserId, pc);
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        
-        socket.emit('group-call:signal', {
-          callId: callIdRef.current,
-          oderId: fromUserId,
-          signal: {
-            type: 'answer',
-            sdp: pc.localDescription
-          }
-        });
-        console.log('[GroupCall] Sent answer to:', fromUserId);
+
+        if (isOffer) {
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          socket.emit('group-call:signal', {
+            callId: callIdRef.current,
+            oderId: fromUserId,
+            signal: { type: 'answer', sdp: pc.localDescription }
+          });
+        }
       } catch (err) {
-        console.error('[GroupCall] Error handling offer:', err);
+        console.error('[GroupCall] Error handling description:', err);
       }
-    } else if (signal.type === 'answer') {
+      return;
+    }
+
+    if (signal.type === 'ice-candidate') {
       const pc = peerConnectionsRef.current[fromUserId];
-      if (pc && pc.signalingState !== 'stable') {
-        try {
-          await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
-          await flushPendingIceCandidates(fromUserId, pc);
-          console.log('[GroupCall] Set remote answer from:', fromUserId);
-        } catch (err) {
-          console.error('[GroupCall] Error setting remote answer:', err);
-        }
+      if (!pendingCandidatesRef.current[fromUserId]) {
+        pendingCandidatesRef.current[fromUserId] = [];
       }
-    } else if (signal.type === 'ice-candidate') {
-      const pc = peerConnectionsRef.current[fromUserId];
-      if (pc && pc.remoteDescription) {
-        try {
-          await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
-        } catch (err) {
-          // Если рано (remoteDescription может быть уже сброшен из-за glare/restart) — кладём обратно.
-          if (!pendingCandidatesRef.current[fromUserId]) {
-            pendingCandidatesRef.current[fromUserId] = [];
-          }
-          pendingCandidatesRef.current[fromUserId].push(signal.candidate);
-        }
-      } else {
-        // Откладываем кандидата до установки remote description
-        if (!pendingCandidatesRef.current[fromUserId]) {
-          pendingCandidatesRef.current[fromUserId] = [];
-        }
-        pendingCandidatesRef.current[fromUserId].push(signal.candidate);
+
+      // Требование: ICE добавляем только после setRemoteDescription.
+      pendingCandidatesRef.current[fromUserId].push(signal.candidate);
+
+      if (pc?.remoteDescription) {
+        await flushPendingIceCandidates(fromUserId, pc);
       }
     }
-  }, [createPeerConnection, socket, ensureIceConfig, flushPendingIceCandidates]);
+  }, [createPeerConnection, socket, ensureIceConfig, flushPendingIceCandidates, currentUserId]);
 
   // Присоединение к звонку
-  const joinCall = useCallback(async () => {
+  const joinCall = useCallback(async ({ unlock = false } = {}) => {
     setCallStatus('connecting');
+
+    // ВАЖНО: unlock делаем только из user gesture (кнопка Join/Accept).
+    if (unlock) {
+      await unlockMediaPlayback();
+    }
 
     // ВАЖНО: ICE конфиг грузим ДО любого signaling/PeerConnection.
     await ensureIceConfig();
@@ -1060,6 +1150,13 @@ function GroupCallModal({
       console.log('[GroupCall] Joined call, existing participants:', response.participants);
       setCallStatus('active');
 
+      const existingCount = Array.isArray(response.participants) ? response.participants.length : 0;
+      if ((existingCount + 1) > 5) {
+        setCapacityWarning('В звонке уже 5 участников — mesh ограничен до 5.');
+      } else {
+        setCapacityWarning(null);
+      }
+
       // ВАЖНО: заполняем participants существующими участниками, иначе поздно вошедший
       // будет видеть только себя (streams приходят, но не рендерятся без метаданных).
       if (response.participants && response.participants.length > 0) {
@@ -1079,13 +1176,19 @@ function GroupCallModal({
       if (response.participants && response.participants.length > 0) {
         response.participants.forEach(p => {
           if (p.oderId !== currentUserId) {
-            // Отправляем offer каждому существующему участнику
-            sendOffer(p.oderId);
+            if ((existingCount + 1) <= 5) {
+              connectToPeerIfPossible(p.oderId);
+            }
           }
         });
       }
+
+      // Если кто-то успел зайти пока мы брали камеру — подключимся.
+      const pending = Array.from(pendingPeersToConnectRef.current);
+      pendingPeersToConnectRef.current.clear();
+      pending.forEach((pid) => connectToPeerIfPossible(pid));
     });
-  }, [getLocalStream, socket, chatId, currentUserId, sendOffer, onClose, ensureIceConfig]);
+  }, [getLocalStream, socket, chatId, currentUserId, onClose, ensureIceConfig, unlockMediaPlayback, connectToPeerIfPossible]);
 
   // Начало звонка (для инициатора)
   const startCall = useCallback(async () => {
@@ -1100,9 +1203,13 @@ function GroupCallModal({
       return;
     }
 
+    const pending = Array.from(pendingPeersToConnectRef.current);
+    pendingPeersToConnectRef.current.clear();
+    pending.forEach((pid) => connectToPeerIfPossible(pid));
+
     setCallStatus('active');
     onJoin?.();
-  }, [getLocalStream, onClose, onJoin, ensureIceConfig]);
+  }, [getLocalStream, onClose, onJoin, ensureIceConfig, connectToPeerIfPossible]);
 
   // Автоматический запуск для не-входящих звонков
   useEffect(() => {
@@ -1190,6 +1297,16 @@ function GroupCallModal({
           }
           return prev;
         });
+
+        // Создаём PeerConnection ТОЛЬКО для нового участника.
+        // Важно: не трогаем существующие peer connections.
+        // Лимит mesh: 5 участников.
+        const projectedTotal = Object.keys(peerConnectionsRef.current).length + 2; // existing remotes + new + self
+        if (projectedTotal <= 5) {
+          connectToPeerIfPossible(oderId);
+        } else {
+          setCapacityWarning('Лимит mesh: максимум 5 участников.');
+        }
       }
     };
 
@@ -1253,7 +1370,7 @@ function GroupCallModal({
       socket.off('group-call:signal', handleIncomingSignal);
       socket.off('group-call:ended', handleCallEnded);
     };
-  }, [socket, currentUserId, callStatus, handleSignal, onClose, cleanup, pinnedUserId]);
+  }, [socket, currentUserId, callStatus, handleSignal, onClose, cleanup, pinnedUserId, connectToPeerIfPossible]);
 
   // Завершение звонка
   const handleEndCall = useCallback(() => {
@@ -1463,12 +1580,8 @@ function GroupCallModal({
 
   // Screen sharing
   const toggleScreenShare = useCallback(async () => {
-    if (isScreenSharingRef.current) {
-      await stopScreenShare();
-    } else {
-      await startScreenShare();
-    }
-  }, [startScreenShare, stopScreenShare]);
+    alert('Демонстрация экрана временно отключена для стабильного mesh WebRTC (без replaceTrack/renegotiation).');
+  }, []);
 
   // Cleanup при unmount
   useEffect(() => {
@@ -1531,7 +1644,7 @@ function GroupCallModal({
               <span>✕</span>
               <span style={styles.btnLabel}>Отклонить</span>
             </button>
-            <button onClick={joinCall} style={styles.acceptBtn}>
+            <button onClick={() => joinCall({ unlock: true })} style={styles.acceptBtn}>
               <span>{callType === 'video' ? '🎥' : '📞'}</span>
               <span style={styles.btnLabel}>Присоединиться</span>
             </button>
@@ -1545,7 +1658,15 @@ function GroupCallModal({
 
   // Рендер активного звонка (Discord UX)
   return (
-    <div style={styles.overlay}>
+    <div
+      style={styles.overlay}
+      onMouseDown={() => {
+        if (!mediaUnlockedRef.current) {
+          // best-effort unlock on any user interaction
+          unlockMediaPlayback();
+        }
+      }}
+    >
       <div style={styles.modal}>
         {/* Заголовок */}
         <div style={styles.header}>
@@ -1559,6 +1680,11 @@ function GroupCallModal({
             </div>
           </div>
           <div style={styles.headerRight}>
+            {capacityWarning && (
+              <div style={styles.capacityWarning} title={capacityWarning}>
+                {capacityWarning}
+              </div>
+            )}
             {/* SD/HD индикатор текущего capture tier */}
             <div
               style={{
@@ -1768,11 +1894,14 @@ function GroupCallModal({
           {callType === 'video' && (
             <button
               onClick={toggleScreenShare}
+              disabled
               style={{
                 ...styles.controlBtn,
+                opacity: 0.5,
+                cursor: 'not-allowed',
                 ...(isScreenSharing ? styles.controlBtnScreen : {})
               }}
-              title={isScreenSharing ? 'Остановить демонстрацию' : 'Демонстрация экрана'}
+              title={'Демонстрация экрана отключена для стабильного mesh'}
             >
               🖥️
             </button>
@@ -1894,6 +2023,19 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     gap: '12px',
+  },
+  capacityWarning: {
+    padding: '4px 10px',
+    borderRadius: '999px',
+    background: 'rgba(245, 158, 11, 0.12)',
+    color: '#fbbf24',
+    border: '1px solid rgba(245, 158, 11, 0.35)',
+    fontSize: '12px',
+    fontWeight: 700,
+    maxWidth: '360px',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
   },
   qualityPill: {
     padding: '4px 10px',
