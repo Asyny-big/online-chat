@@ -11,13 +11,11 @@ const LOCAL_PIN_ID = '__local__';
 
 /**
  * GroupCallModal - Компонент для групповых видео/аудио звонков (Discord-like UX)
- * P2P: 1-на-1 (<=2 участников) — прямой WebRTC (как раньше, но без mesh-map)
- * SFU: 3+ участников — ion-sfu (json-rpc), 1 RTCPeerConnection → SFU
+ * SFU-only: ion-sfu (json-rpc over WebSocket), 1 RTCPeerConnection → SFU
  * 
  * Основные особенности:
  * - Main video (pinned/active speaker) + preview strip
  * - Active speaker detection через AudioContext (клиентская сторона)
- * - Bitrate control для оптимизации mesh до 10 участников
  * - Android WebView compatible
  * 
  * АРХИТЕКТУРА СТРИМОВ (streams-first):
@@ -50,9 +48,7 @@ function GroupCallModal({
   const [isVideoOff, setIsVideoOff] = useState(callType === 'audio');
   const [isScreenSharing, setIsScreenSharing] = useState(false);
 
-  // Логика выбора транспорта
-  const [callMode, setCallMode] = useState('p2p'); // 'p2p' | 'sfu'
-  const callModeRef = useRef('p2p');
+  // Групповые звонки: SFU-only (ion-sfu). Никакого P2P/mesh/hybrid.
   // ВАЖНО: backend отдаёт не только iceServers, но и iceCandidatePoolSize.
   // Для ускорения первого подключения нам нужно иметь этот конфиг ДО создания RTCPeerConnection.
   const [iceServers, setIceServers] = useState([]);
@@ -77,31 +73,22 @@ function GroupCallModal({
   const mainVideoRef = useRef(null); // Главное видео (remote)
   const remoteStreamsRef = useRef(new Map()); // Map<oderId, MediaStream> - remote ТОЛЬКО
 
-  // === P2P (<=2) ===
-  const p2pPcRef = useRef(null); // RTCPeerConnection
-  const p2pPeerIdRef = useRef(null); // userId удалённого участника (если есть)
-  const p2pPendingCandidatesRef = useRef([]); // ICECandidateInit[]
-  const p2pMetaRef = useRef({ isMakingOffer: false, ignoreOffer: false, isPolite: true, shouldInitiate: false });
-
-  // === SFU (>=3) ===
+  // === SFU ===
   const sfuSignalRef = useRef(null);
   const sfuClientRef = useRef(null);
   const sfuPublishedLocalStreamIdRef = useRef(null); // stream.id, который видит SFU
   const sfuRemoteStreamIdToUserIdRef = useRef(new Map()); // streamId -> userId
   const sfuPendingRemoteStreamsByIdRef = useRef(new Map()); // streamId -> MediaStream
 
-  // SFU устойчивость и мягкое переключение (НЕ рвём P2P до готовности SFU)
-  const sfuReadyRef = useRef(false);
-  const sfuConnectingRef = useRef(false);
-  const sfuWsOpenRef = useRef(false);
-  const sfuPcConnectedRef = useRef(false);
-  const sfuGotTrackRef = useRef(false);
-  const sfuPcRef = useRef(null); // найденный RTCPeerConnection внутри ion Client
-  const sfuReadyTimerRef = useRef(null);
+  // SFU lifecycle guards
+  const sfuStartedRef = useRef(false); // WebSocket создаётся один раз
+  const sfuPcRef = useRef(null); // найденный RTCPeerConnection внутри ion Client (для guards)
+  const sfuPublishingRef = useRef(false); // publish вызывается один раз
 
   const captureTierRef = useRef('sd'); // 'sd' | 'hd'
   const ringtoneRef = useRef(null);
   const leaveSentRef = useRef(false);
+  const endedRef = useRef(false);
   const callIdRef = useRef(callId);
   const localStreamRef = useRef(null); // Локальный поток - ОТДЕЛЬНО от remoteStreamsRef
   
@@ -114,28 +101,6 @@ function GroupCallModal({
   const mediaUnlockedRef = useRef(false);
   const pendingPlayElementsRef = useRef(new Set());
   const [capacityWarning, setCapacityWarning] = useState(null);
-
-  // P2P: добавление ICE кандидатов откладываем до remoteDescription.
-  const flushPendingP2pIceCandidates = useCallback(async (pc) => {
-    if (!pc || pc.signalingState === 'closed') return;
-    if (!pc.remoteDescription) return;
-    const pending = p2pPendingCandidatesRef.current;
-    if (!pending || pending.length === 0) return;
-
-    const remaining = [];
-    for (const candidate of pending) {
-      try {
-        await pc.addIceCandidate(new RTCIceCandidate(candidate));
-      } catch (err) {
-        if (err?.name === 'InvalidStateError') {
-          remaining.push(candidate);
-        } else {
-          console.warn('[GroupCall] Failed to add ICE candidate, dropping:', err);
-        }
-      }
-    }
-    p2pPendingCandidatesRef.current = remaining;
-  }, []);
 
   const tryPlayElement = useCallback((el) => {
     if (!el) return;
@@ -188,12 +153,6 @@ function GroupCallModal({
     retryPendingPlays();
   }, [retryPendingPlays, tryPlayElement]);
 
-  const restartIceIfNeeded = useCallback(async (oderId) => {
-    // iceRestart запрещён для этой реализации.
-    // Оставлено как no-op для совместимости вызовов.
-    void oderId;
-  }, [socket]);
-
   // ===== UTILITY FUNCTIONS =====
   
   // Обновляем ref при изменении callId
@@ -225,9 +184,9 @@ function GroupCallModal({
       parameters.encodings = [{}];
     }
     
-    // Почему так: в mesh (группа) каждый аплинк умножается на N-1,
-    // поэтому дефолтные битрейты должны быть консервативными, иначе
-    // получаем "раскачку" (адаптация качества/пакетные потери/рост задержки).
+    // Почему так: даже в SFU качество/битрейт должны быть консервативными,
+    // чтобы избежать перегрузки канала/CPU (особенно на мобильных/Android WebView)
+    // и снизить риск потерь/роста задержки.
     parameters.encodings[0].maxBitrate = maxBitrate * 1000; // kbps -> bps
     if (maxFramerate) {
       parameters.encodings[0].maxFramerate = maxFramerate;
@@ -318,17 +277,13 @@ function GroupCallModal({
   }, [setBitrate]);
 
   // ===== CAPTURE POLICY =====
-  // Требование: для групп (SFU) целимся в HD 720p. Для P2P (<=2) держим SD по умолчанию.
+  // Групповые звонки SFU-only: целимся в HD 720p.
   useEffect(() => {
     if (callType !== 'video') return;
     if (!localStreamRef.current) return;
 
-    if (callModeRef.current === 'sfu') {
-      applyCaptureTier('hd');
-    } else {
-      applyCaptureTier('sd');
-    }
-  }, [callType, callMode, applyCaptureTier]);
+    applyCaptureTier('hd');
+  }, [callType, applyCaptureTier]);
 
   // ===== ACTIVE SPEAKER DETECTION =====
   
@@ -545,8 +500,7 @@ function GroupCallModal({
         },
         video: callType === 'video' ? { 
           // Требование: дефолт 640x480 + сниженная частота кадров для меньшей задержки.
-          // Почему так: в mesh каждый участник отправляет видео всем — лишние пиксели/FPS
-          // дают рост jitter/latency и деградацию у всех.
+          // Почему так: даже в SFU лишние пиксели/FPS повышают нагрузку и задержку.
           width: { ideal: 640, max: 1280 },
           height: { ideal: 480, max: 720 },
           frameRate: { ideal: 20, max: 24 },
@@ -598,27 +552,7 @@ function GroupCallModal({
     }
   }, [localStream, streamUpdateCounter, pinnedUserId, attachStreamToVideo]);
 
-  // ===== PEER CONNECTION =====
-
-  // Perfect Negotiation roles:
-  // - polite: уступает при offer collision (glare)
-  // - initiator: только одна сторона пары шлёт initial offer
-  const isPolitePeer = useCallback((remoteUserId) => {
-    if (!currentUserId || !remoteUserId) return true;
-    return String(currentUserId).localeCompare(String(remoteUserId)) < 0;
-  }, [currentUserId]);
-
-  const shouldInitiateOffer = useCallback((remoteUserId) => {
-    if (!currentUserId || !remoteUserId) return false;
-    // Только одна сторона пары должна инициировать initial offer.
-    // При polite = current < remote, инициатором будет сторона current > remote.
-    return String(currentUserId).localeCompare(String(remoteUserId)) > 0;
-  }, [currentUserId]);
-
-  const setMode = useCallback((nextMode) => {
-    callModeRef.current = nextMode;
-    setCallMode(nextMode);
-  }, []);
+  // ===== SFU =====
 
   const clearRemoteMedia = useCallback(() => {
     remoteStreamsRef.current = new Map();
@@ -626,18 +560,7 @@ function GroupCallModal({
     setStreamUpdateCounter((v) => v + 1);
   }, []);
 
-  const closeP2p = useCallback(() => {
-    try {
-      p2pPcRef.current?.close?.();
-    } catch (e) {}
-    p2pPcRef.current = null;
-    p2pPeerIdRef.current = null;
-    p2pPendingCandidatesRef.current = [];
-    p2pMetaRef.current = { isMakingOffer: false, ignoreOffer: false, isPolite: true, shouldInitiate: false };
-  }, []);
-
   const closeSfu = useCallback(() => {
-    // ВАЖНО: сбрасываем флаги/refs ДО .close(), чтобы onclose не триггерил fallback рекурсивно.
     const client = sfuClientRef.current;
     const signal = sfuSignalRef.current;
     sfuClientRef.current = null;
@@ -646,16 +569,9 @@ function GroupCallModal({
     sfuRemoteStreamIdToUserIdRef.current = new Map();
     sfuPendingRemoteStreamsByIdRef.current = new Map();
 
-    sfuReadyRef.current = false;
-    sfuConnectingRef.current = false;
-    sfuWsOpenRef.current = false;
-    sfuPcConnectedRef.current = false;
-    sfuGotTrackRef.current = false;
+    sfuStartedRef.current = false;
+    sfuPublishingRef.current = false;
     sfuPcRef.current = null;
-    if (sfuReadyTimerRef.current) {
-      clearTimeout(sfuReadyTimerRef.current);
-      sfuReadyTimerRef.current = null;
-    }
 
     try {
       client?.close?.();
@@ -664,15 +580,6 @@ function GroupCallModal({
       signal?.close?.();
     } catch (e) {}
   }, []);
-
-  const fallbackToP2p = useCallback((reason) => {
-    // ВАЖНО: fallback не должен рвать текущий звонок.
-    // P2P PC НЕ трогаем здесь.
-    console.warn('[GroupCall][SFU] Fallback to P2P:', reason);
-    closeSfu();
-    setMode('p2p');
-    if (reason) setCapacityWarning(String(reason));
-  }, [closeSfu, setMode]);
 
   const findPeerConnectionInClient = useCallback((client) => {
     // ion-sdk-js не гарантирует публичное поле pc, поэтому ищем эвристически.
@@ -743,247 +650,155 @@ function GroupCallModal({
     setStreamUpdateCounter((v) => v + 1);
   }, [currentUserId, setupAudioAnalyser]);
 
-  const maybeMarkSfuReady = useCallback(() => {
-    if (sfuReadyRef.current) return true;
-    const ready = !!(sfuWsOpenRef.current && sfuPcConnectedRef.current && sfuGotTrackRef.current);
-    if (!ready) return false;
-
-    // === SFU READY ===
-    sfuReadyRef.current = true;
-    sfuConnectingRef.current = false;
-    if (sfuReadyTimerRef.current) {
-      clearTimeout(sfuReadyTimerRef.current);
-      sfuReadyTimerRef.current = null;
-    }
-
-    // Теперь безопасно переключаться: закрываем P2P и чистим remote, чтобы избежать дублей.
-    closeP2p();
-    clearRemoteMedia();
-    setMode('sfu');
-    setCapacityWarning(null);
-    console.info('[GroupCall][SFU] Ready -> switched to SFU');
-
-    // Если mapping уже есть, но треки пришли раньше — дольём.
+  const endGroupCall = useCallback((reason) => {
+    // Любая ошибка SFU в группе -> корректно завершаем групповой звонок.
+    // Без reconnect/fallback/switch.
+    if (endedRef.current) return;
+    endedRef.current = true;
+    console.error('[GroupCall][SFU] Fatal:', reason);
     try {
-      for (const [streamId, stream] of sfuPendingRemoteStreamsByIdRef.current.entries()) {
-        const mappedUserId = sfuRemoteStreamIdToUserIdRef.current.get(String(streamId));
-        if (!mappedUserId) continue;
-        try {
-          stream.getTracks().forEach((t) => attachIncomingTrackToUser(String(mappedUserId), t));
-        } catch (e) {}
-        sfuPendingRemoteStreamsByIdRef.current.delete(String(streamId));
+      if (!leaveSentRef.current) {
+        leaveSentRef.current = true;
+        socket.emit('group-call:leave', { callId: callIdRef.current });
       }
     } catch (e) {}
 
-    return true;
-  }, [attachIncomingTrackToUser, clearRemoteMedia, closeP2p, setMode]);
+    try {
+      setCapacityWarning(reason ? String(reason) : 'Ошибка SFU');
+    } catch (e) {}
 
-  const connectP2pIfReady = useCallback(async (peerId) => {
-    if (!peerId || peerId === currentUserId) return;
+    closeSfu();
+    clearRemoteMedia();
+
+    // Закрываем UI (ChatPage очистит состояние по onClose)
+    onClose();
+  }, [clearRemoteMedia, closeSfu, onClose, socket]);
+
+  const createIonSignalWithJsonRpc2 = useCallback((url) => {
+    // ТРЕБОВАНИЕ: WebSocket subprotocol = "jsonrpc2".
+    // ion-sdk-js внутри создаёт WebSocket сам, поэтому на момент конструктора
+    // подменяем window.WebSocket только для этого URL.
+    const Original = window.WebSocket;
+    let patched = false;
+    try {
+      class PatchedWebSocket extends Original {
+        constructor(wsUrl, protocols) {
+          const shouldForce = typeof wsUrl === 'string' && wsUrl.includes('/sfu/ws');
+          let nextProtocols = protocols;
+          if (shouldForce) {
+            if (Array.isArray(protocols)) {
+              nextProtocols = protocols.includes('jsonrpc2') ? protocols : ['jsonrpc2', ...protocols];
+            } else {
+              nextProtocols = 'jsonrpc2';
+            }
+          }
+          super(wsUrl, nextProtocols);
+        }
+      }
+      window.WebSocket = PatchedWebSocket;
+      patched = true;
+      return new IonSFUJSONRPCSignal(url);
+    } finally {
+      if (patched) window.WebSocket = Original;
+    }
+  }, []);
+
+  const connectSfuOnce = useCallback(async () => {
+    if (sfuStartedRef.current) return;
     if (!localStreamRef.current) return;
 
     await ensureIceConfig();
 
-    // Уже подключены
-    if (p2pPcRef.current && p2pPeerIdRef.current === peerId) return;
+    const sfuWsUrl = getSfuWsUrl();
+    console.info('[GroupCall][SFU] Connecting via', sfuWsUrl);
 
-    // Если был другой peer — закрываем и пересоздаём
-    if (p2pPcRef.current && p2pPeerIdRef.current && p2pPeerIdRef.current !== peerId) {
-      closeP2p();
-      clearRemoteMedia();
-    }
-
-    p2pPeerIdRef.current = peerId;
-    p2pMetaRef.current.isPolite = isPolitePeer(peerId);
-    p2pMetaRef.current.shouldInitiate = shouldInitiateOffer(peerId);
-
-    const cfg = iceConfigRef.current || { iceServers: iceServers || [], iceCandidatePoolSize: 10 };
-    const pc = new RTCPeerConnection({
-      iceServers: cfg.iceServers || [],
-      iceCandidatePoolSize: typeof cfg.iceCandidatePoolSize === 'number' ? cfg.iceCandidatePoolSize : 10
-    });
-    p2pPcRef.current = pc;
-
-    const local = localStreamRef.current;
-    (local?.getAudioTracks?.() || []).forEach((t) => {
-      try { pc.addTrack(t, local); } catch (e) {}
-    });
-    if (callType === 'video') {
-      const vt = local?.getVideoTracks?.()?.[0];
-      if (vt) {
-        try { pc.addTrack(vt, local); } catch (e) {}
-      }
-    }
-
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        socket.emit('group-call:signal', {
-          callId: callIdRef.current,
-          oderId: peerId,
-          signal: { type: 'ice-candidate', candidate: event.candidate }
-        });
-      }
-    };
-
-    pc.ontrack = (event) => {
-      attachIncomingTrackToUser(peerId, event.track);
-    };
-
-    pc.onconnectionstatechange = () => {
-      const st = pc.connectionState;
-      console.log('[GroupCall][P2P] connectionState:', st);
-    };
-
-    pc.onnegotiationneeded = async () => {
-      const meta = p2pMetaRef.current;
-      if (!meta.shouldInitiate) return;
-      if (pc.signalingState !== 'stable') return;
-      try {
-        meta.isMakingOffer = true;
-        const offer = await pc.createOffer();
-        if (pc.signalingState !== 'stable') return;
-        await pc.setLocalDescription(offer);
-        socket.emit('group-call:signal', {
-          callId: callIdRef.current,
-          oderId: peerId,
-          signal: { type: 'offer', sdp: pc.localDescription }
-        });
-      } catch (err) {
-        console.warn('[GroupCall][P2P] negotiationneeded failed:', err);
-      } finally {
-        meta.isMakingOffer = false;
-      }
-    };
-
-    // Немного поджимаем битрейт в P2P (не обязателен, но помогает на LTE)
-    setTimeout(() => applyBitrateSettings(pc, true), 150);
-  }, [applyBitrateSettings, attachIncomingTrackToUser, callType, clearRemoteMedia, closeP2p, currentUserId, ensureIceConfig, iceServers, isPolitePeer, shouldInitiateOffer, socket]);
-
-  const handleP2pSignal = useCallback(async ({ fromUserId, signal }) => {
-    if (callModeRef.current !== 'p2p') return;
-    if (!fromUserId || !signal) return;
-
-    // Принимаем сигналы только от текущего peer
-    const peerId = p2pPeerIdRef.current || fromUserId;
-    if (peerId !== fromUserId) return;
-
-    await connectP2pIfReady(peerId);
-    const pc = p2pPcRef.current;
-    if (!pc) return;
-
-    if (signal.type === 'offer' || signal.type === 'answer') {
-      try {
-        const description = signal.sdp;
-        const isOffer = description?.type === 'offer';
-        const meta = p2pMetaRef.current;
-        const offerCollision = isOffer && (meta.isMakingOffer || pc.signalingState !== 'stable');
-        meta.ignoreOffer = !meta.isPolite && offerCollision;
-        if (meta.ignoreOffer) {
-          console.log('[GroupCall][P2P] Ignoring offer (glare) from:', fromUserId);
-          return;
-        }
-
-        if (offerCollision) {
-          try { await pc.setLocalDescription({ type: 'rollback' }); } catch (e) {}
-        }
-
-        await pc.setRemoteDescription(new RTCSessionDescription(description));
-        await flushPendingP2pIceCandidates(pc);
-
-        if (isOffer) {
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          socket.emit('group-call:signal', {
-            callId: callIdRef.current,
-            oderId: fromUserId,
-            signal: { type: 'answer', sdp: pc.localDescription }
-          });
-        }
-      } catch (err) {
-        console.error('[GroupCall][P2P] Error handling description:', err);
-      }
+    const cfg = iceConfigRef.current || { iceServers: iceServers || [] };
+    let signal;
+    try {
+      signal = createIonSignalWithJsonRpc2(sfuWsUrl);
+    } catch (e) {
+      endGroupCall('Не удалось создать SFU WebSocket');
       return;
     }
 
-    if (signal.type === 'ice-candidate') {
-      p2pPendingCandidatesRef.current.push(signal.candidate);
-      if (pc.remoteDescription) {
-        await flushPendingP2pIceCandidates(pc);
-      }
-    }
-  }, [connectP2pIfReady, flushPendingP2pIceCandidates, socket]);
-
-  const connectSfuIfReady = useCallback(async () => {
-    if (!localStreamRef.current) return;
-    await ensureIceConfig();
-
-    if (sfuClientRef.current || sfuConnectingRef.current) return;
-
-    // reset SFU state (не трогаем P2P)
-    sfuReadyRef.current = false;
-    sfuConnectingRef.current = true;
-    sfuWsOpenRef.current = false;
-    sfuPcConnectedRef.current = false;
-    sfuGotTrackRef.current = false;
-    if (sfuReadyTimerRef.current) {
-      clearTimeout(sfuReadyTimerRef.current);
-      sfuReadyTimerRef.current = null;
-    }
-
-    const sfuWsUrl = getSfuWsUrl();
-    console.info('[SFU] Connecting via', sfuWsUrl);
-
-    const cfg = iceConfigRef.current || { iceServers: iceServers || [] };
-    const signal = new IonSFUJSONRPCSignal(sfuWsUrl);
     const client = new Client(signal, {
       codec: 'vp8',
       iceServers: cfg.iceServers || [],
-      // явная привязка для отладки (signal использует это значение)
       sfuWsUrl
     });
 
     sfuSignalRef.current = signal;
     sfuClientRef.current = client;
-
-    // Таймаут готовности SFU: если не поднялся — остаёмся в P2P.
-    sfuReadyTimerRef.current = setTimeout(() => {
-      if (callModeRef.current !== 'p2p') {
-        // если уже ушли в SFU — не трогаем
-        return;
-      }
-      if (!sfuReadyRef.current) {
-        fallbackToP2p('SFU не подключился за отведённое время');
-      }
-    }, 8000);
+    sfuStartedRef.current = true;
 
     client.ontrack = (track, stream) => {
       const streamId = stream?.id;
       if (!streamId) return;
 
-      sfuGotTrackRef.current = true;
-
-      // Во время перехода держим треки в pending, чтобы после clearRemoteMedia
-      // (который делаем только когда SFU ready) не потерять их.
+      // Сохраняем до прихода mapping по socket.io
       try {
         sfuPendingRemoteStreamsByIdRef.current.set(String(streamId), stream);
       } catch (e) {}
 
       const mappedUserId = sfuRemoteStreamIdToUserIdRef.current.get(String(streamId));
-      if (sfuReadyRef.current && mappedUserId) {
+      if (mappedUserId) {
         attachIncomingTrackToUser(String(mappedUserId), track);
       }
+    };
 
-      maybeMarkSfuReady();
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+    const waitForPc = async () => {
+      for (let i = 0; i < 30; i++) {
+        const pc = findPeerConnectionInClient(client);
+        if (pc) return pc;
+        await sleep(100);
+      }
+      return null;
+    };
+
+    const waitForStableSignaling = async (pc) => {
+      for (let i = 0; i < 30; i++) {
+        if (pc.connectionState === 'closed') return false;
+        if (pc.signalingState === 'stable') return true;
+        await sleep(100);
+      }
+      return pc.signalingState === 'stable' && pc.connectionState !== 'closed';
     };
 
     signal.onopen = async () => {
       try {
-        sfuWsOpenRef.current = true;
         await client.join(String(callIdRef.current), String(currentUserId));
 
         if (callType === 'video') {
-          // Для SFU требуем HD 720p
           await applyCaptureTier('hd');
+        }
+
+        // Находим SFU PeerConnection и вешаем фатальные обработчики
+        const pc = await waitForPc();
+        if (!pc) {
+          endGroupCall('SFU: не найден RTCPeerConnection');
+          return;
+        }
+        sfuPcRef.current = pc;
+        pc.onconnectionstatechange = () => {
+          const st = pc.connectionState;
+          console.log('[GroupCall][SFU] connectionState:', st);
+          if (st === 'failed' || st === 'closed') {
+            endGroupCall(`SFU connectionState=${st}`);
+          }
+        };
+
+        // Publish строго один раз и только в безопасных состояниях
+        if (sfuPublishingRef.current) return;
+        const stable = await waitForStableSignaling(pc);
+        if (!stable) {
+          endGroupCall('SFU: signalingState не stable / pc закрыт');
+          return;
+        }
+        if (pc.connectionState === 'closed') {
+          endGroupCall('SFU: PeerConnection closed');
+          return;
         }
 
         const localIon = new LocalStream(localStreamRef.current, {
@@ -994,8 +809,8 @@ function GroupCallModal({
           video: callType === 'video'
         });
 
+        sfuPublishingRef.current = true;
         client.publish(localIon);
-
         sfuPublishedLocalStreamIdRef.current = localIon.id;
 
         // Сообщаем всем streamId → userId mapping
@@ -1003,106 +818,22 @@ function GroupCallModal({
           callId: callIdRef.current,
           streamId: localIon.id
         });
-
-        // Подцепляем состояние RTCPeerConnection SFU (нужно для условия ready)
-        const bindPc = (triesLeft) => {
-          if (sfuReadyRef.current) return;
-          if (!sfuConnectingRef.current) return;
-          if (sfuPcRef.current) return;
-          let pc = null;
-          try {
-            pc = findPeerConnectionInClient(client);
-          } catch (e) {
-            pc = null;
-          }
-          if (pc) {
-            sfuPcRef.current = pc;
-            pc.onconnectionstatechange = () => {
-              const st = pc.connectionState;
-              console.log('[GroupCall][SFU] connectionState:', st);
-              if (st === 'connected') {
-                sfuPcConnectedRef.current = true;
-                maybeMarkSfuReady();
-              }
-              if (!sfuReadyRef.current && (st === 'failed' || st === 'closed')) {
-                fallbackToP2p(`SFU connectionState=${st}`);
-              }
-            };
-            if (pc.connectionState === 'connected') {
-              sfuPcConnectedRef.current = true;
-              maybeMarkSfuReady();
-            }
-            return;
-          }
-
-          if (triesLeft > 0) {
-            setTimeout(() => bindPc(triesLeft - 1), 200);
-          } else {
-            // Если pc так и не нашли, не переключаемся (по требованиям нужен pc.connected)
-            console.warn('[GroupCall][SFU] Could not locate RTCPeerConnection in ion Client');
-          }
-        };
-        bindPc(12);
       } catch (e) {
         console.error('[GroupCall][SFU] join/publish failed:', e);
-        if (!sfuReadyRef.current) {
-          fallbackToP2p('Ошибка подключения к SFU');
-        }
+        endGroupCall('SFU: join/publish failed');
       }
     };
 
     signal.onerror = (e) => {
       console.error('[GroupCall][SFU] WebSocket error:', e);
-      if (!sfuReadyRef.current) {
-        fallbackToP2p('Ошибка WebSocket (SFU)');
-      }
+      endGroupCall('SFU: WebSocket error');
     };
 
     signal.onclose = () => {
-      // Если SFU закрыли намеренно (switch/back) — ничего не делаем.
-      if (!sfuConnectingRef.current && !sfuReadyRef.current) return;
-
-      // Никаких бесконечных reconnect loop: если SFU упал — остаёмся/возвращаемся в P2P.
       console.warn('[GroupCall][SFU] WebSocket closed');
-      if (!sfuReadyRef.current) {
-        fallbackToP2p('SFU WebSocket closed');
-        return;
-      }
-
-      // Если SFU уже был активен и упал — НЕ завершаем звонок, просто возвращаемся в P2P.
-      // (Да, при 3+ это деградация, но требование: не рвать звонок.)
-      fallbackToP2p('SFU отключился — fallback в P2P');
+      endGroupCall('SFU: WebSocket closed');
     };
-  }, [applyCaptureTier, attachIncomingTrackToUser, callType, currentUserId, ensureIceConfig, fallbackToP2p, findPeerConnectionInClient, getSfuWsUrl, iceServers, maybeMarkSfuReady, socket]);
-
-  const switchModeIfNeeded = useCallback(async (desiredMode) => {
-    const next = desiredMode === 'sfu' ? 'sfu' : 'p2p';
-    if (callModeRef.current === next) {
-      // Особый случай: мы всё ещё в P2P, но SFU мог быть в процессе подключения.
-      // Если теперь желаем P2P (<=2 участников) — закрываем SFU попытку.
-      if (next === 'p2p' && sfuConnectingRef.current) {
-        closeSfu();
-        setCapacityWarning(null);
-      }
-      return;
-    }
-
-    // P2P -> SFU: поднимаем SFU параллельно, НЕ закрывая P2P.
-    if (next === 'sfu') {
-      setCapacityWarning('Подключаем SFU...');
-      await connectSfuIfReady();
-      return;
-    }
-
-    // SFU -> P2P: можно закрыть SFU сразу.
-    if (callModeRef.current === 'sfu') {
-      closeSfu();
-      clearRemoteMedia();
-    }
-    setCapacityWarning(null);
-    setMode('p2p');
-    // P2P: peer будет назначен из participants (см. socket handlers)
-  }, [clearRemoteMedia, closeSfu, connectSfuIfReady, setMode]);
+  }, [applyCaptureTier, attachIncomingTrackToUser, callType, createIonSignalWithJsonRpc2, currentUserId, endGroupCall, ensureIceConfig, findPeerConnectionInClient, getSfuWsUrl, iceServers, socket]);
 
   // Присоединение к звонку
   const joinCall = useCallback(async ({ unlock = false } = {}) => {
@@ -1143,8 +874,6 @@ function GroupCallModal({
 
       console.log('[GroupCall] Joined call, existing participants:', response.participants);
       setCallStatus('active');
-
-      const existingCount = Array.isArray(response.participants) ? response.participants.length : 0;
       setCapacityWarning(null);
 
       // ВАЖНО: заполняем participants существующими участниками, иначе поздно вошедший
@@ -1162,69 +891,47 @@ function GroupCallModal({
         });
       }
 
-      // Выбор режима: <=2 => P2P, 3+ => SFU
-      const total = existingCount + 1;
-      const desiredMode = total > 2 ? 'sfu' : 'p2p';
-      switchModeIfNeeded(desiredMode)
-        .then(async () => {
-          if (desiredMode === 'p2p') {
-            // Если в комнате ровно 2 участника — подключаемся к единственному peer
-            const peerId = response.participants?.[0]?.oderId;
-            if (peerId) await connectP2pIfReady(peerId);
-          }
-        })
-        .catch((e) => console.error('[GroupCall] switchMode failed:', e));
+      // Групповые звонки: ВСЕГДА SFU с первой секунды.
+      // WebSocket/PeerConnection создаются один раз и живут до конца звонка.
+      connectSfuOnce().catch((e) => {
+        console.error('[GroupCall][SFU] connect failed:', e);
+        endGroupCall('SFU: connect failed');
+      });
     });
-  }, [getLocalStream, socket, chatId, currentUserId, onClose, ensureIceConfig, unlockMediaPlayback, switchModeIfNeeded, connectP2pIfReady]);
-
-  // Начало звонка (для инициатора)
-  const startCall = useCallback(async () => {
-    setCallStatus('connecting');
-
-    // Инициатор тоже должен иметь ICE конфиг заранее.
-    await ensureIceConfig();
-
-    const stream = await getLocalStream();
-    if (!stream) {
-      onClose();
-      return;
-    }
-
-    // Инициатор стартует в P2P-режиме по умолчанию.
-    // Если позже присоединится 3-й участник — переключим на SFU в socket handlers.
-    setMode('p2p');
-
-    setCallStatus('active');
-    onJoin?.();
-  }, [getLocalStream, onClose, onJoin, ensureIceConfig, setMode]);
+  }, [connectSfuOnce, currentUserId, endGroupCall, ensureIceConfig, getLocalStream, onClose, socket, chatId, unlockMediaPlayback]);
 
   // Автоматический запуск для не-входящих звонков
   useEffect(() => {
     if (isIncoming) return;
     if (callStatus !== 'connecting') return;
 
-    // ВАЖНО: join и start — это разные сценарии.
-    // - startCall(): только локальный поток (инициатор уже "в звонке" логически)
-    // - joinCall(): ОБЯЗАТЕЛЬНО делает socket.emit('group-call:join') и получает participants
-    // Если пропустить joinCall (как было раньше в кейсе already_active), пользователь окажется один.
-    if (autoJoin) {
-      joinCall();
-    } else {
-      startCall();
-    }
-  }, [isIncoming, callStatus, startCall, joinCall, autoJoin]);
+    // SFU-only: инициатор и участники запускают звонок через group-call:join.
+    // autoJoin влияет только на входящие/"присоединиться" сценарии (кнопка).
+    joinCall();
+  }, [isIncoming, callStatus, joinCall]);
 
   // ===== CLEANUP =====
   // ВАЖНО: cleanup должен быть объявлен ДО useEffect/socket handlers.
   // Иначе ссылка на cleanup в dependency array попадает в TDZ и в production build падает
   // с ошибкой вида: "Cannot access '<minified>' before initialization".
   const cleanup = useCallback(() => {
-    // ВАЖНО: по требованиям НЕ трогаем tracks (stop/remove/replace) —
-    // просто закрываем PC и очищаем ссылки.
+    // Останавливаем локальные треки, чтобы освободить камеру/микрофон.
+    try {
+      const stream = localStreamRef.current;
+      if (stream) {
+        stream.getTracks().forEach((t) => t.stop());
+      }
+    } catch (e) {}
     localStreamRef.current = null;
+    setLocalStream(null);
 
-    // Закрываем P2P/SFU транспорты
-    closeP2p();
+    try {
+      if (localVideoRef.current) localVideoRef.current.srcObject = null;
+      if (localPreviewVideoRef.current) localPreviewVideoRef.current.srcObject = null;
+      if (mainVideoRef.current) mainVideoRef.current.srcObject = null;
+    } catch (e) {}
+
+    // Закрываем SFU транспорт
     closeSfu();
 
     // Демонстрация экрана: остановим отдельный track (локальную камеру не трогаем)
@@ -1259,7 +966,7 @@ function GroupCallModal({
     if (activeSpeakerTimerRef.current) {
       clearTimeout(activeSpeakerTimerRef.current);
     }
-  }, [closeP2p, closeSfu]);
+  }, [closeSfu]);
 
   // держим ref с последним participants для расчёта количества в socket handlers
   const participantsRef = useRef([]);
@@ -1287,28 +994,12 @@ function GroupCallModal({
           }
           return prev;
         });
-
-        const already = participantsRef.current.some((p) => p?.oderId === oderId);
-        const nextTotal = (already ? participantsRef.current.length : participantsRef.current.length + 1) + 1;
-        const desiredMode = nextTotal > 2 ? 'sfu' : 'p2p';
-        switchModeIfNeeded(desiredMode)
-          .then(async () => {
-            if (desiredMode === 'p2p' && nextTotal === 2) {
-              await connectP2pIfReady(oderId);
-            }
-          })
-          .catch((e) => console.error('[GroupCall] switchMode failed:', e));
       }
     };
 
     // Участник покинул звонок
     const handleParticipantLeft = ({ oderId }) => {
       console.log('[GroupCall] Participant left:', oderId);
-
-      // Если P2P и ушёл текущий peer — закрываем PC
-      if (callModeRef.current === 'p2p' && p2pPeerIdRef.current === oderId) {
-        closeP2p();
-      }
       
       // Удаляем stream
       const stream = remoteStreamsRef.current.get(oderId);
@@ -1328,29 +1019,6 @@ function GroupCallModal({
       // Сбрасываем pinned если это был он
       if (pinnedUserId === oderId) {
         setPinnedUserId(LOCAL_PIN_ID);
-      }
-
-      // Пересчёт режима: если осталось <=2 — возвращаемся в P2P
-      const prevLen = participantsRef.current.length;
-      const nextLen = Math.max(0, prevLen - 1);
-      const nextTotal = nextLen + 1;
-      const desiredMode = nextTotal > 2 ? 'sfu' : 'p2p';
-      switchModeIfNeeded(desiredMode)
-        .then(async () => {
-          if (desiredMode === 'p2p' && nextTotal === 2) {
-            // найдём оставшегося peer
-            const remaining = participantsRef.current.filter((p) => p?.oderId && p.oderId !== oderId);
-            const peerId = remaining?.[0]?.oderId;
-            if (peerId) await connectP2pIfReady(peerId);
-          }
-        })
-        .catch((e) => console.error('[GroupCall] switchMode failed:', e));
-    };
-
-    // Входящий сигнал
-    const handleIncomingSignal = (data) => {
-      if (data.callId === callIdRef.current) {
-        handleP2pSignal(data);
       }
     };
 
@@ -1373,6 +1041,8 @@ function GroupCallModal({
     const handleCallEnded = ({ callId: endedCallId, reason }) => {
       if (endedCallId === callIdRef.current) {
         console.log('[GroupCall] Call ended:', reason);
+        if (endedRef.current) return;
+        endedRef.current = true;
         cleanup();
         onClose();
       }
@@ -1380,21 +1050,21 @@ function GroupCallModal({
 
     socket.on('group-call:participant-joined', handleParticipantJoined);
     socket.on('group-call:participant-left', handleParticipantLeft);
-    socket.on('group-call:signal', handleIncomingSignal);
     socket.on('group-call:sfu-stream', handleSfuStreamMapping);
     socket.on('group-call:ended', handleCallEnded);
 
     return () => {
       socket.off('group-call:participant-joined', handleParticipantJoined);
       socket.off('group-call:participant-left', handleParticipantLeft);
-      socket.off('group-call:signal', handleIncomingSignal);
       socket.off('group-call:sfu-stream', handleSfuStreamMapping);
       socket.off('group-call:ended', handleCallEnded);
     };
-  }, [socket, currentUserId, handleP2pSignal, onClose, cleanup, pinnedUserId, switchModeIfNeeded, connectP2pIfReady, attachIncomingTrackToUser, closeP2p]);
+  }, [socket, currentUserId, onClose, cleanup, pinnedUserId, attachIncomingTrackToUser]);
 
   // Завершение звонка
   const handleEndCall = useCallback(() => {
+    if (endedRef.current) return;
+    endedRef.current = true;
     if (!leaveSentRef.current) {
       leaveSentRef.current = true;
       socket.emit('group-call:leave', { callId: callIdRef.current });
@@ -1462,32 +1132,8 @@ function GroupCallModal({
     }
   }, [isScreenSharing]);
 
-  const getOutboundVideoSender = useCallback(() => {
-    try {
-      if (callModeRef.current === 'sfu') {
-        const transports = sfuClientRef.current?.transports;
-        const pub = transports?.[0] || transports?.pub;
-        const pc = pub?.pc;
-        return pc?.getSenders?.().find((s) => s.track?.kind === 'video') || null;
-      }
-      const pc = p2pPcRef.current;
-      return pc?.getSenders?.().find((s) => s.track?.kind === 'video') || null;
-    } catch (e) {
-      return null;
-    }
-  }, []);
-
   const stopScreenShare = useCallback(async () => {
     if (!isScreenSharing) return;
-    try {
-      const cameraTrack = localStreamRef.current?.getVideoTracks?.()?.[0] || null;
-      const sender = getOutboundVideoSender();
-      if (sender && cameraTrack) {
-        await sender.replaceTrack(cameraTrack);
-      }
-    } catch (e) {
-      console.warn('[GroupCall] stopScreenShare replaceTrack failed:', e);
-    }
 
     try {
       if (screenStreamRef.current) {
@@ -1504,46 +1150,12 @@ function GroupCallModal({
       attachStreamToVideo(localVideoRef.current, localStreamRef.current, { muted: true });
       attachStreamToVideo(localPreviewVideoRef.current, localStreamRef.current, { muted: true });
     }
-  }, [attachStreamToVideo, getOutboundVideoSender, isScreenSharing]);
+  }, [attachStreamToVideo, isScreenSharing]);
 
   const startScreenShare = useCallback(async () => {
     if (callType !== 'video') return;
-    if (!navigator.mediaDevices?.getDisplayMedia) {
-      alert('Демонстрация экрана не поддерживается в этом браузере');
-      return;
-    }
-    if (isScreenSharing) return;
-
-    try {
-      const displayStream = await navigator.mediaDevices.getDisplayMedia({
-        video: { frameRate: { ideal: 30, max: 60 } },
-        audio: false
-      });
-      const screenTrack = displayStream.getVideoTracks?.()?.[0];
-      if (!screenTrack) return;
-
-      screenStreamRef.current = displayStream;
-      screenTrackRef.current = screenTrack;
-
-      const sender = getOutboundVideoSender();
-      if (sender) {
-        await sender.replaceTrack(screenTrack);
-      }
-
-      // self-view: показываем шаринг как локальный превью
-      attachStreamToVideo(localVideoRef.current, displayStream, { muted: true });
-      attachStreamToVideo(localPreviewVideoRef.current, displayStream, { muted: true });
-
-      setIsScreenSharing(true);
-      setIsVideoOff(false);
-
-      screenTrack.onended = () => {
-        stopScreenShare();
-      };
-    } catch (e) {
-      console.error('[GroupCall] startScreenShare failed:', e);
-    }
-  }, [attachStreamToVideo, callType, getOutboundVideoSender, isScreenSharing, stopScreenShare]);
+    setCapacityWarning('Демонстрация экрана в групповых звонках сейчас отключена (SFU-only режим).');
+  }, [callType]);
 
   // Cleanup при unmount
   useEffect(() => {
@@ -1850,17 +1462,7 @@ function GroupCallModal({
           )}
 
           {callType === 'video' && (
-            <button
-              onClick={isScreenSharing ? stopScreenShare : startScreenShare}
-              style={{
-                ...styles.controlBtn,
-                ...styles.controlBtnScreen,
-                ...(isScreenSharing ? styles.controlBtnActive : {})
-              }}
-              title={isScreenSharing ? 'Остановить демонстрацию экрана' : 'Демонстрация экрана'}
-            >
-              {isScreenSharing ? '🛑' : '🖥️'}
-            </button>
+            null
           )}
 
           <button
