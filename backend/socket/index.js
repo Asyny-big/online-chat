@@ -8,6 +8,7 @@ const config = require('../config.local');
 const userSockets = new Map();
 const activeCalls = new Map();
 const activeGroupCalls = new Map(); // chatId -> { callId, type, participants:Set<userId> }
+const activeGroupCallStreams = new Map(); // callId -> Map<userId, streamId>
 
 async function forceLeaveUserFromCall({ io, userId, call }) {
   // Помечаем пользователя вышедшим из звонка (на случай закрытия вкладки/потери сети)
@@ -432,6 +433,42 @@ module.exports = function(io) {
       }
     });
 
+    // === SFU stream mapping (ADD-ONLY, не ломает существующий signaling) ===
+    // Клиент сообщает свой MediaStream.id, чтобы остальные могли связать remote stream.id с userId.
+    // Это необходимо, потому что ion-sfu json-rpc в браузере не даёт стабильного userId в ontrack.
+    socket.on('group-call:sfu-stream', async ({ callId, streamId }, callback) => {
+      try {
+        if (!callId || !streamId) return callback?.({ error: 'Invalid payload' });
+
+        const call = await Call.findById(callId);
+        if (!call) return callback?.({ error: 'Звонок не найден' });
+
+        const chat = await Chat.findById(call.chat);
+        if (!chat || !chat.isParticipant(userId)) return callback?.({ error: 'Нет доступа' });
+
+        // Убеждаемся что пользователь в участниках звонка (не leftAt)
+        const inCall = call.participants.some((p) => !p.leftAt && p.user?.toString?.() === userId);
+        if (!inCall) return callback?.({ error: 'Not in call' });
+
+        if (!activeGroupCallStreams.has(callId)) {
+          activeGroupCallStreams.set(callId, new Map());
+        }
+        activeGroupCallStreams.get(callId).set(userId, String(streamId));
+
+        // Рассылаем всем в чате (в т.ч. отправителю — чтобы унифицировать обработку на клиенте)
+        io.to(`chat:${chat._id}`).emit('group-call:sfu-stream', {
+          callId: String(callId),
+          userId,
+          streamId: String(streamId)
+        });
+
+        callback?.({ success: true });
+      } catch (err) {
+        console.error('group-call:sfu-stream error:', err);
+        callback?.({ error: 'Ошибка' });
+      }
+    });
+
     socket.on('group-call:leave', async ({ callId }, callback) => {
       try {
         const call = await Call.findById(callId);
@@ -471,6 +508,15 @@ module.exports = function(io) {
             participantCount: stillIn.length
           });
         }
+
+        // чистим sfu stream map для вышедшего (best-effort)
+        try {
+          const map = activeGroupCallStreams.get(callId);
+          if (map) {
+            map.delete(userId);
+            if (map.size === 0) activeGroupCallStreams.delete(callId);
+          }
+        } catch (e) {}
 
         callback?.({ success: true });
       } catch (err) {

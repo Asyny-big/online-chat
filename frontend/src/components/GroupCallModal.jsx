@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { API_URL } from '../config';
+import { Client, LocalStream } from 'ion-sdk-js';
+import { IonSFUJSONRPCSignal } from 'ion-sdk-js/lib/signal/json-rpc-impl';
 
 // Спец-id для «закрепить своё видео» без переписывания всей логики pinnedUserId.
 // Почему так: pinnedUserId раньше принимал только remote userId, из-за чего
@@ -9,7 +11,8 @@ const LOCAL_PIN_ID = '__local__';
 
 /**
  * GroupCallModal - Компонент для групповых видео/аудио звонков (Discord-like UX)
- * Использует mesh-топологию WebRTC (каждый участник соединён с каждым)
+ * P2P: 1-на-1 (<=2 участников) — прямой WebRTC (как раньше, но без mesh-map)
+ * SFU: 3+ участников — ion-sfu (json-rpc), 1 RTCPeerConnection → SFU
  * 
  * Основные особенности:
  * - Main video (pinned/active speaker) + preview strip
@@ -45,6 +48,11 @@ function GroupCallModal({
   const [localStream, setLocalStream] = useState(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(callType === 'audio');
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+
+  // Логика выбора транспорта
+  const [callMode, setCallMode] = useState('p2p'); // 'p2p' | 'sfu'
+  const callModeRef = useRef('p2p');
   // ВАЖНО: backend отдаёт не только iceServers, но и iceCandidatePoolSize.
   // Для ускорения первого подключения нам нужно иметь этот конфиг ДО создания RTCPeerConnection.
   const [iceServers, setIceServers] = useState([]);
@@ -61,29 +69,29 @@ function GroupCallModal({
   const [activeSpeakerId, setActiveSpeakerId] = useState(null); // Активный говорящий
   const [audioLevels, setAudioLevels] = useState({}); // { userId: volume }
 
-  // Адаптивное качество (по умолчанию включено).
-  // Почему так: жёсткие потолки хорошо спасают от лагов, но на отличной сети
-  // бессмысленно держать качество низким — можно подняться до HD/бОльшего битрейта.
-  const [isAdaptiveQualityEnabled] = useState(true);
   const [captureTierUi, setCaptureTierUi] = useState('SD'); // UI-индикатор (SD/HD)
 
   // ===== REFS =====
   const localVideoRef = useRef(null); // Для main video (локальное)
   const localPreviewVideoRef = useRef(null); // Для preview strip (локальное) - ОТДЕЛЬНЫЙ ref!
   const mainVideoRef = useRef(null); // Главное видео (remote)
-  const peerConnectionsRef = useRef({}); // { oderId: RTCPeerConnection }
   const remoteStreamsRef = useRef(new Map()); // Map<oderId, MediaStream> - remote ТОЛЬКО
-  const pendingCandidatesRef = useRef({}); // { oderId: ICECandidate[] }
-  const pcMetaRef = useRef({}); // { oderId: { isInitiator?: boolean, isPolite?: boolean, shouldInitiate?: boolean, isMakingOffer?: boolean, ignoreOffer?: boolean } }
-  const qualityRef = useRef({});
-  // qualityRef.current[oderId] = {
-  //   targetKbps, targetFps,
-  //   lastJitterMs, goodStreak, badStreak,
-  //   lastAppliedAt
-  // }
+
+  // === P2P (<=2) ===
+  const p2pPcRef = useRef(null); // RTCPeerConnection
+  const p2pPeerIdRef = useRef(null); // userId удалённого участника (если есть)
+  const p2pPendingCandidatesRef = useRef([]); // ICECandidateInit[]
+  const p2pMetaRef = useRef({ isMakingOffer: false, ignoreOffer: false, isPolite: true, shouldInitiate: false });
+
+  // === SFU (>=3) ===
+  const sfuSignalRef = useRef(null);
+  const sfuClientRef = useRef(null);
+  const sfuPublishedLocalStreamIdRef = useRef(null); // stream.id, который видит SFU
+  const sfuRemoteStreamIdToUserIdRef = useRef(new Map()); // streamId -> userId
+  const sfuPendingRemoteStreamsByIdRef = useRef(new Map()); // streamId -> MediaStream
+  const sfuConfigRef = useRef({ jsonRpcUrl: 'http://95.85.243.120:7000' });
+
   const captureTierRef = useRef('sd'); // 'sd' | 'hd'
-  const captureGoodStreakRef = useRef(0);
-  const captureBadStreakRef = useRef(0);
   const ringtoneRef = useRef(null);
   const leaveSentRef = useRef(false);
   const callIdRef = useRef(callId);
@@ -97,18 +105,13 @@ function GroupCallModal({
   const lastMainUserIdRef = useRef(null);
   const mediaUnlockedRef = useRef(false);
   const pendingPlayElementsRef = useRef(new Set());
-  const pendingPeersToConnectRef = useRef(new Set());
   const [capacityWarning, setCapacityWarning] = useState(null);
 
-  // Добавление ICE кандидатов откладываем до момента, когда remoteDescription уже установлен.
-  // Почему так: addIceCandidate() с remoteDescription === null кидает InvalidStateError.
-  // Раньше мы пытались flush'ить кандидаты сразу при createPeerConnection(), теряли их и
-  // в итоге часть peer'ов уходила в failed → "у некоторых нет видео".
-  const flushPendingIceCandidates = useCallback(async (oderId, pc) => {
+  // P2P: добавление ICE кандидатов откладываем до remoteDescription.
+  const flushPendingP2pIceCandidates = useCallback(async (pc) => {
     if (!pc || pc.signalingState === 'closed') return;
     if (!pc.remoteDescription) return;
-
-    const pending = pendingCandidatesRef.current[oderId];
+    const pending = p2pPendingCandidatesRef.current;
     if (!pending || pending.length === 0) return;
 
     const remaining = [];
@@ -116,7 +119,6 @@ function GroupCallModal({
       try {
         await pc.addIceCandidate(new RTCIceCandidate(candidate));
       } catch (err) {
-        // Если всё ещё рано — сохраняем кандидат, попробуем позже.
         if (err?.name === 'InvalidStateError') {
           remaining.push(candidate);
         } else {
@@ -124,12 +126,7 @@ function GroupCallModal({
         }
       }
     }
-
-    if (remaining.length > 0) {
-      pendingCandidatesRef.current[oderId] = remaining;
-    } else {
-      delete pendingCandidatesRef.current[oderId];
-    }
+    p2pPendingCandidatesRef.current = remaining;
   }, []);
 
   const tryPlayElement = useCallback((el) => {
@@ -312,219 +309,18 @@ function GroupCallModal({
     }
   }, [setBitrate]);
 
-  // ===== ADAPTIVE QUALITY (stats-driven) =====
+  // ===== CAPTURE POLICY =====
+  // Требование: для групп (SFU) целимся в HD 720p. Для P2P (<=2) держим SD по умолчанию.
   useEffect(() => {
-    if (!isAdaptiveQualityEnabled) return;
-    if (callStatus !== 'active') return;
+    if (callType !== 'video') return;
     if (!localStreamRef.current) return;
 
-    let stopped = false;
-
-    const intervalId = setInterval(async () => {
-      if (stopped) return;
-
-      const pcEntries = Object.entries(peerConnectionsRef.current);
-      if (pcEntries.length === 0) return;
-
-      // Для capture-tier решения используем агрегат по всем peer'ам.
-      let worstRttMs = 0;
-      let worstJitterMs = 0;
-      let worstLoss = 0;
-      let minAvailOutKbps = Infinity;
-
-      const mainUserId = getMainUserId();
-      const participantCount = pcEntries.length + 1; // мы + количество peerConnections
-
-      for (const [oderId, pc] of pcEntries) {
-        if (!pc || pc.signalingState === 'closed') continue;
-
-        // Текущая базовая цель (на случай если stats недоступны).
-        const isMainPeer = !!mainUserId && oderId === mainUserId;
-        const baseMinKbps = isMainPeer ? 500 : 160;
-        const baseMaxKbps = isMainPeer
-          ? (participantCount <= 3 ? 2500 : participantCount <= 5 ? 1600 : 1100)
-          : (participantCount <= 3 ? 900 : participantCount <= 5 ? 650 : 450);
-        const baseMinFps = isMainPeer ? 15 : 10;
-        const baseMaxFps = isMainPeer ? 30 : 18;
-
-        const state = (qualityRef.current[oderId] ||= {
-          targetKbps: isMainPeer ? 650 : 250,
-          targetFps: isMainPeer ? 18 : 15,
-          lastJitterMs: null,
-          goodStreak: 0,
-          badStreak: 0,
-          lastAppliedAt: 0,
-        });
-
-        let rttMs = null;
-        let jitterMs = null;
-        let lossRatio = null;
-        let availOutKbps = null;
-
-        try {
-          const stats = await pc.getStats();
-
-          // 1) Candidate pair: доступная пропускная способность и RTT.
-          for (const rep of stats.values()) {
-            if (rep.type !== 'candidate-pair') continue;
-            const selected = rep.selected || rep.nominated;
-            if (!selected) continue;
-            if (rep.state && rep.state !== 'succeeded') continue;
-
-            if (typeof rep.currentRoundTripTime === 'number') {
-              rttMs = Math.round(rep.currentRoundTripTime * 1000);
-            }
-            if (typeof rep.availableOutgoingBitrate === 'number') {
-              availOutKbps = Math.round(rep.availableOutgoingBitrate / 1000);
-            }
-            break;
-          }
-
-          // 2) outbound-rtp video + remote-inbound-rtp video (RTT/jitter/loss глазами получателя).
-          let outboundVideoId = null;
-          for (const rep of stats.values()) {
-            if (rep.type === 'outbound-rtp' && (rep.kind === 'video' || rep.mediaType === 'video') && !rep.isRemote) {
-              outboundVideoId = rep.id;
-              break;
-            }
-          }
-
-          if (outboundVideoId) {
-            for (const rep of stats.values()) {
-              if (rep.type !== 'remote-inbound-rtp') continue;
-              if ((rep.kind !== 'video' && rep.mediaType !== 'video')) continue;
-              if (rep.localId && rep.localId !== outboundVideoId) continue;
-
-              if (typeof rep.roundTripTime === 'number') {
-                // remote-inbound RTT обычно точнее выбранной пары.
-                rttMs = Math.round(rep.roundTripTime * 1000);
-              }
-              if (typeof rep.jitter === 'number') {
-                jitterMs = Math.round(rep.jitter * 1000);
-              }
-              if (typeof rep.packetsLost === 'number' && typeof rep.packetsReceived === 'number') {
-                const total = rep.packetsLost + rep.packetsReceived;
-                if (total > 0) {
-                  lossRatio = rep.packetsLost / total;
-                }
-              }
-              break;
-            }
-          }
-        } catch (e) {
-          // getStats может падать на некоторых WebView.
-        }
-
-        // Fallback значений
-        if (rttMs == null) rttMs = 999;
-        if (jitterMs == null) jitterMs = state.lastJitterMs ?? 0;
-        if (lossRatio == null) lossRatio = 0;
-        if (availOutKbps == null) availOutKbps = 0;
-
-        // Агрегируем для capture-tier решения.
-        worstRttMs = Math.max(worstRttMs, rttMs);
-        worstJitterMs = Math.max(worstJitterMs, jitterMs);
-        worstLoss = Math.max(worstLoss, lossRatio);
-        if (availOutKbps > 0) minAvailOutKbps = Math.min(minAvailOutKbps, availOutKbps);
-
-        // Условие "хорошо" vs "плохо".
-        const jitterGrowth = state.lastJitterMs != null ? (jitterMs - state.lastJitterMs) : 0;
-        state.lastJitterMs = jitterMs;
-
-        const good =
-          availOutKbps >= Math.max(600, state.targetKbps * 2) &&
-          rttMs <= 140 &&
-          jitterMs <= 25 &&
-          jitterGrowth <= 6 &&
-          lossRatio <= 0.02;
-
-        const bad =
-          (availOutKbps > 0 && availOutKbps < Math.max(300, state.targetKbps * 1.1)) ||
-          rttMs >= 220 ||
-          jitterMs >= 45 ||
-          jitterGrowth >= 10 ||
-          lossRatio >= 0.05;
-
-        if (good) {
-          state.goodStreak += 1;
-          state.badStreak = 0;
-        } else if (bad) {
-          state.badStreak += 1;
-          state.goodStreak = 0;
-        } else {
-          // нейтрально: чуть затухаем, чтобы не залипать в streak
-          state.goodStreak = Math.max(0, state.goodStreak - 1);
-          state.badStreak = Math.max(0, state.badStreak - 1);
-        }
-
-        // Шаги изменения качества (плавно вверх, быстрее вниз).
-        const upStepKbps = isMainPeer ? 180 : 90;
-        const downStepKbps = isMainPeer ? 260 : 140;
-        const upStepFps = isMainPeer ? 2 : 1;
-        const downStepFps = isMainPeer ? 3 : 2;
-
-        if (state.goodStreak >= 2) {
-          state.targetKbps = Math.min(baseMaxKbps, state.targetKbps + upStepKbps);
-          state.targetFps = Math.min(baseMaxFps, state.targetFps + upStepFps);
-        } else if (state.badStreak >= 1) {
-          state.targetKbps = Math.max(baseMinKbps, state.targetKbps - downStepKbps);
-          state.targetFps = Math.max(baseMinFps, state.targetFps - downStepFps);
-        }
-
-        // Применяем caps к sender'у (outgoing).
-        const sender = getVideoSender(pc);
-        const now = Date.now();
-        if (now - state.lastAppliedAt >= 1800) {
-          state.lastAppliedAt = now;
-          await setSenderCapsIfChanged(sender, state.targetKbps, state.targetFps);
-        }
-      }
-
-      // ===== Capture SD ↔ HD =====
-      // Решаем по худшему peer'у (если хотя бы одному плохо — держим SD).
-      // И поднимаем только в маленьких группах, иначе mesh быстро съедает upload.
-      const canTryHd = (peerConnectionsRef.current && Object.keys(peerConnectionsRef.current).length + 1) <= 3;
-      const overallGood =
-        canTryHd &&
-        minAvailOutKbps !== Infinity &&
-        minAvailOutKbps >= 2500 &&
-        worstRttMs <= 120 &&
-        worstJitterMs <= 20 &&
-        worstLoss <= 0.02;
-
-      const overallBad =
-        !canTryHd ||
-        worstRttMs >= 220 ||
-        worstJitterMs >= 45 ||
-        worstLoss >= 0.05;
-
-      if (overallGood) {
-        captureGoodStreakRef.current += 1;
-        captureBadStreakRef.current = 0;
-      } else if (overallBad) {
-        captureBadStreakRef.current += 1;
-        captureGoodStreakRef.current = 0;
-      } else {
-        captureGoodStreakRef.current = Math.max(0, captureGoodStreakRef.current - 1);
-        captureBadStreakRef.current = Math.max(0, captureBadStreakRef.current - 1);
-      }
-
-      // Гистерезис: повышаем после ~7.5s стабильного good, понижаем после ~5s bad.
-      if (captureTierRef.current === 'sd' && captureGoodStreakRef.current >= 3) {
-        await applyCaptureTier('hd');
-        captureGoodStreakRef.current = 0;
-      }
-      if (captureTierRef.current === 'hd' && captureBadStreakRef.current >= 2) {
-        await applyCaptureTier('sd');
-        captureBadStreakRef.current = 0;
-      }
-    }, 2500);
-
-    return () => {
-      stopped = true;
-      clearInterval(intervalId);
-    };
-  }, [callStatus, isAdaptiveQualityEnabled, getMainUserId, getVideoSender, setSenderCapsIfChanged, applyCaptureTier]);
+    if (callModeRef.current === 'sfu') {
+      applyCaptureTier('hd');
+    } else {
+      applyCaptureTier('sd');
+    }
+  }, [callType, callMode, applyCaptureTier]);
 
   // ===== ACTIVE SPEAKER DETECTION =====
   
@@ -613,7 +409,7 @@ function GroupCallModal({
   
   const loadIceConfig = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/webrtc/ice`, {
+      const res = await fetch(`${API_URL}/webrtc/config`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
@@ -626,6 +422,10 @@ function GroupCallModal({
       iceConfigRef.current = nextConfig;
       iceReadyRef.current = true;
       setIceServers(nextConfig.iceServers);
+
+      if (data?.sfu?.jsonRpcUrl) {
+        sfuConfigRef.current = { jsonRpcUrl: String(data.sfu.jsonRpcUrl) };
+      }
       return nextConfig;
     } catch (err) {
       console.error('[GroupCall] Failed to fetch ICE servers:', err);
@@ -641,6 +441,8 @@ function GroupCallModal({
       iceConfigRef.current = fallback;
       iceReadyRef.current = true;
       setIceServers(fallback.iceServers);
+
+      // SFU fallback оставляем дефолтным
       return fallback;
     }
   }, [token]);
@@ -810,229 +612,190 @@ function GroupCallModal({
     // При polite = current < remote, инициатором будет сторона current > remote.
     return String(currentUserId).localeCompare(String(remoteUserId)) > 0;
   }, [currentUserId]);
-  
-  // Создание PeerConnection для участника
-  const createPeerConnection = useCallback((oderId, isInitiator = false) => {
-    if (peerConnectionsRef.current[oderId]) {
-      console.log('[GroupCall] PeerConnection already exists for:', oderId);
-      return peerConnectionsRef.current[oderId];
+
+  const setMode = useCallback((nextMode) => {
+    callModeRef.current = nextMode;
+    setCallMode(nextMode);
+  }, []);
+
+  const clearRemoteMedia = useCallback(() => {
+    remoteStreamsRef.current = new Map();
+    analysersRef.current = {};
+    setStreamUpdateCounter((v) => v + 1);
+  }, []);
+
+  const closeP2p = useCallback(() => {
+    try {
+      p2pPcRef.current?.close?.();
+    } catch (e) {}
+    p2pPcRef.current = null;
+    p2pPeerIdRef.current = null;
+    p2pPendingCandidatesRef.current = [];
+    p2pMetaRef.current = { isMakingOffer: false, ignoreOffer: false, isPolite: true, shouldInitiate: false };
+  }, []);
+
+  const closeSfu = useCallback(() => {
+    try {
+      sfuClientRef.current?.close?.();
+    } catch (e) {}
+    try {
+      sfuSignalRef.current?.close?.();
+    } catch (e) {}
+    sfuClientRef.current = null;
+    sfuSignalRef.current = null;
+    sfuPublishedLocalStreamIdRef.current = null;
+    sfuRemoteStreamIdToUserIdRef.current = new Map();
+    sfuPendingRemoteStreamsByIdRef.current = new Map();
+  }, []);
+
+  const toIonWsUrl = useCallback((jsonRpcUrl) => {
+    const raw = String(jsonRpcUrl || '').trim();
+    if (!raw) return null;
+
+    const ensureWsPath = (u) => {
+      const base = u.replace(/\/+$/, '');
+      return base.endsWith('/ws') ? base : `${base}/ws`;
+    };
+
+    if (raw.startsWith('wss://') || raw.startsWith('ws://')) return ensureWsPath(raw);
+    if (raw.startsWith('https://')) return ensureWsPath(raw.replace('https://', 'wss://'));
+    if (raw.startsWith('http://')) return ensureWsPath(raw.replace('http://', 'ws://'));
+    return ensureWsPath(`ws://${raw}`);
+  }, []);
+
+  const attachIncomingTrackToUser = useCallback((userId, track) => {
+    if (!userId || userId === currentUserId) return;
+    if (!track) return;
+
+    let remoteStream = remoteStreamsRef.current.get(userId);
+    if (!remoteStream) {
+      remoteStream = new MediaStream();
+      remoteStreamsRef.current.set(userId, remoteStream);
     }
 
-    console.log('[GroupCall] Creating PeerConnection for:', oderId, 'isInitiator:', isInitiator);
-    
-    // Берём ICE конфиг из ref, а не из state:
-    // state может обновиться позже, а RTCPeerConnection уже создан.
+    const existingTrack = remoteStream.getTracks().find((t) => t.id === track.id);
+    if (!existingTrack) {
+      remoteStream.addTrack(track);
+    }
+
+    if (track.kind === 'audio' && !analysersRef.current[userId]) {
+      setupAudioAnalyser(remoteStream, userId);
+    }
+
+    setStreamUpdateCounter((v) => v + 1);
+  }, [currentUserId, setupAudioAnalyser]);
+
+  const connectP2pIfReady = useCallback(async (peerId) => {
+    if (!peerId || peerId === currentUserId) return;
+    if (!localStreamRef.current) return;
+
+    await ensureIceConfig();
+
+    // Уже подключены
+    if (p2pPcRef.current && p2pPeerIdRef.current === peerId) return;
+
+    // Если был другой peer — закрываем и пересоздаём
+    if (p2pPcRef.current && p2pPeerIdRef.current && p2pPeerIdRef.current !== peerId) {
+      closeP2p();
+      clearRemoteMedia();
+    }
+
+    p2pPeerIdRef.current = peerId;
+    p2pMetaRef.current.isPolite = isPolitePeer(peerId);
+    p2pMetaRef.current.shouldInitiate = shouldInitiateOffer(peerId);
+
     const cfg = iceConfigRef.current || { iceServers: iceServers || [], iceCandidatePoolSize: 10 };
     const pc = new RTCPeerConnection({
       iceServers: cfg.iceServers || [],
       iceCandidatePoolSize: typeof cfg.iceCandidatePoolSize === 'number' ? cfg.iceCandidatePoolSize : 10
     });
+    p2pPcRef.current = pc;
 
-    pcMetaRef.current[oderId] = pcMetaRef.current[oderId] || {};
-    pcMetaRef.current[oderId].isInitiator = !!isInitiator;
-    pcMetaRef.current[oderId].isPolite = isPolitePeer(oderId);
-    pcMetaRef.current[oderId].shouldInitiate = shouldInitiateOffer(oderId);
-    pcMetaRef.current[oderId].isMakingOffer = false;
-    pcMetaRef.current[oderId].ignoreOffer = false;
-
-    // Добавляем локальные треки ТОЛЬКО при создании PeerConnection.
-    // Важно: не используем replaceTrack/addTrack после установления соединения.
-    const localStream = localStreamRef.current;
-    const localAudioTracks = localStream?.getAudioTracks?.() || [];
-    localAudioTracks.forEach((track) => {
-      try { pc.addTrack(track, localStream); } catch (e) {}
+    const local = localStreamRef.current;
+    (local?.getAudioTracks?.() || []).forEach((t) => {
+      try { pc.addTrack(t, local); } catch (e) {}
     });
-
     if (callType === 'video') {
-      const cameraTrack = localStream?.getVideoTracks?.()?.[0] || null;
-      if (cameraTrack) {
-        try { pc.addTrack(cameraTrack, localStream); } catch (e) {}
+      const vt = local?.getVideoTracks?.()?.[0];
+      if (vt) {
+        try { pc.addTrack(vt, local); } catch (e) {}
       }
     }
 
-    // Применяем начальные bitrate настройки (preview quality)
-    setTimeout(() => applyBitrateSettings(pc, false), 100);
-
-    // ICE кандидаты
     pc.onicecandidate = (event) => {
       if (event.candidate) {
         socket.emit('group-call:signal', {
           callId: callIdRef.current,
-          oderId,
-          signal: {
-            type: 'ice-candidate',
-            candidate: event.candidate
-          }
+          oderId: peerId,
+          signal: { type: 'ice-candidate', candidate: event.candidate }
         });
       }
     };
 
-    pc.oniceconnectionstatechange = () => {
-      const state = pc.iceConnectionState;
-      console.log('[GroupCall] ICE state for', oderId, ':', state);
+    pc.ontrack = (event) => {
+      attachIncomingTrackToUser(peerId, event.track);
     };
 
-    // Perfect negotiation: инициируем offer только с одной стороны пары.
-    pc.onnegotiationneeded = async () => {
-      const meta = pcMetaRef.current?.[oderId];
-      if (!meta?.shouldInitiate) return;
-      if (pc.signalingState !== 'stable') return;
+    pc.onconnectionstatechange = () => {
+      const st = pc.connectionState;
+      console.log('[GroupCall][P2P] connectionState:', st);
+    };
 
+    pc.onnegotiationneeded = async () => {
+      const meta = p2pMetaRef.current;
+      if (!meta.shouldInitiate) return;
+      if (pc.signalingState !== 'stable') return;
       try {
         meta.isMakingOffer = true;
         const offer = await pc.createOffer();
         if (pc.signalingState !== 'stable') return;
         await pc.setLocalDescription(offer);
-
         socket.emit('group-call:signal', {
           callId: callIdRef.current,
-          oderId,
-          signal: {
-            type: 'offer',
-            sdp: pc.localDescription
-          }
+          oderId: peerId,
+          signal: { type: 'offer', sdp: pc.localDescription }
         });
       } catch (err) {
-        console.warn('[GroupCall] negotiationneeded failed:', err);
+        console.warn('[GroupCall][P2P] negotiationneeded failed:', err);
       } finally {
         meta.isMakingOffer = false;
       }
     };
 
-    // Получение удалённого потока (addTrack паттерн)
-    pc.ontrack = (event) => {
-      console.log('[GroupCall] Received remote track from:', oderId, 'kind:', event.track?.kind);
+    // Немного поджимаем битрейт в P2P (не обязателен, но помогает на LTE)
+    setTimeout(() => applyBitrateSettings(pc, true), 150);
+  }, [applyBitrateSettings, attachIncomingTrackToUser, callType, clearRemoteMedia, closeP2p, currentUserId, ensureIceConfig, iceServers, isPolitePeer, shouldInitiateOffer, socket]);
 
-      // Гарантируем метаданные участника для UI (иначе stream есть, но не рендерится)
-      if (oderId !== currentUserId) {
-        setParticipants(prev => {
-          if (!prev.find(p => p.oderId === oderId)) {
-            return [...prev, { oderId, userName: 'Участник' }];
-          }
-          return prev;
-        });
-      }
-      
-      // Получаем или создаём MediaStream для этого пользователя
-      let remoteStream = remoteStreamsRef.current.get(oderId);
-      if (!remoteStream) {
-        remoteStream = new MediaStream();
-        remoteStreamsRef.current.set(oderId, remoteStream);
-        console.log('[GroupCall] Created new MediaStream for:', oderId);
-      }
-      
-      // Добавляем трек в существующий стрим (не заменяем стрим целиком!)
-      const track = event.track;
-      if (track) {
-        // Проверяем, нет ли уже такого трека
-        const existingTrack = remoteStream.getTracks().find(t => t.id === track.id);
-        if (!existingTrack) {
-          remoteStream.addTrack(track);
-          console.log('[GroupCall] Added track to stream:', oderId, track.kind);
-        }
-      }
-      
-      // Настраиваем анализатор аудио (только один раз для audio)
-      if (event.track?.kind === 'audio' && !analysersRef.current[oderId]) {
-        setupAudioAnalyser(remoteStream, oderId);
-      }
-      
-      // Trigger ререндер UI
-      setStreamUpdateCounter(prev => prev + 1);
-    };
+  const handleP2pSignal = useCallback(async ({ fromUserId, signal }) => {
+    if (callModeRef.current !== 'p2p') return;
+    if (!fromUserId || !signal) return;
 
-    // Состояние соединения
-    pc.onconnectionstatechange = () => {
-      console.log('[GroupCall] Connection state for', oderId, ':', pc.connectionState);
-      if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
-        console.log('[GroupCall] Connection failed/disconnected for:', oderId);
-      }
-    };
+    // Принимаем сигналы только от текущего peer
+    const peerId = p2pPeerIdRef.current || fromUserId;
+    if (peerId !== fromUserId) return;
 
-    peerConnectionsRef.current[oderId] = pc;
-
-    return pc;
-  }, [iceServers, socket, applyBitrateSettings, setupAudioAnalyser, callType, isPolitePeer, shouldInitiateOffer]);
-
-  // ===== BITRATE OPTIMIZATION =====
-  
-  // Обновление bitrate при изменении главного видео
-  useEffect(() => {
-    const mainUserId = getMainUserId();
-    if (lastMainUserIdRef.current === mainUserId) return;
-    lastMainUserIdRef.current = mainUserId;
-
-    // Почему так: частые setParameters() (особенно на Android/WebView) могут
-    // провоцировать нестабильность и задержку. Обновляем только когда main реально сменился.
-    Object.entries(peerConnectionsRef.current).forEach(([oderId, pc]) => {
-      const isMain = oderId === mainUserId;
-      applyBitrateSettings(pc, isMain);
-    });
-  }, [pinnedUserId, activeSpeakerId, getMainUserId, applyBitrateSettings]);
-
-  // ===== SIGNALING =====
-  
-  const connectToPeerIfPossible = useCallback(async (oderId) => {
-    if (!oderId || oderId === currentUserId) return;
-
-    // Ограничение mesh до 5 участников (включая себя)
-    const projectedTotal = Object.keys(peerConnectionsRef.current).length + 2; // existing remotes + new + self
-    if (projectedTotal > 5) {
-      setCapacityWarning('Лимит mesh: максимум 5 участников.');
-      return;
-    }
-
-    if (!localStreamRef.current) {
-      pendingPeersToConnectRef.current.add(oderId);
-      return;
-    }
-
-    await ensureIceConfig();
-    const pc = createPeerConnection(oderId, true);
+    await connectP2pIfReady(peerId);
+    const pc = p2pPcRef.current;
     if (!pc) return;
-  }, [createPeerConnection, currentUserId, ensureIceConfig]);
-
-  // Обработка входящего сигнала
-  const handleSignal = useCallback(async ({ fromUserId, signal }) => {
-    await ensureIceConfig();
-    console.log('[GroupCall] Received signal from:', fromUserId, signal.type);
-
-    // Если это существующий участник (инициатор/раньше подключившийся), но мы не получили
-    // group-call:participant-joined, добавляем его в participants, иначе UI не покажет stream.
-    if (fromUserId && fromUserId !== currentUserId) {
-      setParticipants(prev => {
-        if (!prev.find(p => p.oderId === fromUserId)) {
-          return [...prev, { oderId: fromUserId, userName: 'Участник' }];
-        }
-        return prev;
-      });
-    }
 
     if (signal.type === 'offer' || signal.type === 'answer') {
-      const pc = createPeerConnection(fromUserId, false);
-      if (!pc) return;
-
-      const meta = pcMetaRef.current?.[fromUserId] || {};
-      pcMetaRef.current[fromUserId] = meta;
-
       try {
         const description = signal.sdp;
         const isOffer = description?.type === 'offer';
+        const meta = p2pMetaRef.current;
         const offerCollision = isOffer && (meta.isMakingOffer || pc.signalingState !== 'stable');
-
         meta.ignoreOffer = !meta.isPolite && offerCollision;
         if (meta.ignoreOffer) {
-          console.log('[GroupCall] Ignoring offer (glare) from:', fromUserId);
+          console.log('[GroupCall][P2P] Ignoring offer (glare) from:', fromUserId);
           return;
         }
 
         if (offerCollision) {
-          // Политый peer откатывает локальный offer, чтобы принять удалённый.
           try { await pc.setLocalDescription({ type: 'rollback' }); } catch (e) {}
         }
 
         await pc.setRemoteDescription(new RTCSessionDescription(description));
-        await flushPendingIceCandidates(fromUserId, pc);
+        await flushPendingP2pIceCandidates(pc);
 
         if (isOffer) {
           const answer = await pc.createAnswer();
@@ -1044,25 +807,122 @@ function GroupCallModal({
           });
         }
       } catch (err) {
-        console.error('[GroupCall] Error handling description:', err);
+        console.error('[GroupCall][P2P] Error handling description:', err);
       }
       return;
     }
 
     if (signal.type === 'ice-candidate') {
-      const pc = peerConnectionsRef.current[fromUserId];
-      if (!pendingCandidatesRef.current[fromUserId]) {
-        pendingCandidatesRef.current[fromUserId] = [];
-      }
-
-      // Требование: ICE добавляем только после setRemoteDescription.
-      pendingCandidatesRef.current[fromUserId].push(signal.candidate);
-
-      if (pc?.remoteDescription) {
-        await flushPendingIceCandidates(fromUserId, pc);
+      p2pPendingCandidatesRef.current.push(signal.candidate);
+      if (pc.remoteDescription) {
+        await flushPendingP2pIceCandidates(pc);
       }
     }
-  }, [createPeerConnection, socket, ensureIceConfig, flushPendingIceCandidates, currentUserId]);
+  }, [connectP2pIfReady, flushPendingP2pIceCandidates, socket]);
+
+  const connectSfuIfReady = useCallback(async () => {
+    if (!localStreamRef.current) return;
+    await ensureIceConfig();
+
+    if (sfuClientRef.current) return;
+
+    const wsUrl = toIonWsUrl(sfuConfigRef.current?.jsonRpcUrl);
+    if (!wsUrl) {
+      setCapacityWarning('SFU URL не настроен');
+      return;
+    }
+
+    const cfg = iceConfigRef.current || { iceServers: iceServers || [] };
+    const signal = new IonSFUJSONRPCSignal(wsUrl);
+    const client = new Client(signal, {
+      codec: 'vp8',
+      iceServers: cfg.iceServers || []
+    });
+
+    sfuSignalRef.current = signal;
+    sfuClientRef.current = client;
+
+    client.ontrack = (track, stream) => {
+      const streamId = stream?.id;
+      if (!streamId) return;
+
+      const mappedUserId = sfuRemoteStreamIdToUserIdRef.current.get(streamId);
+      if (mappedUserId) {
+        attachIncomingTrackToUser(mappedUserId, track);
+      } else {
+        // Сохраняем до прихода mapping по socket.io
+        sfuPendingRemoteStreamsByIdRef.current.set(streamId, stream);
+      }
+    };
+
+    signal.onopen = async () => {
+      try {
+        await client.join(String(callIdRef.current), String(currentUserId));
+
+        if (callType === 'video') {
+          // Для SFU требуем HD 720p
+          await applyCaptureTier('hd');
+        }
+
+        const localIon = new LocalStream(localStreamRef.current, {
+          codec: 'vp8',
+          resolution: 'hd',
+          simulcast: true,
+          audio: true,
+          video: callType === 'video'
+        });
+
+        client.publish(localIon);
+
+        sfuPublishedLocalStreamIdRef.current = localIon.id;
+
+        // Сообщаем всем streamId → userId mapping
+        socket.emit('group-call:sfu-stream', {
+          callId: callIdRef.current,
+          streamId: localIon.id
+        });
+      } catch (e) {
+        console.error('[GroupCall][SFU] join/publish failed:', e);
+        setCapacityWarning('Ошибка подключения к SFU');
+      }
+    };
+
+    signal.onclose = () => {
+      if (callModeRef.current !== 'sfu') return;
+      console.warn('[GroupCall][SFU] signal closed');
+      setCapacityWarning('SFU отключён, пробуем переподключиться...');
+      // best-effort reconnect: чистим и пробуем снова
+      closeSfu();
+      setTimeout(() => {
+        if (callModeRef.current === 'sfu' && callStatus === 'active') {
+          connectSfuIfReady();
+        }
+      }, 1500);
+    };
+  }, [applyCaptureTier, attachIncomingTrackToUser, callStatus, callType, closeSfu, currentUserId, ensureIceConfig, iceServers, socket, toIonWsUrl]);
+
+  const switchModeIfNeeded = useCallback(async (desiredMode) => {
+    const next = desiredMode === 'sfu' ? 'sfu' : 'p2p';
+    if (callModeRef.current === next) return;
+
+    // Закрываем старый транспорт
+    if (callModeRef.current === 'sfu') {
+      closeSfu();
+    } else {
+      closeP2p();
+    }
+
+    clearRemoteMedia();
+    setCapacityWarning(null);
+    setMode(next);
+
+    // Подключаем новый
+    if (next === 'sfu') {
+      await connectSfuIfReady();
+    } else {
+      // P2P: peer будет назначен из participants (см. socket handlers)
+    }
+  }, [clearRemoteMedia, closeP2p, closeSfu, connectSfuIfReady, setMode]);
 
   // Присоединение к звонку
   const joinCall = useCallback(async ({ unlock = false } = {}) => {
@@ -1105,11 +965,7 @@ function GroupCallModal({
       setCallStatus('active');
 
       const existingCount = Array.isArray(response.participants) ? response.participants.length : 0;
-      if ((existingCount + 1) > 5) {
-        setCapacityWarning('В звонке уже 5 участников — mesh ограничен до 5.');
-      } else {
-        setCapacityWarning(null);
-      }
+      setCapacityWarning(null);
 
       // ВАЖНО: заполняем participants существующими участниками, иначе поздно вошедший
       // будет видеть только себя (streams приходят, но не рендерятся без метаданных).
@@ -1125,24 +981,21 @@ function GroupCallModal({
           return merged;
         });
       }
-      
-      // Создаём соединения с существующими участниками
-      if (response.participants && response.participants.length > 0) {
-        response.participants.forEach(p => {
-          if (p.oderId !== currentUserId) {
-            if ((existingCount + 1) <= 5) {
-              connectToPeerIfPossible(p.oderId);
-            }
-          }
-        });
-      }
 
-      // Если кто-то успел зайти пока мы брали камеру — подключимся.
-      const pending = Array.from(pendingPeersToConnectRef.current);
-      pendingPeersToConnectRef.current.clear();
-      pending.forEach((pid) => connectToPeerIfPossible(pid));
+      // Выбор режима: <=2 => P2P, 3+ => SFU
+      const total = existingCount + 1;
+      const desiredMode = total > 2 ? 'sfu' : 'p2p';
+      switchModeIfNeeded(desiredMode)
+        .then(async () => {
+          if (desiredMode === 'p2p') {
+            // Если в комнате ровно 2 участника — подключаемся к единственному peer
+            const peerId = response.participants?.[0]?.oderId;
+            if (peerId) await connectP2pIfReady(peerId);
+          }
+        })
+        .catch((e) => console.error('[GroupCall] switchMode failed:', e));
     });
-  }, [getLocalStream, socket, chatId, currentUserId, onClose, ensureIceConfig, unlockMediaPlayback, connectToPeerIfPossible]);
+  }, [getLocalStream, socket, chatId, currentUserId, onClose, ensureIceConfig, unlockMediaPlayback, switchModeIfNeeded, connectP2pIfReady]);
 
   // Начало звонка (для инициатора)
   const startCall = useCallback(async () => {
@@ -1157,13 +1010,13 @@ function GroupCallModal({
       return;
     }
 
-    const pending = Array.from(pendingPeersToConnectRef.current);
-    pendingPeersToConnectRef.current.clear();
-    pending.forEach((pid) => connectToPeerIfPossible(pid));
+    // Инициатор стартует в P2P-режиме по умолчанию.
+    // Если позже присоединится 3-й участник — переключим на SFU в socket handlers.
+    setMode('p2p');
 
     setCallStatus('active');
     onJoin?.();
-  }, [getLocalStream, onClose, onJoin, ensureIceConfig, connectToPeerIfPossible]);
+  }, [getLocalStream, onClose, onJoin, ensureIceConfig, setMode]);
 
   // Автоматический запуск для не-входящих звонков
   useEffect(() => {
@@ -1190,11 +1043,19 @@ function GroupCallModal({
     // просто закрываем PC и очищаем ссылки.
     localStreamRef.current = null;
 
-    // Закрываем все peer connections
-    Object.values(peerConnectionsRef.current).forEach(pc => {
-      pc.close();
-    });
-    peerConnectionsRef.current = {};
+    // Закрываем P2P/SFU транспорты
+    closeP2p();
+    closeSfu();
+
+    // Демонстрация экрана: остановим отдельный track (локальную камеру не трогаем)
+    try {
+      if (screenStreamRef.current) {
+        screenStreamRef.current.getTracks().forEach((t) => t.stop());
+      }
+    } catch (e) {}
+    screenStreamRef.current = null;
+    screenTrackRef.current = null;
+    setIsScreenSharing(false);
     
     // Очищаем все remote streams (без stop())
     remoteStreamsRef.current = new Map();
@@ -1218,7 +1079,17 @@ function GroupCallModal({
     if (activeSpeakerTimerRef.current) {
       clearTimeout(activeSpeakerTimerRef.current);
     }
-  }, []);
+  }, [closeP2p, closeSfu]);
+
+  // держим ref с последним participants для расчёта количества в socket handlers
+  const participantsRef = useRef([]);
+  useEffect(() => {
+    participantsRef.current = participants;
+  }, [participants]);
+
+  // screen share refs (только для getDisplayMedia)
+  const screenStreamRef = useRef(null);
+  const screenTrackRef = useRef(null);
 
   // Socket обработчики
   useEffect(() => {
@@ -1237,27 +1108,26 @@ function GroupCallModal({
           return prev;
         });
 
-        // Создаём PeerConnection ТОЛЬКО для нового участника.
-        // Важно: не трогаем существующие peer connections.
-        // Лимит mesh: 5 участников.
-        const projectedTotal = Object.keys(peerConnectionsRef.current).length + 2; // existing remotes + new + self
-        if (projectedTotal <= 5) {
-          connectToPeerIfPossible(oderId);
-        } else {
-          setCapacityWarning('Лимит mesh: максимум 5 участников.');
-        }
+        const already = participantsRef.current.some((p) => p?.oderId === oderId);
+        const nextTotal = (already ? participantsRef.current.length : participantsRef.current.length + 1) + 1;
+        const desiredMode = nextTotal > 2 ? 'sfu' : 'p2p';
+        switchModeIfNeeded(desiredMode)
+          .then(async () => {
+            if (desiredMode === 'p2p' && nextTotal === 2) {
+              await connectP2pIfReady(oderId);
+            }
+          })
+          .catch((e) => console.error('[GroupCall] switchMode failed:', e));
       }
     };
 
     // Участник покинул звонок
     const handleParticipantLeft = ({ oderId }) => {
       console.log('[GroupCall] Participant left:', oderId);
-      
-      // Закрываем соединение
-      const pc = peerConnectionsRef.current[oderId];
-      if (pc) {
-        pc.close();
-        delete peerConnectionsRef.current[oderId];
+
+      // Если P2P и ушёл текущий peer — закрываем PC
+      if (callModeRef.current === 'p2p' && p2pPeerIdRef.current === oderId) {
+        closeP2p();
       }
       
       // Удаляем stream
@@ -1279,12 +1149,43 @@ function GroupCallModal({
       if (pinnedUserId === oderId) {
         setPinnedUserId(LOCAL_PIN_ID);
       }
+
+      // Пересчёт режима: если осталось <=2 — возвращаемся в P2P
+      const prevLen = participantsRef.current.length;
+      const nextLen = Math.max(0, prevLen - 1);
+      const nextTotal = nextLen + 1;
+      const desiredMode = nextTotal > 2 ? 'sfu' : 'p2p';
+      switchModeIfNeeded(desiredMode)
+        .then(async () => {
+          if (desiredMode === 'p2p' && nextTotal === 2) {
+            // найдём оставшегося peer
+            const remaining = participantsRef.current.filter((p) => p?.oderId && p.oderId !== oderId);
+            const peerId = remaining?.[0]?.oderId;
+            if (peerId) await connectP2pIfReady(peerId);
+          }
+        })
+        .catch((e) => console.error('[GroupCall] switchMode failed:', e));
     };
 
     // Входящий сигнал
     const handleIncomingSignal = (data) => {
       if (data.callId === callIdRef.current) {
-        handleSignal(data);
+        handleP2pSignal(data);
+      }
+    };
+
+    const handleSfuStreamMapping = ({ callId: cid, userId, streamId }) => {
+      if (!cid || cid !== callIdRef.current) return;
+      if (!userId || !streamId) return;
+
+      sfuRemoteStreamIdToUserIdRef.current.set(String(streamId), String(userId));
+
+      const pending = sfuPendingRemoteStreamsByIdRef.current.get(String(streamId));
+      if (pending) {
+        try {
+          pending.getTracks().forEach((t) => attachIncomingTrackToUser(String(userId), t));
+        } catch (e) {}
+        sfuPendingRemoteStreamsByIdRef.current.delete(String(streamId));
       }
     };
 
@@ -1300,15 +1201,17 @@ function GroupCallModal({
     socket.on('group-call:participant-joined', handleParticipantJoined);
     socket.on('group-call:participant-left', handleParticipantLeft);
     socket.on('group-call:signal', handleIncomingSignal);
+    socket.on('group-call:sfu-stream', handleSfuStreamMapping);
     socket.on('group-call:ended', handleCallEnded);
 
     return () => {
       socket.off('group-call:participant-joined', handleParticipantJoined);
       socket.off('group-call:participant-left', handleParticipantLeft);
       socket.off('group-call:signal', handleIncomingSignal);
+      socket.off('group-call:sfu-stream', handleSfuStreamMapping);
       socket.off('group-call:ended', handleCallEnded);
     };
-  }, [socket, currentUserId, callStatus, handleSignal, onClose, cleanup, pinnedUserId, connectToPeerIfPossible]);
+  }, [socket, currentUserId, handleP2pSignal, onClose, cleanup, pinnedUserId, switchModeIfNeeded, connectP2pIfReady, attachIncomingTrackToUser, closeP2p]);
 
   // Завершение звонка
   const handleEndCall = useCallback(() => {
@@ -1361,6 +1264,15 @@ function GroupCallModal({
 
   // Переключение камеры
   const toggleVideo = useCallback(() => {
+    // В режиме шаринга: управляем track демонстрации (без renegotiation)
+    if (isScreenSharing && screenTrackRef.current) {
+      const track = screenTrackRef.current;
+      track.enabled = !track.enabled;
+      setIsVideoOff(!track.enabled);
+      return;
+    }
+
+    // Обычная камера
     if (localStreamRef.current) {
       const videoTrack = localStreamRef.current.getVideoTracks()[0];
       if (videoTrack) {
@@ -1368,29 +1280,90 @@ function GroupCallModal({
         setIsVideoOff(!videoTrack.enabled);
       }
     }
-  }, []);
+  }, [isScreenSharing]);
 
-  const getVideoSenderForPc = useCallback((oderId, pc) => {
-    if (!pc) return null;
+  const getOutboundVideoSender = useCallback(() => {
     try {
-      // 1) Обычный кейс: sender уже имеет video track
-      const sender = pc.getSenders?.().find(s => s.track?.kind === 'video');
-      if (sender) return sender;
-
-      // 2) Audio-call: есть transceiver с video sender, но track ещё null
-      const meta = pcMetaRef.current?.[oderId];
-      const mt = meta?.videoTransceiver;
-      if (mt?.sender) return mt.sender;
-
-      // 3) Фолбэк: попробуем найти video transceiver по receiver.track.kind
-      const tr = pc.getTransceivers?.()?.find(t => t?.receiver?.track?.kind === 'video');
-      return tr?.sender || null;
+      if (callModeRef.current === 'sfu') {
+        const transports = sfuClientRef.current?.transports;
+        const pub = transports?.[0] || transports?.pub;
+        const pc = pub?.pc;
+        return pc?.getSenders?.().find((s) => s.track?.kind === 'video') || null;
+      }
+      const pc = p2pPcRef.current;
+      return pc?.getSenders?.().find((s) => s.track?.kind === 'video') || null;
     } catch (e) {
       return null;
     }
   }, []);
 
-  // Screen sharing removed: strict mesh mode forbids getDisplayMedia/replaceTrack.
+  const stopScreenShare = useCallback(async () => {
+    if (!isScreenSharing) return;
+    try {
+      const cameraTrack = localStreamRef.current?.getVideoTracks?.()?.[0] || null;
+      const sender = getOutboundVideoSender();
+      if (sender && cameraTrack) {
+        await sender.replaceTrack(cameraTrack);
+      }
+    } catch (e) {
+      console.warn('[GroupCall] stopScreenShare replaceTrack failed:', e);
+    }
+
+    try {
+      if (screenStreamRef.current) {
+        screenStreamRef.current.getTracks().forEach((t) => t.stop());
+      }
+    } catch (e) {}
+
+    screenStreamRef.current = null;
+    screenTrackRef.current = null;
+    setIsScreenSharing(false);
+
+    // возвращаем превью на камеру
+    if (localStreamRef.current) {
+      attachStreamToVideo(localVideoRef.current, localStreamRef.current, { muted: true });
+      attachStreamToVideo(localPreviewVideoRef.current, localStreamRef.current, { muted: true });
+    }
+  }, [attachStreamToVideo, getOutboundVideoSender, isScreenSharing]);
+
+  const startScreenShare = useCallback(async () => {
+    if (callType !== 'video') return;
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      alert('Демонстрация экрана не поддерживается в этом браузере');
+      return;
+    }
+    if (isScreenSharing) return;
+
+    try {
+      const displayStream = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: { ideal: 30, max: 60 } },
+        audio: false
+      });
+      const screenTrack = displayStream.getVideoTracks?.()?.[0];
+      if (!screenTrack) return;
+
+      screenStreamRef.current = displayStream;
+      screenTrackRef.current = screenTrack;
+
+      const sender = getOutboundVideoSender();
+      if (sender) {
+        await sender.replaceTrack(screenTrack);
+      }
+
+      // self-view: показываем шаринг как локальный превью
+      attachStreamToVideo(localVideoRef.current, displayStream, { muted: true });
+      attachStreamToVideo(localPreviewVideoRef.current, displayStream, { muted: true });
+
+      setIsScreenSharing(true);
+      setIsVideoOff(false);
+
+      screenTrack.onended = () => {
+        stopScreenShare();
+      };
+    } catch (e) {
+      console.error('[GroupCall] startScreenShare failed:', e);
+    }
+  }, [attachStreamToVideo, callType, getOutboundVideoSender, isScreenSharing, stopScreenShare]);
 
   // Cleanup при unmount
   useEffect(() => {
@@ -1693,6 +1666,20 @@ function GroupCallModal({
               title={isVideoOff ? 'Включить камеру' : 'Выключить камеру'}
             >
               {isVideoOff ? '📵' : '📹'}
+            </button>
+          )}
+
+          {callType === 'video' && (
+            <button
+              onClick={isScreenSharing ? stopScreenShare : startScreenShare}
+              style={{
+                ...styles.controlBtn,
+                ...styles.controlBtnScreen,
+                ...(isScreenSharing ? styles.controlBtnActive : {})
+              }}
+              title={isScreenSharing ? 'Остановить демонстрацию экрана' : 'Демонстрация экрана'}
+            >
+              {isScreenSharing ? '🛑' : '🖥️'}
             </button>
           )}
 

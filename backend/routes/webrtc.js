@@ -78,4 +78,45 @@ router.get('/ice', (req, res) => {
   }
 });
 
+/**
+ * GET /api/webrtc/config
+ * Возвращает ICE серверы с временными TURN credentials + конфиг SFU (ion-sfu json-rpc)
+ *
+ * ВАЖНО:
+ * - TURN credentials генерируются ТОЛЬКО на backend (TURN_SECRET не уходит на frontend)
+ * - Endpoint защищён authMiddleware
+ */
+router.get('/config', (req, res) => {
+  try {
+    const userId = req.userId;
+
+    const turnCredentials = generateTurnCredentials(userId);
+
+    const response = {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        {
+          urls: [
+            'turn:govchat.ru:3478?transport=udp',
+            'turn:govchat.ru:3478?transport=tcp'
+          ],
+          username: turnCredentials.username,
+          credential: turnCredentials.credential
+        }
+      ],
+      iceCandidatePoolSize: 10,
+      sfu: {
+        jsonRpcUrl: config.SFU_JSONRPC_URL || 'http://95.85.243.120:7000'
+      }
+    };
+
+    console.log(`[WebRTC] Generated WebRTC config for user ${userId}, TURN expires in ${turnCredentials.ttl}s`);
+    res.json(response);
+  } catch (error) {
+    console.error('[WebRTC] Error generating WebRTC config:', error);
+    res.status(500).json({ error: 'Failed to generate WebRTC configuration' });
+  }
+});
+
 module.exports = router;
