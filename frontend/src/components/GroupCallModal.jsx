@@ -90,6 +90,12 @@ function GroupCallModal({
   const sfuRemoteStreamIdToUserIdRef = useRef(new Map()); // streamId -> userId
   const sfuPendingRemoteStreamsByIdRef = useRef(new Map()); // streamId -> MediaStream
 
+  // SFU stability/transition guards
+  const sfuSwitchingRef = useRef(false); // true пока мягко переходим P2P -> SFU
+  const sfuRetryCountRef = useRef(0);
+  const sfuDisabledUntilRef = useRef(0); // timestamp ms
+  const sfuJsonRpcUrlRef = useRef(null); // из /api/webrtc/config (http(s) URL)
+
   const captureTierRef = useRef('sd'); // 'sd' | 'hd'
   const ringtoneRef = useRef(null);
   const leaveSentRef = useRef(false);
@@ -412,6 +418,13 @@ function GroupCallModal({
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
+
+      // best-effort: SFU конфиг приходит вместе с ICE
+      try {
+        sfuJsonRpcUrlRef.current = data?.sfu?.jsonRpcUrl || null;
+      } catch (e) {
+        sfuJsonRpcUrlRef.current = null;
+      }
 
       const nextConfig = {
         iceServers: data.iceServers || [],
