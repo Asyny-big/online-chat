@@ -643,10 +643,10 @@ function GroupCallModal({
 
   const getSfuWsUrl = useCallback(() => {
     // ВАЖНО: никаких ws:// на HTTPS и никакого :7000 из браузера.
-    // SFU доступен только через nginx WSS proxy: /sfu/ws
+    // SFU доступен только через nginx WSS proxy: /sfu
     const sfuWsUrl =
       `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://` +
-      `${window.location.host}/sfu/ws`;
+      `${window.location.host}/sfu`;
     return sfuWsUrl;
   }, []);
 
