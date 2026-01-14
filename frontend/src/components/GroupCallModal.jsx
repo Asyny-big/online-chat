@@ -692,7 +692,17 @@ function GroupCallModal({
               nextProtocols = 'jsonrpc2';
             }
           }
+
           super(wsUrl, nextProtocols);
+
+          // Диагностика: что реально согласовано на handshake.
+          if (shouldForce) {
+            try {
+              this.addEventListener('open', () => {
+                console.info('[GroupCall][SFU] WS negotiated protocol:', this.protocol);
+              });
+            } catch (e) {}
+          }
         }
       }
       window.WebSocket = PatchedWebSocket;
@@ -749,21 +759,12 @@ function GroupCallModal({
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
     const waitForPc = async () => {
-      for (let i = 0; i < 30; i++) {
+      for (let i = 0; i < 20; i++) {
         const pc = findPeerConnectionInClient(client);
         if (pc) return pc;
         await sleep(100);
       }
       return null;
-    };
-
-    const waitForStableSignaling = async (pc) => {
-      for (let i = 0; i < 30; i++) {
-        if (pc.connectionState === 'closed') return false;
-        if (pc.signalingState === 'stable') return true;
-        await sleep(100);
-      }
-      return pc.signalingState === 'stable' && pc.connectionState !== 'closed';
     };
 
     signal.onopen = async () => {
@@ -774,50 +775,42 @@ function GroupCallModal({
           await applyCaptureTier('hd');
         }
 
-        // Находим SFU PeerConnection и вешаем фатальные обработчики
+        // Publish строго один раз (делаем сразу после join, без ожиданий),
+        // иначе некоторые конфигурации SFU закрывают WS как "idle".
+        if (!sfuPublishingRef.current) {
+          const localIon = new LocalStream(localStreamRef.current, {
+            codec: 'vp8',
+            resolution: 'hd',
+            simulcast: true,
+            audio: true,
+            video: callType === 'video'
+          });
+
+          sfuPublishingRef.current = true;
+          client.publish(localIon);
+          sfuPublishedLocalStreamIdRef.current = localIon.id;
+
+          // Сообщаем всем streamId → userId mapping
+          socket.emit('group-call:sfu-stream', {
+            callId: callIdRef.current,
+            streamId: localIon.id
+          });
+        }
+
+        // Находим SFU PeerConnection (не фатально, если не найдём)
         const pc = await waitForPc();
-        if (!pc) {
-          endGroupCall('SFU: не найден RTCPeerConnection');
-          return;
+        if (pc) {
+          sfuPcRef.current = pc;
+          pc.onconnectionstatechange = () => {
+            const st = pc.connectionState;
+            console.log('[GroupCall][SFU] connectionState:', st);
+            if (st === 'failed' || st === 'closed') {
+              endGroupCall(`SFU connectionState=${st}`);
+            }
+          };
+        } else {
+          console.warn('[GroupCall][SFU] RTCPeerConnection not found in client (non-fatal)');
         }
-        sfuPcRef.current = pc;
-        pc.onconnectionstatechange = () => {
-          const st = pc.connectionState;
-          console.log('[GroupCall][SFU] connectionState:', st);
-          if (st === 'failed' || st === 'closed') {
-            endGroupCall(`SFU connectionState=${st}`);
-          }
-        };
-
-        // Publish строго один раз и только в безопасных состояниях
-        if (sfuPublishingRef.current) return;
-        const stable = await waitForStableSignaling(pc);
-        if (!stable) {
-          endGroupCall('SFU: signalingState не stable / pc закрыт');
-          return;
-        }
-        if (pc.connectionState === 'closed') {
-          endGroupCall('SFU: PeerConnection closed');
-          return;
-        }
-
-        const localIon = new LocalStream(localStreamRef.current, {
-          codec: 'vp8',
-          resolution: 'hd',
-          simulcast: true,
-          audio: true,
-          video: callType === 'video'
-        });
-
-        sfuPublishingRef.current = true;
-        client.publish(localIon);
-        sfuPublishedLocalStreamIdRef.current = localIon.id;
-
-        // Сообщаем всем streamId → userId mapping
-        socket.emit('group-call:sfu-stream', {
-          callId: callIdRef.current,
-          streamId: localIon.id
-        });
       } catch (e) {
         console.error('[GroupCall][SFU] join/publish failed:', e);
         endGroupCall('SFU: join/publish failed');
@@ -829,9 +822,12 @@ function GroupCallModal({
       endGroupCall('SFU: WebSocket error');
     };
 
-    signal.onclose = () => {
-      console.warn('[GroupCall][SFU] WebSocket closed');
-      endGroupCall('SFU: WebSocket closed');
+    signal.onclose = (ev) => {
+      const code = ev?.code;
+      const reason = ev?.reason;
+      const wasClean = ev?.wasClean;
+      console.warn('[GroupCall][SFU] WebSocket closed', { code, reason, wasClean });
+      endGroupCall(`SFU: WebSocket closed (${code || 'no-code'})${reason ? `: ${reason}` : ''}`);
     };
   }, [applyCaptureTier, attachIncomingTrackToUser, callType, createIonSignalWithJsonRpc2, currentUserId, endGroupCall, ensureIceConfig, findPeerConnectionInClient, getSfuWsUrl, iceServers, socket]);
 
