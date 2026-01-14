@@ -712,6 +712,37 @@ function GroupCallModal({
     return null;
   }, []);
 
+  const getSfuWsUrl = useCallback(() => {
+    // ВАЖНО: никаких ws:// на HTTPS и никакого :7000 из браузера.
+    // SFU доступен только через nginx WSS proxy: /sfu/ws
+    const sfuWsUrl =
+      `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://` +
+      `${window.location.host}/sfu/ws`;
+    return sfuWsUrl;
+  }, []);
+
+  const attachIncomingTrackToUser = useCallback((userId, track) => {
+    if (!userId || userId === currentUserId) return;
+    if (!track) return;
+
+    let remoteStream = remoteStreamsRef.current.get(userId);
+    if (!remoteStream) {
+      remoteStream = new MediaStream();
+      remoteStreamsRef.current.set(userId, remoteStream);
+    }
+
+    const existingTrack = remoteStream.getTracks().find((t) => t.id === track.id);
+    if (!existingTrack) {
+      remoteStream.addTrack(track);
+    }
+
+    if (track.kind === 'audio' && !analysersRef.current[userId]) {
+      setupAudioAnalyser(remoteStream, userId);
+    }
+
+    setStreamUpdateCounter((v) => v + 1);
+  }, [currentUserId, setupAudioAnalyser]);
+
   const maybeMarkSfuReady = useCallback(() => {
     if (sfuReadyRef.current) return true;
     const ready = !!(sfuWsOpenRef.current && sfuPcConnectedRef.current && sfuGotTrackRef.current);
@@ -746,37 +777,6 @@ function GroupCallModal({
 
     return true;
   }, [attachIncomingTrackToUser, clearRemoteMedia, closeP2p, setMode]);
-
-  const getSfuWsUrl = useCallback(() => {
-    // ВАЖНО: никаких ws:// на HTTPS и никакого :7000 из браузера.
-    // SFU доступен только через nginx WSS proxy: /sfu/ws
-    const sfuWsUrl =
-      `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://` +
-      `${window.location.host}/sfu/ws`;
-    return sfuWsUrl;
-  }, []);
-
-  const attachIncomingTrackToUser = useCallback((userId, track) => {
-    if (!userId || userId === currentUserId) return;
-    if (!track) return;
-
-    let remoteStream = remoteStreamsRef.current.get(userId);
-    if (!remoteStream) {
-      remoteStream = new MediaStream();
-      remoteStreamsRef.current.set(userId, remoteStream);
-    }
-
-    const existingTrack = remoteStream.getTracks().find((t) => t.id === track.id);
-    if (!existingTrack) {
-      remoteStream.addTrack(track);
-    }
-
-    if (track.kind === 'audio' && !analysersRef.current[userId]) {
-      setupAudioAnalyser(remoteStream, userId);
-    }
-
-    setStreamUpdateCounter((v) => v + 1);
-  }, [currentUserId, setupAudioAnalyser]);
 
   const connectP2pIfReady = useCallback(async (peerId) => {
     if (!peerId || peerId === currentUserId) return;
