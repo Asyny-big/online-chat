@@ -89,7 +89,6 @@ function GroupCallModal({
   const sfuPublishedLocalStreamIdRef = useRef(null); // stream.id, который видит SFU
   const sfuRemoteStreamIdToUserIdRef = useRef(new Map()); // streamId -> userId
   const sfuPendingRemoteStreamsByIdRef = useRef(new Map()); // streamId -> MediaStream
-  const sfuConfigRef = useRef({ jsonRpcUrl: 'http://95.85.243.120:7000' });
 
   const captureTierRef = useRef('sd'); // 'sd' | 'hd'
   const ringtoneRef = useRef(null);
@@ -422,10 +421,6 @@ function GroupCallModal({
       iceConfigRef.current = nextConfig;
       iceReadyRef.current = true;
       setIceServers(nextConfig.iceServers);
-
-      if (data?.sfu?.jsonRpcUrl) {
-        sfuConfigRef.current = { jsonRpcUrl: String(data.sfu.jsonRpcUrl) };
-      }
       return nextConfig;
     } catch (err) {
       console.error('[GroupCall] Failed to fetch ICE servers:', err);
@@ -441,8 +436,6 @@ function GroupCallModal({
       iceConfigRef.current = fallback;
       iceReadyRef.current = true;
       setIceServers(fallback.iceServers);
-
-      // SFU fallback оставляем дефолтным
       return fallback;
     }
   }, [token]);
@@ -648,19 +641,13 @@ function GroupCallModal({
     sfuPendingRemoteStreamsByIdRef.current = new Map();
   }, []);
 
-  const toIonWsUrl = useCallback((jsonRpcUrl) => {
-    const raw = String(jsonRpcUrl || '').trim();
-    if (!raw) return null;
-
-    const ensureWsPath = (u) => {
-      const base = u.replace(/\/+$/, '');
-      return base.endsWith('/ws') ? base : `${base}/ws`;
-    };
-
-    if (raw.startsWith('wss://') || raw.startsWith('ws://')) return ensureWsPath(raw);
-    if (raw.startsWith('https://')) return ensureWsPath(raw.replace('https://', 'wss://'));
-    if (raw.startsWith('http://')) return ensureWsPath(raw.replace('http://', 'ws://'));
-    return ensureWsPath(`ws://${raw}`);
+  const getSfuWsUrl = useCallback(() => {
+    // ВАЖНО: никаких ws:// на HTTPS и никакого :7000 из браузера.
+    // SFU доступен только через nginx WSS proxy: /sfu/ws
+    const sfuWsUrl =
+      `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://` +
+      `${window.location.host}/sfu/ws`;
+    return sfuWsUrl;
   }, []);
 
   const attachIncomingTrackToUser = useCallback((userId, track) => {
@@ -826,17 +813,16 @@ function GroupCallModal({
 
     if (sfuClientRef.current) return;
 
-    const wsUrl = toIonWsUrl(sfuConfigRef.current?.jsonRpcUrl);
-    if (!wsUrl) {
-      setCapacityWarning('SFU URL не настроен');
-      return;
-    }
+    const sfuWsUrl = getSfuWsUrl();
+    console.info('[SFU] Connecting via', sfuWsUrl);
 
     const cfg = iceConfigRef.current || { iceServers: iceServers || [] };
-    const signal = new IonSFUJSONRPCSignal(wsUrl);
+    const signal = new IonSFUJSONRPCSignal(sfuWsUrl);
     const client = new Client(signal, {
       codec: 'vp8',
-      iceServers: cfg.iceServers || []
+      iceServers: cfg.iceServers || [],
+      // явная привязка для отладки (signal использует это значение)
+      sfuWsUrl
     });
 
     sfuSignalRef.current = signal;
@@ -887,9 +873,14 @@ function GroupCallModal({
       }
     };
 
+    signal.onerror = (e) => {
+      console.error('[GroupCall][SFU] WebSocket error:', e);
+      setCapacityWarning('Ошибка WebSocket (SFU)');
+    };
+
     signal.onclose = () => {
       if (callModeRef.current !== 'sfu') return;
-      console.warn('[GroupCall][SFU] signal closed');
+      console.warn('[GroupCall][SFU] WebSocket closed');
       setCapacityWarning('SFU отключён, пробуем переподключиться...');
       // best-effort reconnect: чистим и пробуем снова
       closeSfu();
@@ -899,7 +890,7 @@ function GroupCallModal({
         }
       }, 1500);
     };
-  }, [applyCaptureTier, attachIncomingTrackToUser, callStatus, callType, closeSfu, currentUserId, ensureIceConfig, iceServers, socket, toIonWsUrl]);
+  }, [applyCaptureTier, attachIncomingTrackToUser, callStatus, callType, closeSfu, currentUserId, ensureIceConfig, getSfuWsUrl, iceServers, socket]);
 
   const switchModeIfNeeded = useCallback(async (desiredMode) => {
     const next = desiredMode === 'sfu' ? 'sfu' : 'p2p';
