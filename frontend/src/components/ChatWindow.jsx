@@ -535,9 +535,11 @@ const styles = {
     flex: 1,
     display: 'flex',
     flexDirection: 'column',
-    background: '#0f172a',
+    background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%)',
     height: '100%',
     minHeight: 0,
+    position: 'relative',
+    overflow: 'hidden',
   },
   empty: {
     flex: 1,
@@ -545,40 +547,58 @@ const styles = {
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    background: '#0f172a',
+    background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
+    position: 'relative',
   },
   emptyIcon: {
-    fontSize: '48px',
-    marginBottom: '16px',
+    fontSize: '64px',
+    marginBottom: '20px',
+    animation: 'float 3s ease-in-out infinite',
+    filter: 'drop-shadow(0 4px 12px rgba(59, 130, 246, 0.3))',
   },
   emptyText: {
-    fontSize: '20px',
-    fontWeight: '600',
-    color: '#94a3b8',
-    marginBottom: '8px',
+    fontSize: '22px',
+    fontWeight: '700',
+    background: 'linear-gradient(135deg, #60a5fa, #a78bfa)',
+    WebkitBackgroundClip: 'text',
+    WebkitTextFillColor: 'transparent',
+    backgroundClip: 'text',
+    marginBottom: '10px',
+    letterSpacing: '0.5px',
   },
   emptyHint: {
-    fontSize: '14px',
-    color: '#64748b',
+    fontSize: '15px',
+    color: '#94a3b8',
+    opacity: 0.8,
   },
   // Incoming call banner
   incomingCallBanner: {
-    background: 'linear-gradient(135deg, #22c55e, #16a34a)',
-    padding: '12px 16px',
+    background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 50%, #15803d 100%)',
+    padding: '14px 18px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: '12px',
-    animation: 'slideDown 0.3s ease, pulse-banner 1.5s infinite',
+    gap: '14px',
+    animation: 'slideDown 0.4s cubic-bezier(0.16, 1, 0.3, 1), pulse-banner 2s infinite',
+    boxShadow: '0 8px 32px rgba(34, 197, 94, 0.3), inset 0 1px 0 rgba(255,255,255,0.1)',
+    borderRadius: '0 0 16px 16px',
+    backdropFilter: 'blur(20px)',
+    border: '1px solid rgba(255,255,255,0.1)',
+    borderTop: 'none',
   },
   incomingGroupCallBanner: {
-    background: 'linear-gradient(135deg, #a855f7, #7e22ce)',
-    padding: '12px 16px',
+    background: 'linear-gradient(135deg, #a855f7 0%, #7e22ce 50%, #6b21a8 100%)',
+    padding: '14px 18px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: '12px',
-    animation: 'slideDown 0.3s ease, pulse-banner 1.5s infinite',
+    gap: '14px',
+    animation: 'slideDown 0.4s cubic-bezier(0.16, 1, 0.3, 1), pulse-group-banner 2s infinite',
+    boxShadow: '0 8px 32px rgba(168, 85, 247, 0.3), inset 0 1px 0 rgba(255,255,255,0.1)',
+    borderRadius: '0 0 16px 16px',
+    backdropFilter: 'blur(20px)',
+    border: '1px solid rgba(255,255,255,0.1)',
+    borderTop: 'none',
   },
   callBannerContent: {
     display: 'flex',
@@ -586,8 +606,9 @@ const styles = {
     gap: '12px',
   },
   callBannerIcon: {
-    fontSize: '24px',
-    animation: 'shake 0.5s infinite',
+    fontSize: '28px',
+    animation: 'shake 0.6s infinite, glow 2s infinite',
+    filter: 'drop-shadow(0 0 8px rgba(255,255,255,0.5))',
   },
   callBannerInfo: {
     display: 'flex',
@@ -621,26 +642,32 @@ const styles = {
     transition: 'transform 0.2s',
   },
   callBannerAccept: {
-    width: '40px',
-    height: '40px',
+    width: '48px',
+    height: '48px',
     borderRadius: '50%',
     border: 'none',
-    background: '#fff',
-    fontSize: '18px',
+    background: 'linear-gradient(135deg, #fff, #f0f0f0)',
+    fontSize: '20px',
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    animation: 'pulse-btn 1s infinite',
+    animation: 'pulse-btn 1.2s infinite, scale-in 0.3s ease',
+    boxShadow: '0 4px 16px rgba(0,0,0,0.3), inset 0 2px 4px rgba(255,255,255,0.5)',
+    transition: 'transform 0.2s',
   },
   // Header
   header: {
-    padding: '12px 16px',
-    borderBottom: '1px solid #334155',
-    background: '#1e293b',
+    padding: '14px 18px',
+    borderBottom: '1px solid rgba(255,255,255,0.08)',
+    background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95))',
+    backdropFilter: 'blur(20px) saturate(180%)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
+    boxShadow: '0 2px 16px rgba(0,0,0,0.1)',
+    position: 'relative',
+    zIndex: 10,
   },
   headerInfo: {
     display: 'flex',
@@ -648,19 +675,25 @@ const styles = {
     gap: '12px',
   },
   avatar: {
-    width: '40px',
-    height: '40px',
+    width: '44px',
+    height: '44px',
     borderRadius: '50%',
-    background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)',
+    background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 50%, #a855f7 100%)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     color: '#fff',
-    fontWeight: '600',
-    fontSize: '16px',
+    fontWeight: '700',
+    fontSize: '18px',
+    boxShadow: '0 4px 16px rgba(59, 130, 246, 0.4), inset 0 1px 0 rgba(255,255,255,0.2)',
+    border: '2px solid rgba(255,255,255,0.1)',
+    transition: 'transform 0.3s ease, box-shadow 0.3s ease',
+    position: 'relative',
+    overflow: 'hidden',
   },
   groupAvatar: {
-    background: 'linear-gradient(135deg, #a855f7, #7e22ce)',
+    background: 'linear-gradient(135deg, #a855f7 0%, #7e22ce 50%, #6b21a8 100%)',
+    boxShadow: '0 4px 16px rgba(168, 85, 247, 0.4), inset 0 1px 0 rgba(255,255,255,0.2)',
   },
   chatName: {
     margin: 0,
@@ -701,17 +734,19 @@ const styles = {
     transition: 'background 0.2s',
   },
   callBtn: {
-    width: '40px',
-    height: '40px',
+    width: '44px',
+    height: '44px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    background: 'transparent',
-    border: '1px solid #334155',
+    background: 'rgba(59, 130, 246, 0.1)',
+    border: '1px solid rgba(59, 130, 246, 0.3)',
     borderRadius: '50%',
-    fontSize: '18px',
+    fontSize: '20px',
     cursor: 'pointer',
-    transition: 'all 0.2s',
+    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+    backdropFilter: 'blur(10px)',
+    boxShadow: '0 2px 8px rgba(59, 130, 246, 0.2)',
   },
   groupCallBtn: {
     width: '40px',
@@ -738,10 +773,12 @@ const styles = {
   messagesContainer: {
     flex: 1,
     overflowY: 'auto',
-    padding: '16px',
+    padding: '20px 18px',
     display: 'flex',
     flexDirection: 'column',
-    gap: '8px',
+    gap: '12px',
+    background: 'radial-gradient(ellipse at top, rgba(59, 130, 246, 0.03) 0%, transparent 50%)',
+    position: 'relative',
   },
   noMessages: {
     flex: 1,
@@ -763,19 +800,26 @@ const styles = {
   },
   bubble: {
     maxWidth: '75%',
-    padding: '10px 14px',
-    borderRadius: '18px',
+    padding: '12px 16px',
+    borderRadius: '20px',
     wordWrap: 'break-word',
+    position: 'relative',
+    animation: 'messageSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+    boxShadow: '0 2px 12px rgba(0,0,0,0.15)',
   },
   bubbleMine: {
-    background: 'linear-gradient(135deg, #3b82f6, #2563eb)',
+    background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 50%, #1d4ed8 100%)',
     color: '#fff',
-    borderBottomRightRadius: '4px',
+    borderBottomRightRadius: '6px',
+    boxShadow: '0 4px 16px rgba(59, 130, 246, 0.3), inset 0 1px 0 rgba(255,255,255,0.2)',
+    marginLeft: 'auto',
   },
   bubbleTheirs: {
-    background: '#334155',
+    background: 'linear-gradient(135deg, #334155 0%, #1e293b 100%)',
     color: '#e2e8f0',
-    borderBottomLeftRadius: '4px',
+    borderBottomLeftRadius: '6px',
+    boxShadow: '0 4px 16px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.05)',
+    border: '1px solid rgba(255,255,255,0.05)',
   },
   senderName: {
     fontSize: '12px',
@@ -1034,30 +1078,80 @@ if (typeof document !== 'undefined') {
   styleSheet.textContent = `
     @keyframes slideDown {
       from {
-        transform: translateY(-100%);
+        transform: translateY(-100%) scale(0.95);
         opacity: 0;
       }
       to {
-        transform: translateY(0);
+        transform: translateY(0) scale(1);
         opacity: 1;
       }
     }
     @keyframes pulse-banner {
       0%, 100% {
-        box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4);
+        box-shadow: 0 8px 32px rgba(34, 197, 94, 0.3), 0 0 0 0 rgba(34, 197, 94, 0.4);
       }
       50% {
-        box-shadow: 0 0 0 8px rgba(34, 197, 94, 0);
+        box-shadow: 0 8px 32px rgba(34, 197, 94, 0.5), 0 0 0 12px rgba(34, 197, 94, 0);
+      }
+    }
+    @keyframes pulse-group-banner {
+      0%, 100% {
+        box-shadow: 0 8px 32px rgba(168, 85, 247, 0.3), 0 0 0 0 rgba(168, 85, 247, 0.4);
+      }
+      50% {
+        box-shadow: 0 8px 32px rgba(168, 85, 247, 0.5), 0 0 0 12px rgba(168, 85, 247, 0);
       }
     }
     @keyframes pulse-btn {
-      0%, 100% { transform: scale(1); }
-      50% { transform: scale(1.1); }
+      0%, 100% { 
+        transform: scale(1);
+        box-shadow: 0 4px 16px rgba(0,0,0,0.3), 0 0 0 0 rgba(255,255,255,0.4);
+      }
+      50% { 
+        transform: scale(1.08);
+        box-shadow: 0 6px 20px rgba(0,0,0,0.4), 0 0 0 8px rgba(255,255,255,0);
+      }
     }
     @keyframes shake {
-      0%, 100% { transform: rotate(0deg); }
-      25% { transform: rotate(-15deg); }
-      75% { transform: rotate(15deg); }
+      0%, 100% { transform: rotate(0deg) scale(1); }
+      25% { transform: rotate(-12deg) scale(1.05); }
+      75% { transform: rotate(12deg) scale(1.05); }
+    }
+    @keyframes glow {
+      0%, 100% { filter: drop-shadow(0 0 8px rgba(255,255,255,0.5)); }
+      50% { filter: drop-shadow(0 0 16px rgba(255,255,255,0.8)); }
+    }
+    @keyframes float {
+      0%, 100% { transform: translateY(0px); }
+      50% { transform: translateY(-10px); }
+    }
+    @keyframes scale-in {
+      from {
+        transform: scale(0);
+        opacity: 0;
+      }
+      to {
+        transform: scale(1);
+        opacity: 1;
+      }
+    }
+    @keyframes messageSlideIn {
+      from {
+        transform: translateY(10px) scale(0.95);
+        opacity: 0;
+      }
+      to {
+        transform: translateY(0) scale(1);
+        opacity: 1;
+      }
+    }
+    
+    /* Hover эффекты */
+    button:hover {
+      transform: translateY(-2px) scale(1.02);
+    }
+    button:active {
+      transform: translateY(0) scale(0.98);
     }
   `;
   document.head.appendChild(styleSheet);

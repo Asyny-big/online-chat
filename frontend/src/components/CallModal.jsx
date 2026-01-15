@@ -1195,13 +1195,14 @@ const styles = {
     left: 0,
     right: 0,
     bottom: 0,
-    background: 'rgba(0, 0, 0, 0.75)', 
-    backdropFilter: 'blur(12px)',      
+    background: 'radial-gradient(ellipse at center, rgba(0, 0, 0, 0.85) 0%, rgba(0, 0, 0, 0.95) 100%)', 
+    backdropFilter: 'blur(20px) saturate(180%)',      
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 10000,
     perspective: '1000px',
+    animation: 'fadeInOverlay 0.3s ease-out',
   },
   modal: {
     position: 'relative',
@@ -1209,7 +1210,8 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
     transition: 'all 0.4s cubic-bezier(0.16, 1, 0.3, 1)',
-    animation: 'modal-appear 0.4s ease-out forwards',
+    animation: 'modal-appear 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards',
+    boxShadow: '0 25px 60px -12px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255,255,255,0.05)',
   },
   videoContainer: {
     flex: 1,
@@ -1219,7 +1221,8 @@ const styles = {
     justifyContent: 'center',
     width: '100%',
     height: '100%',
-    overflow: 'hidden', 
+    overflow: 'hidden',
+    background: 'radial-gradient(ellipse at center, rgba(15, 23, 42, 0.8) 0%, rgba(0, 0, 0, 0.95) 100%)',
   },
   remoteVideo: {
     width: '100%',
@@ -1230,15 +1233,16 @@ const styles = {
     position: 'absolute',
     top: '24px',
     right: '24px',
-    width: '180px', 
+    width: '200px', 
     aspectRatio: '3/4',
-    borderRadius: '16px',
+    borderRadius: '20px',
     objectFit: 'cover',
-    border: '2px solid rgba(255, 255, 255, 0.1)',
-    boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+    border: '3px solid rgba(255, 255, 255, 0.15)',
+    boxShadow: '0 12px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.05), inset 0 1px 0 rgba(255,255,255,0.1)',
     background: '#1a1a1a',
-    transition: 'opacity 0.3s, width 0.3s',
+    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
     zIndex: 10,
+    backdropFilter: 'blur(10px)',
   },
   avatarContainer: {
     position: 'relative',
@@ -1249,19 +1253,22 @@ const styles = {
     height: '100%',
   },
   avatar: {
-    width: '140px',
-    height: '140px',
+    width: '160px',
+    height: '160px',
     borderRadius: '50%',
-    background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)',
+    background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 50%, #a855f7 100%)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    fontSize: '56px',
-    fontWeight: '600',
+    fontSize: '64px',
+    fontWeight: '700',
     color: '#fff',
     overflow: 'hidden',
-    boxShadow: '0 0 60px rgba(59, 130, 246, 0.2)',
+    boxShadow: '0 0 80px rgba(59, 130, 246, 0.4), inset 0 2px 8px rgba(255,255,255,0.2)',
+    border: '3px solid rgba(255,255,255,0.1)',
     zIndex: 5,
+    position: 'relative',
+    animation: 'avatarPulse 3s ease-in-out infinite',
   },
   avatarImg: {
     width: '100%',
@@ -1270,11 +1277,12 @@ const styles = {
   },
   incomingPulse: {
     position: 'absolute',
-    width: '200px',
-    height: '200px',
+    width: '220px',
+    height: '220px',
     borderRadius: '50%',
-    border: '2px solid rgba(34, 197, 94, 0.5)',
-    animation: 'pulse-ring 2s infinite',
+    border: '3px solid rgba(34, 197, 94, 0.6)',
+    animation: 'pulse-ring 2s infinite, pulse-ring-2 2s infinite 0.5s',
+    boxShadow: '0 0 40px rgba(34, 197, 94, 0.3)',
   },
   info: {
     position: 'absolute',
@@ -1305,69 +1313,77 @@ const styles = {
   },
   controls: {
     position: 'absolute',
-    bottom: '40px',
+    bottom: '48px',
     left: '50%',
     transform: 'translateX(-50%)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: '16px', 
-    padding: '12px 24px',
-    borderRadius: '24px',
-    background: 'rgba(30, 41, 59, 0.75)', 
-    backdropFilter: 'blur(16px) saturate(180%)', 
-    border: '1px solid rgba(255, 255, 255, 0.1)',
-    boxShadow: '0 20px 40px rgba(0, 0, 0, 0.4), inset 0 1px 1px rgba(255,255,255,0.1)',
+    gap: '20px', 
+    padding: '16px 32px',
+    borderRadius: '32px',
+    background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.85), rgba(15, 23, 42, 0.85))', 
+    backdropFilter: 'blur(20px) saturate(180%)', 
+    border: '1px solid rgba(255, 255, 255, 0.15)',
+    boxShadow: '0 25px 50px rgba(0, 0, 0, 0.5), inset 0 1px 2px rgba(255,255,255,0.15), 0 0 0 1px rgba(0,0,0,0.2)',
     zIndex: 50,
-    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+    transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
   },
   controlBtn: {
-    width: '52px',
-    height: '52px',
+    width: '56px',
+    height: '56px',
     borderRadius: '50%',
     border: 'none',
-    background: 'rgba(255, 255, 255, 0.05)', 
+    background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05))', 
     color: '#e2e8f0', 
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+    backdropFilter: 'blur(10px)',
+    boxShadow: '0 4px 16px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.1)',
+    border: '1px solid rgba(255,255,255,0.1)',
   },
   controlBtnActive: {
-    background: '#3b82f6', 
+    background: 'linear-gradient(135deg, #3b82f6, #2563eb)', 
     color: '#fff',
-    boxShadow: '0 0 20px rgba(59, 130, 246, 0.5)', 
-    transform: 'scale(1.05)',
+    boxShadow: '0 0 30px rgba(59, 130, 246, 0.6), inset 0 2px 4px rgba(255,255,255,0.2)', 
+    transform: 'scale(1.08)',
+    border: '1px solid rgba(255,255,255,0.2)',
   },
   acceptBtn: {
-    width: '64px',
-    height: '64px',
+    width: '72px',
+    height: '72px',
     borderRadius: '50%',
     border: 'none',
-    background: 'linear-gradient(135deg, #22c55e, #16a34a)', 
+    background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 50%, #15803d 100%)', 
     color: '#fff',
-    fontSize: '32px',
+    fontSize: '36px',
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    animation: 'pulse-btn 1.5s infinite',
-    boxShadow: '0 8px 24px rgba(34, 197, 94, 0.4), inset 0 2px 4px rgba(255,255,255,0.2)',
+    animation: 'pulse-btn 1.5s infinite, glow-accept 2s infinite',
+    boxShadow: '0 12px 32px rgba(34, 197, 94, 0.5), inset 0 2px 6px rgba(255,255,255,0.3), 0 0 0 2px rgba(34, 197, 94, 0.2)',
+    border: '2px solid rgba(255,255,255,0.2)',
+    transition: 'transform 0.2s',
   },
   declineBtn: {
-    width: '64px',
-    height: '64px',
+    width: '72px',
+    height: '72px',
     borderRadius: '50%',
     border: 'none',
-    background: 'linear-gradient(135deg, #ef4444, #dc2626)', 
-    fontSize: '32px',
+    background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 50%, #b91c1c 100%)', 
+    fontSize: '36px',
     color: '#fff',
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    boxShadow: '0 8px 24px rgba(239, 68, 68, 0.4), inset 0 2px 4px rgba(255,255,255,0.2)',
+    boxShadow: '0 12px 32px rgba(239, 68, 68, 0.5), inset 0 2px 6px rgba(255,255,255,0.3), 0 0 0 2px rgba(239, 68, 68, 0.2)',
+    border: '2px solid rgba(255,255,255,0.2)',
+    transition: 'transform 0.2s',
   },
   endBtn: {
     width: '52px', 
@@ -1390,28 +1406,73 @@ const styles = {
 if (typeof document !== 'undefined') {
   const styleSheet = document.createElement('style');
   styleSheet.textContent = `
+    @keyframes fadeInOverlay {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    
     @keyframes pulse-ring {
       0% { transform: scale(1); opacity: 0.6; }
-      100% { transform: scale(1.6); opacity: 0; }
+      100% { transform: scale(1.8); opacity: 0; }
+    }
+    
+    @keyframes pulse-ring-2 {
+      0% { transform: scale(1); opacity: 0.4; }
+      100% { transform: scale(2); opacity: 0; }
+    }
+    
+    @keyframes avatarPulse {
+      0%, 100% { 
+        box-shadow: 0 0 80px rgba(59, 130, 246, 0.4), 0 0 0 0 rgba(59, 130, 246, 0.5);
+      }
+      50% { 
+        box-shadow: 0 0 100px rgba(59, 130, 246, 0.6), 0 0 0 20px rgba(59, 130, 246, 0);
+      }
     }
     
     @keyframes pulse-btn {
-      0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }
-      50% { transform: scale(1.05); box-shadow: 0 0 0 10px rgba(34, 197, 94, 0); }
+      0%, 100% { 
+        transform: scale(1); 
+        box-shadow: 0 12px 32px rgba(34, 197, 94, 0.5), 0 0 0 0 rgba(34, 197, 94, 0.7);
+      }
+      50% { 
+        transform: scale(1.08); 
+        box-shadow: 0 16px 40px rgba(34, 197, 94, 0.6), 0 0 0 12px rgba(34, 197, 94, 0);
+      }
+    }
+    
+    @keyframes glow-accept {
+      0%, 100% { 
+        filter: drop-shadow(0 0 8px rgba(34, 197, 94, 0.5));
+      }
+      50% { 
+        filter: drop-shadow(0 0 16px rgba(34, 197, 94, 0.8));
+      }
     }
 
     @keyframes modal-appear {
-        from { transform: scale(0.95); opacity: 0; }
-        to { transform: scale(1); opacity: 1; }
+        from { 
+          transform: scale(0.9) translateY(20px); 
+          opacity: 0; 
+        }
+        to { 
+          transform: scale(1) translateY(0); 
+          opacity: 1; 
+        }
     }
 
     button:hover {
-        transform: translateY(-2px); 
-        filter: brightness(1.1);
+        transform: translateY(-3px) scale(1.05); 
+        filter: brightness(1.15);
     }
     
     button:active {
-        transform: translateY(0) scale(0.95);
+        transform: translateY(-1px) scale(1.02);
+    }
+    
+    .control-btn:hover {
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.15), rgba(255, 255, 255, 0.1));
+      box-shadow: 0 6px 20px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.15);
     }
   `;
   document.head.appendChild(styleSheet);
