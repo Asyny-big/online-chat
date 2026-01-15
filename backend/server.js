@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -147,6 +149,10 @@ const frontendBuild = path.join(__dirname, '../frontend/build');
 if (fs.existsSync(frontendBuild)) {
   app.use(express.static(frontendBuild));
   app.get('*', (req, res) => {
+    // Никогда не отдаём SPA вместо API.
+    if (req.path && req.path.startsWith('/api/')) {
+      return res.status(404).json({ error: 'Not found' });
+    }
     res.sendFile(path.join(frontendBuild, 'index.html'));
   });
 }
