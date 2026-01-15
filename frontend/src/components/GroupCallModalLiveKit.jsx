@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { API_URL, LIVEKIT_URL } from '../config';
-import { connect, createLocalTracks, RoomEvent } from 'livekit-client';
+import { createLocalTracks, Room, RoomEvent } from 'livekit-client';
 
 function TrackVideo({ track, isMuted }) {
   const ref = useRef(null);
@@ -132,20 +132,18 @@ function GroupCallModalLiveKit({
 
       const rtcConfig = iceData?.iceServers ? { iceServers: iceData.iceServers } : undefined;
 
-      let room;
+      const room = new Room({ adaptiveStream: true, dynacast: true });
+      roomRef.current = room;
+
       try {
-        room = await connect(LIVEKIT_URL, lkToken, {
+        await room.connect(LIVEKIT_URL, lkToken, {
           rtcConfig,
-          autoSubscribe: true,
-          adaptiveStream: true,
-          dynacast: true
+          autoSubscribe: true
         });
       } catch (e) {
-        console.error('[LiveKit] connect() failed:', e);
+        console.error('[LiveKit] room.connect() failed:', e);
         throw e;
       }
-
-      roomRef.current = room;
 
       room.on(RoomEvent.ParticipantConnected, updateRemoteParticipants);
       room.on(RoomEvent.ParticipantDisconnected, updateRemoteParticipants);
