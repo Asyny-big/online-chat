@@ -2,8 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { API_URL, LIVEKIT_URL } from '../config';
 import { createLocalTracks, Room, RoomEvent } from 'livekit-client';
 
-import './GroupCallModalLiveKit.css';
-
 function TrackVideo({ track, isMuted }) {
   const ref = useRef(null);
 
@@ -21,7 +19,7 @@ function TrackVideo({ track, isMuted }) {
       autoPlay
       playsInline
       muted={isMuted}
-      className="gcl-video"
+      style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#0b1220' }}
     />
   );
 }
@@ -38,263 +36,6 @@ function TrackAudio({ track }) {
   }, [track]);
 
   return <audio ref={ref} autoPlay />;
-}
-
-function Icon({ name }) {
-  switch (name) {
-    case 'mic':
-      return (
-        <svg className="gcl-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path
-            d="M12 14.5c1.66 0 3-1.34 3-3V6.5c0-1.66-1.34-3-3-3s-3 1.34-3 3v5c0 1.66 1.34 3 3 3Z"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-          <path
-            d="M19 11.5c0 3.87-3.13 7-7 7s-7-3.13-7-7"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-          />
-          <path
-            d="M12 18.5v2"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-          />
-        </svg>
-      );
-    case 'camera':
-      return (
-        <svg className="gcl-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path
-            d="M4.5 7.5h9A2.5 2.5 0 0 1 16 10v6a2.5 2.5 0 0 1-2.5 2.5h-9A2.5 2.5 0 0 1 2 16v-6A2.5 2.5 0 0 1 4.5 7.5Z"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinejoin="round"
-          />
-          <path
-            d="M16 11l4-2.5v7L16 13"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      );
-    case 'settings':
-      return (
-        <svg className="gcl-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path
-            d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"
-            stroke="currentColor"
-            strokeWidth="1.8"
-          />
-          <path
-            d="M19.4 12a7.6 7.6 0 0 0-.1-1.3l2-1.5-2-3.4-2.4 1a8.2 8.2 0 0 0-2.2-1.3l-.4-2.5H9.7l-.4 2.5a8.2 8.2 0 0 0-2.2 1.3l-2.4-1-2 3.4 2 1.5a7.6 7.6 0 0 0 0 2.6l-2 1.5 2 3.4 2.4-1a8.2 8.2 0 0 0 2.2 1.3l.4 2.5h4.6l.4-2.5a8.2 8.2 0 0 0 2.2-1.3l2.4 1 2-3.4-2-1.5c.06-.43.1-.86.1-1.3Z"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinejoin="round"
-          />
-        </svg>
-      );
-    case 'leave':
-      return (
-        <svg className="gcl-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path
-            d="M10 7h-1a3 3 0 0 0-3 3v4a3 3 0 0 0 3 3h1"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-          />
-          <path
-            d="M13 16l3-4-3-4"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-          <path
-            d="M16 12H10"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-          />
-          <path
-            d="M14 3h5v18h-5"
-            stroke="currentColor"
-            strokeWidth="1.6"
-            strokeLinecap="round"
-          />
-        </svg>
-      );
-    default:
-      return null;
-  }
-}
-
-function getStatusMeta(callStatus) {
-  switch (callStatus) {
-    case 'incoming':
-      return { label: 'Входящий звонок', variant: 'incoming' };
-    case 'connecting':
-      return { label: 'Подключение…', variant: 'incoming' };
-    case 'active':
-      return { label: 'В звонке', variant: 'active' };
-    case 'ended':
-      return { label: 'Завершён', variant: 'ended' };
-    default:
-      return { label: String(callStatus || ''), variant: 'incoming' };
-  }
-}
-
-function CallHeader({ title, callStatus, participantsCount, onClose }) {
-  const meta = getStatusMeta(callStatus);
-
-  return (
-    <div className="gcl-header">
-      <div className="gcl-headerLeft">
-        <div className="gcl-titleRow">
-          <div className="gcl-title" title={title}>{title}</div>
-          <div className="gcl-statusPill" data-variant={meta.variant}>{meta.label}</div>
-        </div>
-        <div className="gcl-subtitle">{participantsCount} участник(ов)</div>
-      </div>
-
-      <div className="gcl-headerRight">
-        <button type="button" className="gcl-closeBtn" onClick={onClose} aria-label="Закрыть">
-          ✕
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function VideoTile({ name, videoTrack, audioTrack, isLocalMuted }) {
-  return (
-    <div className="gcl-tile">
-      {videoTrack ? (
-        <TrackVideo track={videoTrack} isMuted={isLocalMuted} />
-      ) : (
-        <div className="gcl-placeholder">Видео выключено</div>
-      )}
-      {audioTrack ? <TrackAudio track={audioTrack} /> : null}
-      <div className="gcl-namePill">{name}</div>
-    </div>
-  );
-}
-
-function VideoGrid({ localVideoTrack, isVideoOff, remoteParticipants }) {
-  const remoteTiles = useMemo(() => {
-    return remoteParticipants.map((participant) => {
-      const videoPubs = participant?.videoTrackPublications && typeof participant.videoTrackPublications.values === 'function'
-        ? Array.from(participant.videoTrackPublications.values())
-        : [];
-      const audioPubs = participant?.audioTrackPublications && typeof participant.audioTrackPublications.values === 'function'
-        ? Array.from(participant.audioTrackPublications.values())
-        : [];
-
-      const videoPub = videoPubs.find((p) => p?.track) || null;
-      const audioPub = audioPubs.find((p) => p?.track) || null;
-      const videoTrack = videoPub?.track || null;
-      const audioTrack = audioPub?.track || null;
-
-      return (
-        <VideoTile
-          key={participant.sid}
-          name={participant.identity || 'Участник'}
-          videoTrack={videoTrack}
-          audioTrack={audioTrack}
-        />
-      );
-    });
-  }, [remoteParticipants]);
-
-  const total = 1 + remoteParticipants.length;
-  const countClass = total >= 10 ? 'count-10'
-    : total === 9 ? 'count-9'
-      : total === 8 ? 'count-8'
-        : total === 7 ? 'count-7'
-          : '';
-
-  return (
-    <div className={`gcl-grid ${countClass}`.trim()}>
-      <VideoTile
-        name="Вы"
-        videoTrack={localVideoTrack && !isVideoOff ? localVideoTrack : null}
-        audioTrack={null}
-        isLocalMuted
-      />
-      {remoteTiles}
-    </div>
-  );
-}
-
-function ControlBar({
-  visible,
-  callStatus,
-  callType,
-  isMuted,
-  isVideoOff,
-  onToggleMute,
-  onToggleVideo,
-  onSettings,
-  onLeave
-}) {
-  const disabled = callStatus !== 'active';
-
-  return (
-    <div className="gcl-controlBarWrap" aria-hidden={callStatus === 'incoming'}>
-      <div className={`gcl-controlBar ${visible ? '' : 'hidden'}`.trim()}>
-        <button
-          type="button"
-          className={`gcl-iconBtn ${isMuted ? 'toggled' : ''}`.trim()}
-          onClick={onToggleMute}
-          disabled={disabled}
-          aria-label={isMuted ? 'Включить микрофон' : 'Выключить микрофон'}
-          title={isMuted ? 'Включить микрофон' : 'Выключить микрофон'}
-        >
-          <Icon name="mic" />
-        </button>
-
-        {callType === 'video' ? (
-          <button
-            type="button"
-            className={`gcl-iconBtn ${isVideoOff ? 'toggled' : ''}`.trim()}
-            onClick={onToggleVideo}
-            disabled={disabled}
-            aria-label={isVideoOff ? 'Включить камеру' : 'Выключить камеру'}
-            title={isVideoOff ? 'Включить камеру' : 'Выключить камеру'}
-          >
-            <Icon name="camera" />
-          </button>
-        ) : null}
-
-        <button
-          type="button"
-          className="gcl-iconBtn"
-          onClick={onSettings}
-          disabled={false}
-          aria-label="Настройки"
-          title="Настройки"
-        >
-          <Icon name="settings" />
-        </button>
-
-        <button
-          type="button"
-          className="gcl-iconBtn danger"
-          onClick={onLeave}
-          aria-label="Покинуть звонок"
-          title="Покинуть"
-        >
-          <Icon name="leave" />
-        </button>
-      </div>
-    </div>
-  );
 }
 
 function GroupCallModalLiveKit({
@@ -319,9 +60,6 @@ function GroupCallModalLiveKit({
   const [remoteParticipants, setRemoteParticipants] = useState([]);
   const [localVideoTrack, setLocalVideoTrack] = useState(null);
 
-  const [controlsVisible, setControlsVisible] = useState(true);
-  const lastInteractionAtRef = useRef(Date.now());
-
   const roomRef = useRef(null);
   const localTracksRef = useRef([]);
   const isConnectingRef = useRef(false);
@@ -339,11 +77,6 @@ function GroupCallModalLiveKit({
     }
 
     setRemoteParticipants(Array.from(map.values()));
-  }, []);
-
-  const markInteracted = useCallback(() => {
-    lastInteractionAtRef.current = Date.now();
-    setControlsVisible(true);
   }, []);
 
   const fetchIceServers = useCallback(async () => {
@@ -541,41 +274,6 @@ function GroupCallModalLiveKit({
     };
   }, [disconnectLiveKit]);
 
-  useEffect(() => {
-    const onWindowActivity = () => markInteracted();
-    window.addEventListener('mousemove', onWindowActivity, { passive: true });
-    window.addEventListener('touchstart', onWindowActivity, { passive: true });
-    window.addEventListener('keydown', onWindowActivity);
-
-    return () => {
-      window.removeEventListener('mousemove', onWindowActivity);
-      window.removeEventListener('touchstart', onWindowActivity);
-      window.removeEventListener('keydown', onWindowActivity);
-    };
-  }, [markInteracted]);
-
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      if (callStatus !== 'active') {
-        setControlsVisible(true);
-        return;
-      }
-
-      const idleMs = Date.now() - lastInteractionAtRef.current;
-      if (idleMs > 2500) {
-        setControlsVisible(false);
-      }
-    }, 250);
-
-    return () => window.clearInterval(id);
-  }, [callStatus]);
-
-  const participantsCount = 1 + remoteParticipants.length;
-  const headerTitle = chatName || 'Групповой звонок';
-  const handleSettings = useCallback(() => {
-    // UI-only: кнопка присутствует по требованиям, но без новых панелей/логики.
-  }, []);
-
   const remoteTiles = useMemo(() => {
     return remoteParticipants.map((participant) => {
       const videoPubs = participant?.videoTrackPublications && typeof participant.videoTrackPublications.values === 'function'
@@ -605,54 +303,188 @@ function GroupCallModalLiveKit({
   }, [remoteParticipants]);
 
   return (
-    <div className="gcl-overlay">
-      <div className="gcl-surface" onMouseMove={markInteracted} onTouchStart={markInteracted}>
-        <CallHeader
-          title={headerTitle}
-          callStatus={callStatus}
-          participantsCount={participantsCount}
-          onClose={handleLeave}
-        />
+    <div style={styles.overlay}>
+      <div style={styles.modal}>
+        <div style={styles.header}>
+          <div>
+            <div style={styles.title}>{chatName || 'Групповой звонок'}</div>
+            <div style={styles.subtitle}>LiveKit SFU</div>
+          </div>
+          <button style={styles.closeBtn} onClick={handleLeave}>✕</button>
+        </div>
 
-        {error ? <div className="gcl-error">{error}</div> : null}
+        {error && <div style={styles.error}>{error}</div>}
 
-        <div className="gcl-content">
-          {callStatus === 'incoming' && !autoJoin ? (
-            <div className="gcl-incoming">
-              <div className="gcl-incomingCard">
-                <div className="gcl-incomingTitle">Входящий групповой звонок</div>
-                <div className="gcl-subtitle">Нажмите «Принять», чтобы подключиться</div>
-                <div className="gcl-actions">
-                  <button type="button" className="gcl-actionBtn primary" onClick={handleJoinClick}>Принять</button>
-                  <button type="button" className="gcl-actionBtn danger" onClick={handleLeave}>Отклонить</button>
-                </div>
-              </div>
+        {callStatus === 'incoming' && !autoJoin && (
+          <div style={styles.incomingBox}>
+            <div style={styles.incomingText}>Входящий групповой звонок</div>
+            <div style={styles.actionsRow}>
+              <button style={styles.primaryBtn} onClick={handleJoinClick}>Принять</button>
+              <button style={styles.secondaryBtn} onClick={handleLeave}>Отклонить</button>
             </div>
-          ) : (
-            <div className="gcl-scroll">
-              <VideoGrid
-                localVideoTrack={localVideoTrack}
-                isVideoOff={isVideoOff}
-                remoteParticipants={remoteParticipants}
-              />
+          </div>
+        )}
+
+        {callStatus !== 'incoming' && (
+          <div style={styles.grid}>
+            <div style={styles.tile}>
+              {localVideoTrack && !isVideoOff ? (
+                <TrackVideo track={localVideoTrack} isMuted />
+              ) : (
+                <div style={styles.placeholder}>Ваше видео выключено</div>
+              )}
+              <div style={styles.tileLabel}>Вы</div>
             </div>
+            {remoteTiles}
+          </div>
+        )}
+
+        <div style={styles.controls}>
+          <button style={styles.controlBtn} onClick={toggleMute} disabled={callStatus !== 'active'}>
+            {isMuted ? 'Вкл. микрофон' : 'Выкл. микрофон'}
+          </button>
+          {callType === 'video' && (
+            <button style={styles.controlBtn} onClick={toggleVideo} disabled={callStatus !== 'active'}>
+              {isVideoOff ? 'Вкл. камеру' : 'Выкл. камеру'}
+            </button>
           )}
-
-          <ControlBar
-            visible={controlsVisible}
-            callStatus={callStatus}
-            callType={callType}
-            isMuted={isMuted}
-            isVideoOff={isVideoOff}
-            onToggleMute={toggleMute}
-            onToggleVideo={toggleVideo}
-            onSettings={handleSettings}
-            onLeave={handleLeave}
-          />
+          <button style={styles.dangerBtn} onClick={handleLeave}>Покинуть</button>
         </div>
       </div>
     </div>
   );
 }
+
+const styles = {
+  overlay: {
+    position: 'fixed',
+    inset: 0,
+    background: 'rgba(2, 6, 23, 0.85)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 9999
+  },
+  modal: {
+    width: 'min(1080px, 95vw)',
+    maxHeight: '90vh',
+    background: '#0f172a',
+    borderRadius: 16,
+    padding: 20,
+    color: '#e2e8f0',
+    boxShadow: '0 24px 80px rgba(0,0,0,0.35)',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 16
+  },
+  header: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between'
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: 600
+  },
+  subtitle: {
+    fontSize: 12,
+    color: '#94a3b8'
+  },
+  closeBtn: {
+    background: 'transparent',
+    border: 'none',
+    color: '#e2e8f0',
+    fontSize: 20,
+    cursor: 'pointer'
+  },
+  grid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+    gap: 12,
+    overflowY: 'auto'
+  },
+  tile: {
+    background: '#0b1220',
+    borderRadius: 12,
+    overflow: 'hidden',
+    position: 'relative',
+    aspectRatio: '16 / 9',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  placeholder: {
+    color: '#94a3b8',
+    fontSize: 14
+  },
+  tileLabel: {
+    position: 'absolute',
+    left: 10,
+    bottom: 8,
+    fontSize: 12,
+    background: 'rgba(15, 23, 42, 0.7)',
+    padding: '4px 8px',
+    borderRadius: 8
+  },
+  controls: {
+    display: 'flex',
+    gap: 12,
+    justifyContent: 'center',
+    flexWrap: 'wrap'
+  },
+  controlBtn: {
+    background: '#1e293b',
+    border: '1px solid #334155',
+    color: '#e2e8f0',
+    padding: '10px 16px',
+    borderRadius: 10,
+    cursor: 'pointer'
+  },
+  dangerBtn: {
+    background: '#dc2626',
+    border: 'none',
+    color: '#fff',
+    padding: '10px 16px',
+    borderRadius: 10,
+    cursor: 'pointer'
+  },
+  incomingBox: {
+    background: '#111827',
+    borderRadius: 12,
+    padding: 16,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 12
+  },
+  incomingText: {
+    fontSize: 16
+  },
+  actionsRow: {
+    display: 'flex',
+    gap: 12
+  },
+  primaryBtn: {
+    background: '#16a34a',
+    border: 'none',
+    color: '#fff',
+    padding: '10px 16px',
+    borderRadius: 10,
+    cursor: 'pointer'
+  },
+  secondaryBtn: {
+    background: '#334155',
+    border: 'none',
+    color: '#e2e8f0',
+    padding: '10px 16px',
+    borderRadius: 10,
+    cursor: 'pointer'
+  },
+  error: {
+    background: '#7f1d1d',
+    color: '#fecaca',
+    padding: 10,
+    borderRadius: 8
+  }
+};
 
 export default GroupCallModalLiveKit;
