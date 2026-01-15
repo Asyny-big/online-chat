@@ -5,7 +5,7 @@ import { API_URL, SOCKET_URL } from '../config';
 import Sidebar from '../components/Sidebar';
 import ChatWindow from '../components/ChatWindow';
 import CallModal from '../components/CallModal';
-import GroupCallModal from '../components/GroupCallModal';
+import GroupCallModalLiveKit from '../components/GroupCallModalLiveKit';
 
 function ChatPage({ token, onLogout }) {
   const [chats, setChats] = useState([]);
@@ -623,7 +623,7 @@ function ChatPage({ token, onLogout }) {
 
       {/* Модальное окно группового звонка */}
       {groupCallState !== 'idle' && groupCallData && (
-        <GroupCallModal
+        <GroupCallModalLiveKit
           socket={socketRef.current}
           callId={groupCallData.callId}
           chatId={groupCallData.chatId}

@@ -45,7 +45,6 @@ function GroupCallModal({
   const [participants, setParticipants] = useState([]);
   const [localStream, setLocalStream] = useState(null);
   const [isMuted, setIsMuted] = useState(false);
-  const [isVideoOff, setIsVideoOff] = useState(callType === 'audio');
   const [isScreenSharing, setIsScreenSharing] = useState(false);
 
   // Групповые звонки: SFU-only (ion-sfu). Никакого P2P/mesh/hybrid.
