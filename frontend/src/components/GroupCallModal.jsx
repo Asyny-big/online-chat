@@ -55,6 +55,7 @@ function GroupCallModal({
   const iceConfigRef = useRef({ iceServers: [], iceCandidatePoolSize: 10 });
   const iceReadyRef = useRef(false);
   const iceLoadPromiseRef = useRef(null);
+  const sfuJsonRpcUrlRef = useRef(null);
   // Счётчик обновлений стримов для trigger ререндера
   const [streamUpdateCounter, setStreamUpdateCounter] = useState(0);
   
@@ -382,6 +383,10 @@ function GroupCallModal({
         iceCandidatePoolSize: typeof data.iceCandidatePoolSize === 'number' ? data.iceCandidatePoolSize : 10
       };
 
+      if (data?.sfu?.jsonRpcUrl) {
+        sfuJsonRpcUrlRef.current = String(data.sfu.jsonRpcUrl);
+      }
+
       iceConfigRef.current = nextConfig;
       iceReadyRef.current = true;
       setIceServers(nextConfig.iceServers);
@@ -620,12 +625,32 @@ function GroupCallModal({
   }, []);
 
   const getSfuWsUrl = useCallback(() => {
-    // ВАЖНО: никаких ws:// на HTTPS и никакого :7000 из браузера.
-    // SFU доступен только через nginx WSS proxy: /sfu/ws
-    const sfuWsUrl =
-      `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://` +
-      `${window.location.host}/sfu/ws`;
-    return sfuWsUrl;
+    const normalizeToWs = (rawUrl) => {
+      if (!rawUrl) return null;
+
+      let url = String(rawUrl).trim();
+
+      if (url.startsWith('ws://') || url.startsWith('wss://')) {
+        return url.includes('/ws') ? url : `${url.replace(/\/$/, '')}/ws`;
+      }
+
+      if (url.startsWith('http://') || url.startsWith('https://')) {
+        const isHttps = url.startsWith('https://');
+        url = url.replace(/^https?:\/\//, isHttps ? 'wss://' : 'ws://');
+        return url.includes('/ws') ? url : `${url.replace(/\/$/, '')}/ws`;
+      }
+
+      const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+      url = `${scheme}://${url.replace(/^[\/]+/, '')}`;
+      return url.includes('/ws') ? url : `${url.replace(/\/$/, '')}/ws`;
+    };
+
+    // 1) Если backend дал конкретный адрес SFU — используем его.
+    const fromConfig = normalizeToWs(sfuJsonRpcUrlRef.current);
+    if (fromConfig) return fromConfig;
+
+    // 2) Fallback: через nginx proxy /sfu/ws на текущем хосте.
+    return `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/sfu/ws`;
   }, []);
 
   const attachIncomingTrackToUser = useCallback((userId, track) => {

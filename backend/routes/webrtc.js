@@ -106,9 +106,6 @@ router.get('/config', (req, res) => {
         }
       ],
       iceCandidatePoolSize: 10,
-      sfu: {
-        jsonRpcUrl: config.SFU_JSONRPC_URL || 'http://95.85.243.120:7000'
-      }
     };
 
     console.log(`[WebRTC] Generated WebRTC config for user ${userId}, TURN expires in ${turnCredentials.ttl}s`);
