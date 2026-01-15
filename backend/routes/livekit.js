@@ -4,7 +4,7 @@ const router = express.Router();
 const livekit = require('livekit-server-sdk');
 const AccessToken = livekit.AccessToken;
 
-router.get('/token', (req, res) => {
+router.get('/token', async (req, res) => {
   const { room, identity } = req.query;
 
   if (!room || !identity) {
@@ -17,22 +17,27 @@ router.get('/token', (req, res) => {
     });
   }
 
-  const at = new AccessToken(
-    process.env.LIVEKIT_API_KEY,
-    process.env.LIVEKIT_API_SECRET,
-    { identity }
-  );
+  try {
+    const at = new AccessToken(
+      process.env.LIVEKIT_API_KEY,
+      process.env.LIVEKIT_API_SECRET,
+      { identity }
+    );
 
-  at.addGrant({
-    room,
-    roomJoin: true,
-    canPublish: true,
-    canSubscribe: true,
-  });
+    at.addGrant({
+      room,
+      roomJoin: true,
+      canPublish: true,
+      canSubscribe: true,
+    });
 
-  const token = at.toJwt(); // ← ВАЖНО: маленькая t
+    const token = await at.toJwt(); // 🔥 ВАЖНО
 
-  res.json({ token });
+    res.json({ token });
+  } catch (err) {
+    console.error('[LiveKit token error]', err);
+    res.status(500).json({ error: 'failed to generate token' });
+  }
 });
 
 module.exports = router;
