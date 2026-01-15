@@ -31,7 +31,7 @@ router.get('/token', (req, res) => {
       canPublish: true,
       canSubscribe: true
     })
-    .toJwt();
+    .toJWT();
 
   return res.json({ token });
 });
