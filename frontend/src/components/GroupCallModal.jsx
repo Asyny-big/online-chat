@@ -445,7 +445,7 @@ function GroupCallModal({
   // Надёжная привязка MediaStream к <video>.
   // Почему так: при переключении main/preview React размонтирует/монтирует video-элементы.
   // На некоторых браузерах (особенно Android WebView) одного autoPlay недостаточно —
-  // видео остаётся "чёрным" пока явно не вызвать play() после назначения srcObject.
+  // видео остаётся "чёрным" пока явно не вызовем play() после назначения srcObject.
   const attachStreamToVideo = useCallback((videoEl, stream, { muted } = {}) => {
     if (!videoEl) return;
 
@@ -733,8 +733,8 @@ function GroupCallModal({
 
     const client = new Client(signal, {
       codec: 'vp8',
-      iceServers: cfg.iceServers || [],
-      sfuWsUrl
+      iceServers: cfg.iceServers || []
+      // sfuWsUrl запрещён
     });
 
     sfuSignalRef.current = signal;
