@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { API_URL } from '../config';
-import { createLocalTracks, Room, RoomEvent } from 'livekit-client';
+import { API_URL, LIVEKIT_URL } from '../config';
+import { connect, createLocalTracks, RoomEvent } from 'livekit-client';
 
 function TrackVideo({ track, isMuted }) {
   const ref = useRef(null);
@@ -84,13 +84,21 @@ function GroupCallModalLiveKit({
   }, [token]);
 
   const fetchLiveKitToken = useCallback(async () => {
-    const res = await fetch(`${API_URL}/livekit/token`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ roomId: callId })
+    const room = String(callId || '').trim();
+    const identity = String(currentUserId || '').trim();
+
+    if (!room) {
+      throw new Error('room is required');
+    }
+    if (!identity) {
+      throw new Error('identity is required');
+    }
+
+    const url = `${API_URL}/livekit/token?room=${encodeURIComponent(room)}&identity=${encodeURIComponent(identity)}`;
+
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined
     });
 
     if (!res.ok) {
@@ -98,8 +106,14 @@ function GroupCallModalLiveKit({
       throw new Error(data?.error || 'Failed to get LiveKit token');
     }
 
-    return res.json();
-  }, [token, callId]);
+    const data = await res.json();
+    const lkToken = data?.token;
+    if (typeof lkToken !== 'string' || !lkToken.trim()) {
+      throw new Error('LiveKit token is invalid');
+    }
+
+    return lkToken;
+  }, [callId, currentUserId, token]);
 
   const connectLiveKit = useCallback(async () => {
     if (isConnectingRef.current) return;
@@ -114,22 +128,29 @@ function GroupCallModalLiveKit({
         socket.emit('group-call:join', { callId, chatId });
       }
 
-      const [lkData, iceData] = await Promise.all([
-        fetchLiveKitToken(),
-        fetchIceServers()
-      ]);
+      const [lkToken, iceData] = await Promise.all([fetchLiveKitToken(), fetchIceServers()]);
 
-      const room = new Room({ adaptiveStream: true, dynacast: true });
+      const rtcConfig = iceData?.iceServers ? { iceServers: iceData.iceServers } : undefined;
+
+      let room;
+      try {
+        room = await connect(LIVEKIT_URL, lkToken, {
+          rtcConfig,
+          autoSubscribe: true,
+          adaptiveStream: true,
+          dynacast: true
+        });
+      } catch (e) {
+        console.error('[LiveKit] connect() failed:', e);
+        throw e;
+      }
+
       roomRef.current = room;
 
       room.on(RoomEvent.ParticipantConnected, updateRemoteParticipants);
       room.on(RoomEvent.ParticipantDisconnected, updateRemoteParticipants);
       room.on(RoomEvent.TrackSubscribed, updateRemoteParticipants);
       room.on(RoomEvent.TrackUnsubscribed, updateRemoteParticipants);
-
-      const rtcConfig = iceData?.iceServers ? { iceServers: iceData.iceServers } : undefined;
-
-      await room.connect(lkData.url, lkData.token, { rtcConfig, autoSubscribe: true });
 
       const tracks = await createLocalTracks({
         audio: true,

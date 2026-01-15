@@ -19,3 +19,5 @@ export const SOCKET_URL = (() => {
   }
   return '/';
 })();
+
+export const LIVEKIT_URL = 'wss://govchat.ru/rtc';
