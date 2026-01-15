@@ -64,11 +64,19 @@ function GroupCallModalLiveKit({
   const localTracksRef = useRef([]);
   const isConnectingRef = useRef(false);
   const leaveSentRef = useRef(false);
+  const mountedRef = useRef(true);
 
   const updateRemoteParticipants = useCallback(() => {
     const room = roomRef.current;
-    if (!room) return;
-    setRemoteParticipants(Array.from(room.participants.values()));
+    if (!room || !mountedRef.current) return;
+
+    const map = room.remoteParticipants;
+    if (!map || typeof map.values !== 'function') {
+      setRemoteParticipants([]);
+      return;
+    }
+
+    setRemoteParticipants(Array.from(map.values()));
   }, []);
 
   const fetchIceServers = useCallback(async () => {
@@ -135,6 +143,16 @@ function GroupCallModalLiveKit({
       const room = new Room({ adaptiveStream: true, dynacast: true });
       roomRef.current = room;
 
+      // Важно: подписки на события до/после connect допустимы,
+      // но state-апдейты защищаем mountedRef.
+      const sync = () => updateRemoteParticipants();
+      room.on(RoomEvent.ParticipantConnected, sync);
+      room.on(RoomEvent.ParticipantDisconnected, sync);
+      room.on(RoomEvent.TrackPublished, sync);
+      room.on(RoomEvent.TrackUnpublished, sync);
+      room.on(RoomEvent.TrackSubscribed, sync);
+      room.on(RoomEvent.TrackUnsubscribed, sync);
+
       try {
         await room.connect(LIVEKIT_URL, lkToken, {
           rtcConfig,
@@ -144,11 +162,6 @@ function GroupCallModalLiveKit({
         console.error('[LiveKit] room.connect() failed:', e);
         throw e;
       }
-
-      room.on(RoomEvent.ParticipantConnected, updateRemoteParticipants);
-      room.on(RoomEvent.ParticipantDisconnected, updateRemoteParticipants);
-      room.on(RoomEvent.TrackSubscribed, updateRemoteParticipants);
-      room.on(RoomEvent.TrackUnsubscribed, updateRemoteParticipants);
 
       const tracks = await createLocalTracks({
         audio: true,
@@ -160,13 +173,16 @@ function GroupCallModalLiveKit({
       await Promise.all(tracks.map((track) => room.localParticipant.publishTrack(track)));
 
       const localVideo = tracks.find((t) => t.kind === 'video') || null;
-      setLocalVideoTrack(localVideo);
-
-      setCallStatus('active');
+      if (mountedRef.current) {
+        setLocalVideoTrack(localVideo);
+        setCallStatus('active');
+      }
       updateRemoteParticipants();
     } catch (err) {
-      setError(err?.message || 'LiveKit connection failed');
-      setCallStatus('ended');
+      if (mountedRef.current) {
+        setError(err?.message || 'LiveKit connection failed');
+        setCallStatus('ended');
+      }
     } finally {
       isConnectingRef.current = false;
     }
@@ -175,6 +191,11 @@ function GroupCallModalLiveKit({
   const disconnectLiveKit = useCallback(async () => {
     const room = roomRef.current;
     if (room) {
+      try {
+        room.removeAllListeners?.();
+      } catch (_) {
+        // no-op
+      }
       room.disconnect();
       roomRef.current = null;
     }
@@ -187,7 +208,10 @@ function GroupCallModalLiveKit({
       }
     });
     localTracksRef.current = [];
-    setLocalVideoTrack(null);
+    if (mountedRef.current) {
+      setLocalVideoTrack(null);
+      setRemoteParticipants([]);
+    }
   }, []);
 
   const handleLeave = useCallback(async () => {
@@ -245,14 +269,22 @@ function GroupCallModalLiveKit({
 
   useEffect(() => {
     return () => {
+      mountedRef.current = false;
       disconnectLiveKit();
     };
   }, [disconnectLiveKit]);
 
   const remoteTiles = useMemo(() => {
     return remoteParticipants.map((participant) => {
-      const videoPub = Array.from(participant.videoTrackPublications.values()).find((p) => p.track);
-      const audioPub = Array.from(participant.audioTrackPublications.values()).find((p) => p.track);
+      const videoPubs = participant?.videoTrackPublications && typeof participant.videoTrackPublications.values === 'function'
+        ? Array.from(participant.videoTrackPublications.values())
+        : [];
+      const audioPubs = participant?.audioTrackPublications && typeof participant.audioTrackPublications.values === 'function'
+        ? Array.from(participant.audioTrackPublications.values())
+        : [];
+
+      const videoPub = videoPubs.find((p) => p?.track) || null;
+      const audioPub = audioPubs.find((p) => p?.track) || null;
       const videoTrack = videoPub?.track || null;
       const audioTrack = audioPub?.track || null;
 
