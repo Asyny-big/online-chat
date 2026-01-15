@@ -30,7 +30,7 @@ router.get('/token', (req, res) => {
     canSubscribe: true,
   });
 
-  const token = at.toJWT();
+  const token = at.toJwt(); // ← ВАЖНО: маленькая t
 
   res.json({ token });
 });
