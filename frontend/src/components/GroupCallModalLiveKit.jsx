@@ -2,7 +2,83 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { API_URL, LIVEKIT_URL } from '../config';
 import { createLocalTracks, Room, RoomEvent } from 'livekit-client';
 
-function TrackVideo({ track, isMuted }) {
+/* ─────────────────────────────────────────────────────────────
+   ICONS (SVG Components)
+───────────────────────────────────────────────────────────── */
+const Icons = {
+  Mic: ({ off }) => (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {off ? (
+        <>
+          <line x1="1" y1="1" x2="23" y2="23" />
+          <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94 0v5.12" />
+          <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23" />
+          <line x1="12" y1="19" x2="12" y2="23" />
+          <line x1="8" y1="23" x2="16" y2="23" />
+        </>
+      ) : (
+        <>
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+          <line x1="12" y1="19" x2="12" y2="23" />
+          <line x1="8" y1="23" x2="16" y2="23" />
+        </>
+      )}
+    </svg>
+  ),
+  Camera: ({ off }) => (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {off ? (
+        <>
+          <line x1="1" y1="1" x2="23" y2="23" />
+          <path d="M21 21l-3.5-3.5m-2-2l-2-2m-2-2l-2-2m-2-2l-3.5-3.5" />
+          <path d="M15 7h2a2 2 0 0 1 2 2v2m0 4v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h1" />
+          <polygon points="23 7 16 12 23 17 23 7" />
+        </>
+      ) : (
+        <>
+          <polygon points="23 7 16 12 23 17 23 7" />
+          <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+        </>
+      )}
+    </svg>
+  ),
+  Settings: () => (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  ),
+  Hangup: () => (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+      <path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.18-.43.28-.7.28-.28 0-.53-.11-.71-.29L.29 13.08a.956.956 0 0 1-.29-.7c0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.67c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.48 2.48c-.18.18-.43.29-.71.29-.27 0-.52-.11-.7-.28-.79-.74-1.69-1.36-2.67-1.85-.33-.16-.56-.5-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z" />
+    </svg>
+  ),
+  Users: () => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  ),
+  Phone: () => (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+    </svg>
+  ),
+  PhoneOff: () => (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91" />
+      <line x1="23" y1="1" x2="1" y2="23" />
+    </svg>
+  )
+};
+
+/* ─────────────────────────────────────────────────────────────
+   VIDEO TRACK COMPONENT (unchanged logic)
+───────────────────────────────────────────────────────────── */
+function TrackVideo({ track, isMuted, style }) {
   const ref = useRef(null);
 
   useEffect(() => {
@@ -19,11 +95,20 @@ function TrackVideo({ track, isMuted }) {
       autoPlay
       playsInline
       muted={isMuted}
-      style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#0b1220' }}
+      style={{
+        width: '100%',
+        height: '100%',
+        objectFit: 'cover',
+        background: '#1a1f2e',
+        ...style
+      }}
     />
   );
 }
 
+/* ─────────────────────────────────────────────────────────────
+   AUDIO TRACK COMPONENT (unchanged logic)
+───────────────────────────────────────────────────────────── */
 function TrackAudio({ track }) {
   const ref = useRef(null);
 
@@ -37,6 +122,132 @@ function TrackAudio({ track }) {
 
   return <audio ref={ref} autoPlay />;
 }
+
+/* ─────────────────────────────────────────────────────────────
+   PARTICIPANT TILE COMPONENT
+───────────────────────────────────────────────────────────── */
+function ParticipantTile({ videoTrack, audioTrack, name, isLocal, isMuted: micMuted }) {
+  const [isHovered, setIsHovered] = useState(false);
+  const initials = name ? name.slice(0, 2).toUpperCase() : '??';
+
+  return (
+    <div
+      style={{
+        ...tileStyles.container,
+        ...(isHovered ? tileStyles.containerHover : {})
+      }}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+    >
+      {videoTrack ? (
+        <TrackVideo track={videoTrack} isMuted={isLocal} />
+      ) : (
+        <div style={tileStyles.avatarContainer}>
+          <div style={tileStyles.avatar}>{initials}</div>
+        </div>
+      )}
+      
+      {audioTrack && !isLocal && <TrackAudio track={audioTrack} />}
+      
+      {/* Name badge */}
+      <div style={tileStyles.nameContainer}>
+        <div style={tileStyles.nameBadge}>
+          {micMuted && (
+            <span style={tileStyles.mutedIcon}>
+              <Icons.Mic off />
+            </span>
+          )}
+          <span style={tileStyles.nameText}>{isLocal ? 'Вы' : name || 'Участник'}</span>
+        </div>
+      </div>
+
+      {/* Speaking indicator ring */}
+      <div style={tileStyles.speakingRing} />
+    </div>
+  );
+}
+
+const tileStyles = {
+  container: {
+    position: 'relative',
+    background: 'linear-gradient(145deg, #1e2433 0%, #141820 100%)',
+    borderRadius: 12,
+    overflow: 'hidden',
+    aspectRatio: '16 / 9',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    border: '1px solid rgba(255, 255, 255, 0.06)',
+    transition: 'all 0.2s ease',
+    boxShadow: '0 4px 20px rgba(0, 0, 0, 0.3)'
+  },
+  containerHover: {
+    border: '1px solid rgba(99, 102, 241, 0.4)',
+    transform: 'scale(1.01)',
+    boxShadow: '0 8px 30px rgba(99, 102, 241, 0.15)'
+  },
+  avatarContainer: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    height: '100%',
+    background: 'linear-gradient(145deg, #2a3142 0%, #1a1f2e 100%)'
+  },
+  avatar: {
+    width: 72,
+    height: 72,
+    borderRadius: '50%',
+    background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: 24,
+    fontWeight: 600,
+    color: '#fff',
+    textShadow: '0 2px 4px rgba(0,0,0,0.2)'
+  },
+  nameContainer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    padding: '24px 12px 12px',
+    background: 'linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 100%)'
+  },
+  nameBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    background: 'rgba(0, 0, 0, 0.5)',
+    backdropFilter: 'blur(8px)',
+    padding: '6px 10px',
+    borderRadius: 8,
+    fontSize: 13,
+    fontWeight: 500,
+    color: '#fff'
+  },
+  nameText: {
+    maxWidth: 120,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap'
+  },
+  mutedIcon: {
+    display: 'flex',
+    alignItems: 'center',
+    color: '#ef4444',
+    opacity: 0.9
+  },
+  speakingRing: {
+    position: 'absolute',
+    inset: 0,
+    borderRadius: 12,
+    border: '2px solid transparent',
+    pointerEvents: 'none',
+    transition: 'border-color 0.2s ease'
+  }
+};
 
 function GroupCallModalLiveKit({
   socket,
@@ -59,12 +270,50 @@ function GroupCallModalLiveKit({
   const [error, setError] = useState(null);
   const [remoteParticipants, setRemoteParticipants] = useState([]);
   const [localVideoTrack, setLocalVideoTrack] = useState(null);
+  const [showControls, setShowControls] = useState(true);
 
   const roomRef = useRef(null);
   const localTracksRef = useRef([]);
   const isConnectingRef = useRef(false);
   const leaveSentRef = useRef(false);
   const mountedRef = useRef(true);
+  const controlsTimeoutRef = useRef(null);
+
+  /* ─────────────────────────────────────────────────────────────
+     AUTO-HIDE CONTROLS
+  ───────────────────────────────────────────────────────────── */
+  useEffect(() => {
+    const handleActivity = () => {
+      setShowControls(true);
+      if (controlsTimeoutRef.current) {
+        clearTimeout(controlsTimeoutRef.current);
+      }
+      controlsTimeoutRef.current = setTimeout(() => {
+        if (callStatus === 'active') {
+          setShowControls(false);
+        }
+      }, 3500);
+    };
+
+    window.addEventListener('mousemove', handleActivity);
+    window.addEventListener('touchstart', handleActivity);
+    window.addEventListener('click', handleActivity);
+
+    controlsTimeoutRef.current = setTimeout(() => {
+      if (callStatus === 'active') {
+        setShowControls(false);
+      }
+    }, 3500);
+
+    return () => {
+      window.removeEventListener('mousemove', handleActivity);
+      window.removeEventListener('touchstart', handleActivity);
+      window.removeEventListener('click', handleActivity);
+      if (controlsTimeoutRef.current) {
+        clearTimeout(controlsTimeoutRef.current);
+      }
+    };
+  }, [callStatus]);
 
   const updateRemoteParticipants = useCallback(() => {
     const room = roomRef.current;
@@ -289,202 +538,496 @@ function GroupCallModalLiveKit({
       const audioTrack = audioPub?.track || null;
 
       return (
-        <div key={participant.sid} style={styles.tile}>
-          {videoTrack ? (
-            <TrackVideo track={videoTrack} />
-          ) : (
-            <div style={styles.placeholder}>Видео выключено</div>
-          )}
-          {audioTrack ? <TrackAudio track={audioTrack} /> : null}
-          <div style={styles.tileLabel}>{participant.identity || 'Участник'}</div>
-        </div>
+        <ParticipantTile
+          key={participant.sid}
+          videoTrack={videoTrack}
+          audioTrack={audioTrack}
+          name={participant.identity}
+          isLocal={false}
+        />
       );
     });
   }, [remoteParticipants]);
 
-  return (
-    <div style={styles.overlay}>
-      <div style={styles.modal}>
-        <div style={styles.header}>
-          <div>
-            <div style={styles.title}>{chatName || 'Групповой звонок'}</div>
-            <div style={styles.subtitle}>LiveKit SFU</div>
-          </div>
-          <button style={styles.closeBtn} onClick={handleLeave}>✕</button>
-        </div>
+  // Calculate grid columns based on participant count
+  const participantCount = remoteParticipants.length + 1;
+  const getGridColumns = () => {
+    if (participantCount <= 1) return '1fr';
+    if (participantCount === 2) return 'repeat(2, 1fr)';
+    if (participantCount <= 4) return 'repeat(2, 1fr)';
+    if (participantCount <= 6) return 'repeat(3, 1fr)';
+    return 'repeat(auto-fit, minmax(280px, 1fr))';
+  };
 
-        {error && <div style={styles.error}>{error}</div>}
+  const getStatusText = () => {
+    switch (callStatus) {
+      case 'connecting': return 'Подключение...';
+      case 'active': return `${participantCount} участник${participantCount === 1 ? '' : participantCount < 5 ? 'а' : 'ов'}`;
+      case 'incoming': return 'Входящий звонок';
+      case 'ended': return 'Звонок завершён';
+      default: return '';
+    }
+  };
 
-        {callStatus === 'incoming' && !autoJoin && (
-          <div style={styles.incomingBox}>
-            <div style={styles.incomingText}>Входящий групповой звонок</div>
-            <div style={styles.actionsRow}>
-              <button style={styles.primaryBtn} onClick={handleJoinClick}>Принять</button>
-              <button style={styles.secondaryBtn} onClick={handleLeave}>Отклонить</button>
+  /* ─────────────────────────────────────────────────────────────
+     RENDER: INCOMING CALL SCREEN
+  ───────────────────────────────────────────────────────────── */
+  if (callStatus === 'incoming' && !autoJoin) {
+    return (
+      <div style={styles.overlay}>
+        <div style={styles.incomingModal}>
+          {/* Animated rings */}
+          <div style={styles.incomingRings}>
+            <div style={styles.ring1} />
+            <div style={styles.ring2} />
+            <div style={styles.ring3} />
+            <div style={styles.incomingAvatar}>
+              <Icons.Users />
             </div>
           </div>
-        )}
 
-        {callStatus !== 'incoming' && (
-          <div style={styles.grid}>
-            <div style={styles.tile}>
-              {localVideoTrack && !isVideoOff ? (
-                <TrackVideo track={localVideoTrack} isMuted />
-              ) : (
-                <div style={styles.placeholder}>Ваше видео выключено</div>
-              )}
-              <div style={styles.tileLabel}>Вы</div>
-            </div>
-            {remoteTiles}
-          </div>
-        )}
+          <h2 style={styles.incomingTitle}>{chatName || 'Групповой звонок'}</h2>
+          <p style={styles.incomingSubtitle}>Входящий групповой {callType === 'video' ? 'видео' : ''}звонок</p>
 
-        <div style={styles.controls}>
-          <button style={styles.controlBtn} onClick={toggleMute} disabled={callStatus !== 'active'}>
-            {isMuted ? 'Вкл. микрофон' : 'Выкл. микрофон'}
-          </button>
-          {callType === 'video' && (
-            <button style={styles.controlBtn} onClick={toggleVideo} disabled={callStatus !== 'active'}>
-              {isVideoOff ? 'Вкл. камеру' : 'Выкл. камеру'}
+          <div style={styles.incomingActions}>
+            <button style={styles.declineBtn} onClick={handleLeave}>
+              <Icons.PhoneOff />
             </button>
-          )}
-          <button style={styles.dangerBtn} onClick={handleLeave}>Покинуть</button>
+            <button style={styles.acceptBtn} onClick={handleJoinClick}>
+              <Icons.Phone />
+            </button>
+          </div>
         </div>
       </div>
+    );
+  }
+
+  /* ─────────────────────────────────────────────────────────────
+     RENDER: MAIN CALL SCREEN
+  ───────────────────────────────────────────────────────────── */
+  return (
+    <div style={styles.overlay}>
+      {/* ─── HEADER ─── */}
+      <header style={{
+        ...styles.header,
+        opacity: showControls ? 1 : 0,
+        transform: showControls ? 'translateY(0)' : 'translateY(-20px)'
+      }}>
+        <div style={styles.headerLeft}>
+          <div style={styles.headerIcon}>
+            <Icons.Users />
+          </div>
+          <div>
+            <h1 style={styles.headerTitle}>{chatName || 'Групповой звонок'}</h1>
+            <p style={styles.headerStatus}>{getStatusText()}</p>
+          </div>
+        </div>
+      </header>
+
+      {/* ─── ERROR TOAST ─── */}
+      {error && (
+        <div style={styles.errorToast}>
+          <span style={styles.errorIcon}>⚠</span>
+          {error}
+        </div>
+      )}
+
+      {/* ─── VIDEO GRID ─── */}
+      <main style={styles.videoContainer}>
+        <div style={{
+          ...styles.videoGrid,
+          gridTemplateColumns: getGridColumns()
+        }}>
+          {/* Local participant */}
+          <ParticipantTile
+            videoTrack={localVideoTrack && !isVideoOff ? localVideoTrack : null}
+            name="Вы"
+            isLocal
+            isMuted={isMuted}
+          />
+          {/* Remote participants */}
+          {remoteTiles}
+        </div>
+
+        {/* Connecting overlay */}
+        {callStatus === 'connecting' && (
+          <div style={styles.connectingOverlay}>
+            <div style={styles.spinner} />
+            <p style={styles.connectingText}>Подключение к звонку...</p>
+          </div>
+        )}
+      </main>
+
+      {/* ─── CONTROL BAR ─── */}
+      <footer style={{
+        ...styles.controlBar,
+        opacity: showControls ? 1 : 0,
+        transform: showControls ? 'translateY(0)' : 'translateY(20px)'
+      }}>
+        <div style={styles.controlsWrapper}>
+          {/* Mic button */}
+          <button
+            style={{
+              ...styles.controlButton,
+              ...(isMuted ? styles.controlButtonOff : {})
+            }}
+            onClick={toggleMute}
+            disabled={callStatus !== 'active'}
+            title={isMuted ? 'Включить микрофон' : 'Выключить микрофон'}
+          >
+            <Icons.Mic off={isMuted} />
+          </button>
+
+          {/* Camera button */}
+          {callType === 'video' && (
+            <button
+              style={{
+                ...styles.controlButton,
+                ...(isVideoOff ? styles.controlButtonOff : {})
+              }}
+              onClick={toggleVideo}
+              disabled={callStatus !== 'active'}
+              title={isVideoOff ? 'Включить камеру' : 'Выключить камеру'}
+            >
+              <Icons.Camera off={isVideoOff} />
+            </button>
+          )}
+
+          {/* Settings button */}
+          <button
+            style={styles.controlButton}
+            title="Настройки"
+          >
+            <Icons.Settings />
+          </button>
+
+          {/* Leave button */}
+          <button
+            style={styles.leaveButton}
+            onClick={handleLeave}
+            title="Покинуть звонок"
+          >
+            <Icons.Hangup />
+          </button>
+        </div>
+      </footer>
     </div>
   );
 }
 
+/* ─────────────────────────────────────────────────────────────
+   STYLES
+───────────────────────────────────────────────────────────── */
 const styles = {
+  /* Overlay */
   overlay: {
     position: 'fixed',
     inset: 0,
-    background: 'rgba(2, 6, 23, 0.85)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 9999
-  },
-  modal: {
-    width: 'min(1080px, 95vw)',
-    maxHeight: '90vh',
-    background: '#0f172a',
-    borderRadius: 16,
-    padding: 20,
-    color: '#e2e8f0',
-    boxShadow: '0 24px 80px rgba(0,0,0,0.35)',
+    background: 'linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #16213e 100%)',
     display: 'flex',
     flexDirection: 'column',
-    gap: 16
+    zIndex: 9999,
+    overflow: 'hidden'
   },
+
+  /* Header */
   header: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between'
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: 600
-  },
-  subtitle: {
-    fontSize: 12,
-    color: '#94a3b8'
-  },
-  closeBtn: {
-    background: 'transparent',
-    border: 'none',
-    color: '#e2e8f0',
-    fontSize: 20,
-    cursor: 'pointer'
-  },
-  grid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
-    gap: 12,
-    overflowY: 'auto'
-  },
-  tile: {
-    background: '#0b1220',
-    borderRadius: 12,
-    overflow: 'hidden',
-    position: 'relative',
-    aspectRatio: '16 / 9',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  placeholder: {
-    color: '#94a3b8',
-    fontSize: 14
-  },
-  tileLabel: {
     position: 'absolute',
-    left: 10,
-    bottom: 8,
-    fontSize: 12,
-    background: 'rgba(15, 23, 42, 0.7)',
-    padding: '4px 8px',
-    borderRadius: 8
-  },
-  controls: {
+    top: 0,
+    left: 0,
+    right: 0,
     display: 'flex',
-    gap: 12,
-    justifyContent: 'center',
-    flexWrap: 'wrap'
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '20px 24px',
+    background: 'linear-gradient(to bottom, rgba(0,0,0,0.7) 0%, transparent 100%)',
+    zIndex: 10,
+    transition: 'all 0.3s ease'
   },
-  controlBtn: {
-    background: '#1e293b',
-    border: '1px solid #334155',
-    color: '#e2e8f0',
-    padding: '10px 16px',
-    borderRadius: 10,
-    cursor: 'pointer'
+  headerLeft: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 14
   },
-  dangerBtn: {
-    background: '#dc2626',
-    border: 'none',
-    color: '#fff',
-    padding: '10px 16px',
-    borderRadius: 10,
-    cursor: 'pointer'
-  },
-  incomingBox: {
-    background: '#111827',
+  headerIcon: {
+    width: 44,
+    height: 44,
     borderRadius: 12,
-    padding: 16,
+    background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: '#fff',
+    boxShadow: '0 4px 15px rgba(99, 102, 241, 0.4)'
+  },
+  headerTitle: {
+    margin: 0,
+    fontSize: 18,
+    fontWeight: 600,
+    color: '#fff',
+    letterSpacing: '-0.02em'
+  },
+  headerStatus: {
+    margin: 0,
+    fontSize: 13,
+    color: 'rgba(255, 255, 255, 0.6)',
+    fontWeight: 400
+  },
+
+  /* Video Container */
+  videoContainer: {
+    flex: 1,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '80px 24px 100px',
+    position: 'relative'
+  },
+  videoGrid: {
+    display: 'grid',
+    gap: 12,
+    width: '100%',
+    maxWidth: 1400,
+    maxHeight: '100%',
+    alignContent: 'center'
+  },
+
+  /* Control Bar */
+  controlBar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    display: 'flex',
+    justifyContent: 'center',
+    padding: '20px 24px 28px',
+    background: 'linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 100%)',
+    backdropFilter: 'blur(12px)',
+    WebkitBackdropFilter: 'blur(12px)',
+    transition: 'all 0.3s ease',
+    zIndex: 10
+  },
+  controlsWrapper: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+    padding: '12px 20px',
+    background: 'rgba(30, 32, 44, 0.85)',
+    borderRadius: 16,
+    border: '1px solid rgba(255, 255, 255, 0.08)',
+    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)'
+  },
+  controlButton: {
+    width: 52,
+    height: 52,
+    borderRadius: 14,
+    border: 'none',
+    background: 'rgba(255, 255, 255, 0.1)',
+    color: '#fff',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    transition: 'all 0.2s ease',
+    outline: 'none'
+  },
+  controlButtonOff: {
+    background: 'rgba(239, 68, 68, 0.2)',
+    color: '#ef4444'
+  },
+  leaveButton: {
+    width: 52,
+    height: 52,
+    borderRadius: 14,
+    border: 'none',
+    background: 'linear-gradient(135deg, #dc2626 0%, #ef4444 100%)',
+    color: '#fff',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    transition: 'all 0.2s ease',
+    marginLeft: 8,
+    boxShadow: '0 4px 15px rgba(220, 38, 38, 0.4)',
+    outline: 'none'
+  },
+
+  /* Incoming Call Modal */
+  incomingModal: {
     display: 'flex',
     flexDirection: 'column',
-    gap: 12
+    alignItems: 'center',
+    justifyContent: 'center',
+    textAlign: 'center',
+    padding: 40
   },
-  incomingText: {
+  incomingRings: {
+    position: 'relative',
+    width: 140,
+    height: 140,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 32
+  },
+  ring1: {
+    position: 'absolute',
+    width: '100%',
+    height: '100%',
+    borderRadius: '50%',
+    border: '2px solid rgba(99, 102, 241, 0.3)',
+    animation: 'pulse 2s ease-out infinite'
+  },
+  ring2: {
+    position: 'absolute',
+    width: '120%',
+    height: '120%',
+    borderRadius: '50%',
+    border: '2px solid rgba(99, 102, 241, 0.2)',
+    animation: 'pulse 2s ease-out infinite 0.5s'
+  },
+  ring3: {
+    position: 'absolute',
+    width: '140%',
+    height: '140%',
+    borderRadius: '50%',
+    border: '2px solid rgba(99, 102, 241, 0.1)',
+    animation: 'pulse 2s ease-out infinite 1s'
+  },
+  incomingAvatar: {
+    width: 80,
+    height: 80,
+    borderRadius: '50%',
+    background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: '#fff',
+    boxShadow: '0 8px 30px rgba(99, 102, 241, 0.5)',
+    zIndex: 1
+  },
+  incomingTitle: {
+    margin: 0,
+    fontSize: 26,
+    fontWeight: 600,
+    color: '#fff',
+    marginBottom: 8
+  },
+  incomingSubtitle: {
+    margin: 0,
+    fontSize: 15,
+    color: 'rgba(255, 255, 255, 0.6)',
+    marginBottom: 40
+  },
+  incomingActions: {
+    display: 'flex',
+    gap: 32
+  },
+  acceptBtn: {
+    width: 64,
+    height: 64,
+    borderRadius: '50%',
+    border: 'none',
+    background: 'linear-gradient(135deg, #16a34a 0%, #22c55e 100%)',
+    color: '#fff',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    boxShadow: '0 8px 25px rgba(22, 163, 74, 0.5)',
+    transition: 'all 0.2s ease'
+  },
+  declineBtn: {
+    width: 64,
+    height: 64,
+    borderRadius: '50%',
+    border: 'none',
+    background: 'linear-gradient(135deg, #dc2626 0%, #ef4444 100%)',
+    color: '#fff',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    boxShadow: '0 8px 25px rgba(220, 38, 38, 0.5)',
+    transition: 'all 0.2s ease'
+  },
+
+  /* Error Toast */
+  errorToast: {
+    position: 'absolute',
+    top: 80,
+    left: '50%',
+    transform: 'translateX(-50%)',
+    background: 'rgba(127, 29, 29, 0.95)',
+    color: '#fecaca',
+    padding: '12px 20px',
+    borderRadius: 12,
+    fontSize: 14,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    zIndex: 20,
+    boxShadow: '0 8px 30px rgba(0, 0, 0, 0.4)',
+    backdropFilter: 'blur(8px)'
+  },
+  errorIcon: {
     fontSize: 16
   },
-  actionsRow: {
+
+  /* Connecting Overlay */
+  connectingOverlay: {
+    position: 'absolute',
+    inset: 0,
     display: 'flex',
-    gap: 12
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'rgba(15, 15, 26, 0.85)',
+    backdropFilter: 'blur(8px)',
+    gap: 20
   },
-  primaryBtn: {
-    background: '#16a34a',
-    border: 'none',
-    color: '#fff',
-    padding: '10px 16px',
-    borderRadius: 10,
-    cursor: 'pointer'
+  spinner: {
+    width: 48,
+    height: 48,
+    border: '3px solid rgba(99, 102, 241, 0.2)',
+    borderTopColor: '#6366f1',
+    borderRadius: '50%',
+    animation: 'spin 1s linear infinite'
   },
-  secondaryBtn: {
-    background: '#334155',
-    border: 'none',
-    color: '#e2e8f0',
-    padding: '10px 16px',
-    borderRadius: 10,
-    cursor: 'pointer'
-  },
-  error: {
-    background: '#7f1d1d',
-    color: '#fecaca',
-    padding: 10,
-    borderRadius: 8
+  connectingText: {
+    margin: 0,
+    fontSize: 16,
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontWeight: 500
   }
 };
+
+/* Inject keyframes for animations */
+if (typeof document !== 'undefined') {
+  const styleSheet = document.createElement('style');
+  styleSheet.textContent = `
+    @keyframes pulse {
+      0% { transform: scale(1); opacity: 1; }
+      100% { transform: scale(1.5); opacity: 0; }
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    button:hover:not(:disabled) {
+      transform: scale(1.05);
+    }
+    button:active:not(:disabled) {
+      transform: scale(0.95);
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+  `;
+  if (!document.querySelector('#group-call-modal-styles')) {
+    styleSheet.id = 'group-call-modal-styles';
+    document.head.appendChild(styleSheet);
+  }
+}
 
 export default GroupCallModalLiveKit;
