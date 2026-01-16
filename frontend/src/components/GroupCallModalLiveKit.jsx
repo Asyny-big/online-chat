@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { API_URL, LIVEKIT_URL } from '../config';
-import { createLocalTracks, Room, RoomEvent, Track, VideoPresets } from 'livekit-client';
-import { GroupCallGrid } from './livekit/GroupCallGrid';
+import { createLocalTracks, Room, RoomEvent } from 'livekit-client';
 
 /* ─────────────────────────────────────────────────────────────
    ICONS (SVG Components)
@@ -76,8 +75,179 @@ const Icons = {
   )
 };
 
-// UI state: pin + active speaker (smoothing)
-const LOCAL_TILE_ID = 'local';
+/* ─────────────────────────────────────────────────────────────
+   VIDEO TRACK COMPONENT (unchanged logic)
+───────────────────────────────────────────────────────────── */
+function TrackVideo({ track, isMuted, style }) {
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!track || !ref.current) return undefined;
+    track.attach(ref.current);
+    return () => {
+      track.detach(ref.current);
+    };
+  }, [track]);
+
+  return (
+    <video
+      ref={ref}
+      autoPlay
+      playsInline
+      muted={isMuted}
+      style={{
+        width: '100%',
+        height: '100%',
+        objectFit: 'cover',
+        background: '#1a1f2e',
+        ...style
+      }}
+    />
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────
+   AUDIO TRACK COMPONENT (unchanged logic)
+───────────────────────────────────────────────────────────── */
+function TrackAudio({ track }) {
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!track || !ref.current) return undefined;
+    track.attach(ref.current);
+    return () => {
+      track.detach(ref.current);
+    };
+  }, [track]);
+
+  return <audio ref={ref} autoPlay />;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   PARTICIPANT TILE COMPONENT
+───────────────────────────────────────────────────────────── */
+function ParticipantTile({ videoTrack, audioTrack, name, isLocal, isMuted: micMuted }) {
+  const [isHovered, setIsHovered] = useState(false);
+  const initials = name ? name.slice(0, 2).toUpperCase() : '??';
+
+  return (
+    <div
+      style={{
+        ...tileStyles.container,
+        ...(isHovered ? tileStyles.containerHover : {})
+      }}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+    >
+      {videoTrack ? (
+        <TrackVideo track={videoTrack} isMuted={isLocal} />
+      ) : (
+        <div style={tileStyles.avatarContainer}>
+          <div style={tileStyles.avatar}>{initials}</div>
+        </div>
+      )}
+      
+      {audioTrack && !isLocal && <TrackAudio track={audioTrack} />}
+      
+      {/* Name badge */}
+      <div style={tileStyles.nameContainer}>
+        <div style={tileStyles.nameBadge}>
+          {micMuted && (
+            <span style={tileStyles.mutedIcon}>
+              <Icons.Mic off />
+            </span>
+          )}
+          <span style={tileStyles.nameText}>{isLocal ? 'Вы' : name || 'Участник'}</span>
+        </div>
+      </div>
+
+      {/* Speaking indicator ring */}
+      <div style={tileStyles.speakingRing} />
+    </div>
+  );
+}
+
+const tileStyles = {
+  container: {
+    position: 'relative',
+    background: 'linear-gradient(145deg, #1e2433 0%, #141820 100%)',
+    borderRadius: 12,
+    overflow: 'hidden',
+    aspectRatio: '16 / 9',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    border: '1px solid rgba(255, 255, 255, 0.06)',
+    transition: 'all 0.2s ease',
+    boxShadow: '0 4px 20px rgba(0, 0, 0, 0.3)'
+  },
+  containerHover: {
+    border: '1px solid rgba(99, 102, 241, 0.4)',
+    transform: 'scale(1.01)',
+    boxShadow: '0 8px 30px rgba(99, 102, 241, 0.15)'
+  },
+  avatarContainer: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    height: '100%',
+    background: 'linear-gradient(145deg, #2a3142 0%, #1a1f2e 100%)'
+  },
+  avatar: {
+    width: 72,
+    height: 72,
+    borderRadius: '50%',
+    background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: 24,
+    fontWeight: 600,
+    color: '#fff',
+    textShadow: '0 2px 4px rgba(0,0,0,0.2)'
+  },
+  nameContainer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    padding: '24px 12px 12px',
+    background: 'linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 100%)'
+  },
+  nameBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    background: 'rgba(0, 0, 0, 0.5)',
+    backdropFilter: 'blur(8px)',
+    padding: '6px 10px',
+    borderRadius: 8,
+    fontSize: 13,
+    fontWeight: 500,
+    color: '#fff'
+  },
+  nameText: {
+    maxWidth: 120,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap'
+  },
+  mutedIcon: {
+    display: 'flex',
+    alignItems: 'center',
+    color: '#ef4444',
+    opacity: 0.9
+  },
+  speakingRing: {
+    position: 'absolute',
+    inset: 0,
+    borderRadius: 12,
+    border: '2px solid transparent',
+    pointerEvents: 'none',
+    transition: 'border-color 0.2s ease'
+  }
+};
 
 function GroupCallModalLiveKit({
   socket,
@@ -102,17 +272,12 @@ function GroupCallModalLiveKit({
   const [localVideoTrack, setLocalVideoTrack] = useState(null);
   const [showControls, setShowControls] = useState(true);
 
-  const [pinnedId, setPinnedId] = useState(null); // 'local' | participant.sid | null
-  const [activeSpeakerId, setActiveSpeakerId] = useState(null);
-
   const roomRef = useRef(null);
   const localTracksRef = useRef([]);
   const isConnectingRef = useRef(false);
   const leaveSentRef = useRef(false);
   const mountedRef = useRef(true);
   const controlsTimeoutRef = useRef(null);
-  const activeSpeakerHoldRef = useRef(null);
-  const activeSpeakerLastSwitchTsRef = useRef(0);
 
   /* ─────────────────────────────────────────────────────────────
      AUTO-HIDE CONTROLS
@@ -227,31 +392,6 @@ function GroupCallModalLiveKit({
       const room = new Room({ adaptiveStream: true, dynacast: true });
       roomRef.current = room;
 
-      // Active speaker: используем серверные данные SFU (лучше, чем клиентский анализ).
-      // Сглаживание (hold + minSwitch) — чтобы подсветка была «мягкой».
-      const onActiveSpeakersChanged = (speakers) => {
-        if (!mountedRef.current) return;
-        const nextSid = Array.isArray(speakers) && speakers[0]?.sid ? speakers[0].sid : null;
-        const now = Date.now();
-
-        // Hold on silence
-        if (!nextSid) {
-          if (activeSpeakerHoldRef.current) clearTimeout(activeSpeakerHoldRef.current);
-          activeSpeakerHoldRef.current = setTimeout(() => {
-            if (mountedRef.current) setActiveSpeakerId(null);
-          }, 900);
-          return;
-        }
-
-        // min switch interval
-        if (now - activeSpeakerLastSwitchTsRef.current < 450) return;
-        activeSpeakerLastSwitchTsRef.current = now;
-
-        if (activeSpeakerHoldRef.current) clearTimeout(activeSpeakerHoldRef.current);
-        setActiveSpeakerId(nextSid);
-      };
-      room.on(RoomEvent.ActiveSpeakersChanged, onActiveSpeakersChanged);
-
       // Важно: подписки на события до/после connect допустимы,
       // но state-апдейты защищаем mountedRef.
       const sync = () => updateRemoteParticipants();
@@ -272,47 +412,14 @@ function GroupCallModalLiveKit({
         throw e;
       }
 
-      // LiveKit: local tracks создаём один раз на join (не на re-render).
-      // Под simulcast/priority: сюда можно добавить simulcast/publishOptions (см. комментарии ниже).
       const tracks = await createLocalTracks({
         audio: true,
-        video:
-          callType === 'video'
-            ? {
-                // Консервативные настройки: стабильнее на мобильных/плохой сети.
-                width: { ideal: 1280 },
-                height: { ideal: 720 },
-                frameRate: { ideal: 24, max: 30 }
-              }
-            : false
+        video: callType === 'video'
       });
 
       localTracksRef.current = tracks;
 
-      // Публикация треков:
-      // - video: simulcast слои (для SFU, до 12 участников)
-      // - source: Camera/Microphone (для корректной маршрутизации/приоритизации)
-      // - priority: (если поддерживается клиентом)
-      const simulcastLayers = [VideoPresets?.h180, VideoPresets?.h360, VideoPresets?.h720].filter(Boolean);
-
-      for (const track of tracks) {
-        if (track.kind === 'video') {
-          const publishOpts = {
-            simulcast: simulcastLayers.length > 0,
-            videoSimulcastLayers: simulcastLayers.length > 0 ? simulcastLayers : undefined,
-            source: Track?.Source?.Camera,
-            // priority доступен не во всех версиях; если нет — просто игнорируется.
-            priority: Track?.Priority?.HIGH
-          };
-          await room.localParticipant.publishTrack(track, publishOpts);
-        } else {
-          const publishOpts = {
-            source: Track?.Source?.Microphone,
-            priority: Track?.Priority?.HIGH
-          };
-          await room.localParticipant.publishTrack(track, publishOpts);
-        }
-      }
+      await Promise.all(tracks.map((track) => room.localParticipant.publishTrack(track)));
 
       const localVideo = tracks.find((t) => t.kind === 'video') || null;
       if (mountedRef.current) {
@@ -353,8 +460,6 @@ function GroupCallModalLiveKit({
     if (mountedRef.current) {
       setLocalVideoTrack(null);
       setRemoteParticipants([]);
-      setPinnedId(null);
-      setActiveSpeakerId(null);
     }
   }, []);
 
@@ -418,63 +523,41 @@ function GroupCallModalLiveKit({
     };
   }, [disconnectLiveKit]);
 
-  const tiles = useMemo(() => {
-    const localTile = {
-      id: LOCAL_TILE_ID,
-      name: 'Вы',
-      isLocal: true,
-      micMuted: isMuted,
-      cameraOff: isVideoOff || callType === 'audio',
-      videoTrack: localVideoTrack && !isVideoOff ? localVideoTrack : null,
-      audioTrack: null
-    };
+  const remoteTiles = useMemo(() => {
+    return remoteParticipants.map((participant) => {
+      const videoPubs = participant?.videoTrackPublications && typeof participant.videoTrackPublications.values === 'function'
+        ? Array.from(participant.videoTrackPublications.values())
+        : [];
+      const audioPubs = participant?.audioTrackPublications && typeof participant.audioTrackPublications.values === 'function'
+        ? Array.from(participant.audioTrackPublications.values())
+        : [];
 
-    const remoteTiles = remoteParticipants.map((participant) => {
-      const videoPubs =
-        participant?.videoTrackPublications && typeof participant.videoTrackPublications.values === 'function'
-          ? Array.from(participant.videoTrackPublications.values())
-          : [];
-      const audioPubs =
-        participant?.audioTrackPublications && typeof participant.audioTrackPublications.values === 'function'
-          ? Array.from(participant.audioTrackPublications.values())
-          : [];
-
-      // Детерминированный выбор camera/mic, чтобы видео не «перепрыгивало» между публикациями.
-      const videoPub =
-        videoPubs.find((p) => p?.source === Track?.Source?.Camera) ||
-        videoPubs.find((p) => p?.track || p?.isMuted === true) ||
-        null;
-      const audioPub =
-        audioPubs.find((p) => p?.source === Track?.Source?.Microphone) ||
-        audioPubs.find((p) => p?.track || p?.isMuted === true) ||
-        null;
-
+      const videoPub = videoPubs.find((p) => p?.track) || null;
+      const audioPub = audioPubs.find((p) => p?.track) || null;
       const videoTrack = videoPub?.track || null;
       const audioTrack = audioPub?.track || null;
 
-      return {
-        id: participant.sid,
-        name: participant.identity,
-        isLocal: false,
-        micMuted: !!audioPub?.isMuted,
-        cameraOff: !!videoPub?.isMuted || callType === 'audio',
-        videoTrack,
-        audioTrack
-      };
+      return (
+        <ParticipantTile
+          key={participant.sid}
+          videoTrack={videoTrack}
+          audioTrack={audioTrack}
+          name={participant.identity}
+          isLocal={false}
+        />
+      );
     });
+  }, [remoteParticipants]);
 
-    return [localTile, ...remoteTiles].slice(0, 12);
-  }, [callType, isMuted, isVideoOff, localVideoTrack, remoteParticipants]);
-
-  // Если закрепили участника и он ушел — снимаем pin.
-  useEffect(() => {
-    if (!pinnedId) return;
-    if (pinnedId === LOCAL_TILE_ID) return;
-    const exists = remoteParticipants.some((p) => p.sid === pinnedId);
-    if (!exists) setPinnedId(null);
-  }, [pinnedId, remoteParticipants]);
-
+  // Calculate grid columns based on participant count
   const participantCount = remoteParticipants.length + 1;
+  const getGridColumns = () => {
+    if (participantCount <= 1) return '1fr';
+    if (participantCount === 2) return 'repeat(2, 1fr)';
+    if (participantCount <= 4) return 'repeat(2, 1fr)';
+    if (participantCount <= 6) return 'repeat(3, 1fr)';
+    return 'repeat(auto-fit, minmax(280px, 1fr))';
+  };
 
   const getStatusText = () => {
     switch (callStatus) {
@@ -551,13 +634,19 @@ function GroupCallModalLiveKit({
 
       {/* ─── VIDEO GRID ─── */}
       <main style={styles.videoContainer}>
-        <div style={styles.videoGrid}>
-          <GroupCallGrid
-            tiles={tiles}
-            pinnedId={pinnedId}
-            activeSpeakerId={activeSpeakerId}
-            onPinChange={setPinnedId}
+        <div style={{
+          ...styles.videoGrid,
+          gridTemplateColumns: getGridColumns()
+        }}>
+          {/* Local participant */}
+          <ParticipantTile
+            videoTrack={localVideoTrack && !isVideoOff ? localVideoTrack : null}
+            name="Вы"
+            isLocal
+            isMuted={isMuted}
           />
+          {/* Remote participants */}
+          {remoteTiles}
         </div>
 
         {/* Connecting overlay */}
@@ -695,6 +784,8 @@ const styles = {
     position: 'relative'
   },
   videoGrid: {
+    display: 'grid',
+    gap: 12,
     width: '100%',
     maxWidth: 1400,
     maxHeight: '100%',
