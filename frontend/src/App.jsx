@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { API_URL } from './config';
 import ChatPage from './pages/ChatPage';
@@ -44,24 +44,28 @@ function App() {
   if (token) return <ChatPage token={token} onLogout={handleLogout} />;
 
   return (
-    <div style={styles.authContainer}>
+    <div style={styles.authContainer} data-auth-element>
       <div style={styles.authBox}>
         <h1 style={styles.title}>
           <span>🦆</span>
           GovChat
         </h1>
-        <p style={styles.subtitle}>Современный мессенджер</p>
+        <p style={styles.subtitle}>Современный мессенджер с видеозвонками</p>
         
         <div style={styles.tabs}>
           <button
             onClick={() => setAuthMode('login')}
             style={{ ...styles.tab, ...(authMode === 'login' ? styles.tabActive : {}) }}
+            data-auth-tab
+            data-auth-tab-active={authMode === 'login' ? 'true' : undefined}
           >
             Вход
           </button>
           <button
             onClick={() => setAuthMode('register')}
             style={{ ...styles.tab, ...(authMode === 'register' ? styles.tabActive : {}) }}
+            data-auth-tab
+            data-auth-tab-active={authMode === 'register' ? 'true' : undefined}
           >
             Регистрация
           </button>
@@ -75,6 +79,7 @@ function App() {
               value={name}
               onChange={(e) => setName(e.target.value)}
               style={styles.input}
+              data-auth-input
               required
             />
           )}
@@ -85,6 +90,7 @@ function App() {
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
             style={styles.input}
+            data-auth-input
             required
           />
           
@@ -94,6 +100,7 @@ function App() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             style={styles.input}
+            data-auth-input
             required
           />
 
@@ -106,9 +113,17 @@ function App() {
               opacity: loading ? 0.7 : 1,
               cursor: loading ? 'not-allowed' : 'pointer'
             }}
+            data-auth-button
             disabled={loading}
           >
-            {loading ? 'Загрузка...' : (authMode === 'login' ? 'Войти' : 'Зарегистрироваться')}
+            {loading ? (
+              <>
+                <span className="loading"></span>
+                <span style={{ marginLeft: '8px' }}>Загрузка...</span>
+              </>
+            ) : (
+              authMode === 'login' ? 'Войти' : 'Зарегистрироваться'
+            )}
           </button>
         </form>
       </div>
