@@ -649,14 +649,15 @@ const styles = {
     height: '100vh',
     height: '100dvh', // для мобильных браузеров
     overflow: 'hidden',
-    background: '#0f172a',
+    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
     position: 'relative',
   },
   sidebarWrapper: {
     width: '320px',
     flexShrink: 0,
     height: '100%',
-    transition: 'transform 0.3s ease',
+    transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+    boxShadow: '4px 0 24px rgba(0, 0, 0, 0.15)',
   },
   chatWindowWrapper: {
     flex: 1,
@@ -664,6 +665,7 @@ const styles = {
     flexDirection: 'column',
     height: '100%',
     minWidth: 0,
+    background: '#1a1d29',
   },
 };
 
