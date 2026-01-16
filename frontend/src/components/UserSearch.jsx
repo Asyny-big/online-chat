@@ -39,39 +39,20 @@ function UserSearch({ token, onCreateChat }) {
 
   return (
     <div style={styles.container}>
-      <div style={styles.searchWrapper}>
-        <span style={styles.searchIcon}>🔍</span>
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Найти по номеру телефона"
-          style={styles.input}
-          onFocus={(e) => {
-            e.target.style.borderColor = '#6366f1';
-            e.target.style.boxShadow = '0 0 0 3px rgba(99, 102, 241, 0.2)';
-          }}
-          onBlur={(e) => {
-            e.target.style.borderColor = 'rgba(255, 255, 255, 0.1)';
-            e.target.style.boxShadow = 'none';
-          }}
-        />
-      </div>
+      <input
+        type="text"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Найдите пользователя по номеру телефона"
+        style={styles.input}
+      />
 
       {query && (
         <div style={styles.results}>
-          {loading && (
-            <div style={styles.hint}>
-              <div style={styles.spinner}></div>
-              Поиск...
-            </div>
-          )}
+          {loading && <div style={styles.hint}>Поиск...</div>}
 
           {!loading && results.length === 0 && (
-            <div style={styles.emptyHint}>
-              <span style={styles.emptyIcon}>👤</span>
-              <span>Пользователь не найден</span>
-            </div>
+            <div style={styles.hint}>Пользователь не найден</div>
           )}
 
           {!loading &&
@@ -80,23 +61,12 @@ function UserSearch({ token, onCreateChat }) {
                 key={user._id}
                 onClick={() => handleSelectUser(user._id)}
                 style={styles.userItem}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'linear-gradient(135deg, rgba(102, 126, 234, 0.2), rgba(118, 75, 162, 0.2))';
-                  e.currentTarget.style.transform = 'translateX(4px)';
-                  e.currentTarget.style.borderColor = '#6366f1';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'transparent';
-                  e.currentTarget.style.transform = 'translateX(0)';
-                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
-                }}
               >
                 <div style={styles.userAvatar}>{user.name?.charAt(0)?.toUpperCase() || '?'}</div>
                 <div style={styles.userInfo}>
                   <div style={styles.userName}>{user.name}</div>
                   <div style={styles.userPhone}>{user.phone}</div>
                 </div>
-                <span style={styles.addIcon}>➕</span>
               </button>
             ))}
         </div>
@@ -107,102 +77,57 @@ function UserSearch({ token, onCreateChat }) {
 
 const styles = {
   container: {
-    padding: '16px',
-    borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
-    background: 'linear-gradient(135deg, rgba(102, 126, 234, 0.05), rgba(118, 75, 162, 0.05))',
-  },
-  searchWrapper: {
-    position: 'relative',
-    display: 'flex',
-    alignItems: 'center',
-  },
-  searchIcon: {
-    position: 'absolute',
-    left: '16px',
-    fontSize: '16px',
-    opacity: 0.5,
-    pointerEvents: 'none',
+    padding: '12px',
+    borderBottom: '1px solid #334155',
   },
   input: {
     width: '100%',
-    padding: '12px 16px 12px 44px',
-    background: '#242837',
-    border: '2px solid rgba(255, 255, 255, 0.1)',
-    borderRadius: '16px',
+    padding: '12px 16px',
+    background: '#0f172a',
+    border: '1px solid #334155',
+    borderRadius: '24px',
     color: '#fff',
     fontSize: '14px',
     outline: 'none',
-    transition: 'all 0.3s ease',
-    fontFamily: 'inherit',
-    fontWeight: '500',
+    transition: 'border-color 0.2s',
   },
   results: {
-    marginTop: '16px',
-    maxHeight: '280px',
+    marginTop: '12px',
+    maxHeight: '240px',
     overflowY: 'auto',
-    scrollbarWidth: 'thin',
-    scrollbarColor: '#6366f1 transparent',
   },
   hint: {
-    padding: '16px 12px',
-    color: '#a0aec0',
-    fontSize: '14px',
+    padding: '12px',
+    color: '#64748b',
+    fontSize: '13px',
     textAlign: 'center',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '8px',
-  },
-  emptyHint: {
-    padding: '24px 12px',
-    color: '#718096',
-    fontSize: '14px',
-    textAlign: 'center',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: '8px',
-  },
-  emptyIcon: {
-    fontSize: '32px',
-    opacity: 0.5,
-  },
-  spinner: {
-    width: '16px',
-    height: '16px',
-    border: '2px solid rgba(99, 102, 241, 0.3)',
-    borderTop: '2px solid #6366f1',
-    borderRadius: '50%',
-    animation: 'spin 0.8s linear infinite',
   },
   userItem: {
     width: '100%',
-    padding: '12px 14px',
+    padding: '10px 12px',
     background: 'transparent',
-    border: '2px solid rgba(255, 255, 255, 0.1)',
-    borderRadius: '14px',
+    border: '1px solid #334155',
+    borderRadius: '12px',
     color: '#fff',
     cursor: 'pointer',
     textAlign: 'left',
-    marginBottom: '8px',
-    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+    marginBottom: '6px',
+    transition: 'all 0.15s ease',
     display: 'flex',
     alignItems: 'center',
     gap: '12px',
-    transform: 'translateX(0)',
   },
   userAvatar: {
-    width: '44px',
-    height: '44px',
+    width: '40px',
+    height: '40px',
     borderRadius: '50%',
-    background: 'linear-gradient(135deg, #10b981, #059669)',
+    background: 'linear-gradient(135deg, #22c55e, #16a34a)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    fontWeight: '700',
-    fontSize: '18px',
+    fontWeight: '600',
+    fontSize: '16px',
     flexShrink: 0,
-    boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
   },
   userInfo: {
     flex: 1,
@@ -210,32 +135,13 @@ const styles = {
   },
   userName: {
     fontWeight: '600',
-    fontSize: '15px',
+    fontSize: '14px',
     marginBottom: '2px',
-    color: '#ffffff',
   },
   userPhone: {
-    fontSize: '13px',
-    color: '#a0aec0',
-  },
-  addIcon: {
-    fontSize: '16px',
-    opacity: 0.6,
-    transition: 'all 0.3s ease',
+    fontSize: '12px',
+    color: '#94a3b8',
   },
 };
-
-// Добавляем анимацию спиннера
-if (typeof document !== 'undefined' && !document.getElementById('usersearch-animations')) {
-  const styleSheet = document.createElement('style');
-  styleSheet.id = 'usersearch-animations';
-  styleSheet.textContent = `
-    @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
-    }
-  `;
-  document.head.appendChild(styleSheet);
-}
 
 export default UserSearch;
