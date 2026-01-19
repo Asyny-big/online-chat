@@ -89,50 +89,116 @@ const Icons = {
    Важно: не создаём PeerConnection и не трогаем логику SFU.
 ───────────────────────────────────────────────────────────── */
 const MediaStreamVideo = React.memo(function MediaStreamVideo({ mediaStreamTrack, muted, className, onTrackEnded }) {
-  const ref = useRef(null);
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const attachedTrackRef = useRef(null);
+  const endedHandlerRef = useRef(null);
 
+  // Создаём MediaStream ровно один раз на video-элемент (mount) и назначаем srcObject один раз.
   useEffect(() => {
-    const el = ref.current;
+    const el = videoRef.current;
     if (!el) return undefined;
 
-    if (!mediaStreamTrack) {
-      el.srcObject = null;
-      return undefined;
+    if (!streamRef.current) {
+      streamRef.current = new MediaStream();
     }
 
-    const stream = new MediaStream([mediaStreamTrack]);
-    el.srcObject = stream;
+    // Назначаем srcObject только если ещё не назначен наш stream.
+    try {
+      if (el.srcObject !== streamRef.current) {
+        el.srcObject = streamRef.current;
+      }
+    } catch (_) {
+      // no-op
+    }
 
     const p = el.play?.();
     if (p && typeof p.catch === 'function') p.catch(() => {});
 
+    return () => {
+      // На unmount: полностью отвязываем srcObject, чтобы не держать last frame.
+      try {
+        el.srcObject = null;
+      } catch (_) {}
+    };
+  }, []);
+
+  // Аккуратно обновляем track внутри существующего MediaStream без пересоздания stream/srcObject.
+  useEffect(() => {
+    const el = videoRef.current;
+    const stream = streamRef.current;
+    if (!el || !stream) return undefined;
+
+    const prev = attachedTrackRef.current;
+    const next = mediaStreamTrack || null;
+
+    if (prev === next) return undefined;
+
+    // Снимаем обработчик ended с предыдущего track.
+    if (prev && endedHandlerRef.current) {
+      try {
+        prev.removeEventListener?.('ended', endedHandlerRef.current);
+      } catch (_) {}
+    }
+
+    // Удаляем предыдущий track из stream.
+    if (prev) {
+      try {
+        stream.removeTrack(prev);
+      } catch (_) {}
+    }
+
+    attachedTrackRef.current = next;
+
+    // Если next отсутствует — оставляем stream пустым; сам <video> обычно размонтируется выше.
+    if (!next) {
+      // Доп. защита: можно сбросить srcObject, чтобы не держать последний кадр.
+      try {
+        el.srcObject = null;
+      } catch (_) {}
+      onTrackEnded?.();
+      return undefined;
+    }
+
+    // Добавляем новый track.
+    try {
+      stream.addTrack(next);
+    } catch (_) {}
+
+    // Если srcObject был сброшен — восстанавливаем ссылку на тот же stream (не новый!).
+    try {
+      if (el.srcObject !== stream) {
+        el.srcObject = stream;
+      }
+    } catch (_) {}
+
     const handleEnded = () => {
+      // Для кейса track stopped: убираем track из stream и сбрасываем srcObject.
+      try {
+        stream.removeTrack(next);
+      } catch (_) {}
       try {
         if (el.srcObject === stream) el.srcObject = null;
       } catch (_) {}
+      attachedTrackRef.current = null;
       onTrackEnded?.();
     };
 
-    // Для кейса "track stopped" (ended) — гарантируем, что не останется last frame.
+    endedHandlerRef.current = handleEnded;
     try {
-      mediaStreamTrack.addEventListener?.('ended', handleEnded);
+      next.addEventListener?.('ended', handleEnded);
     } catch (_) {}
 
     return () => {
-      // Не стопаем track (управляет LiveKit), только отвязываем.
       try {
-        if (el.srcObject === stream) el.srcObject = null;
-      } catch (_) {}
-
-      try {
-        mediaStreamTrack.removeEventListener?.('ended', handleEnded);
+        next.removeEventListener?.('ended', handleEnded);
       } catch (_) {}
     };
   }, [mediaStreamTrack, onTrackEnded]);
 
   return (
     <video
-      ref={ref}
+      ref={videoRef}
       autoPlay
       playsInline
       muted={muted}
