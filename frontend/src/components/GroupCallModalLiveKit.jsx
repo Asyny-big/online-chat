@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { API_URL, LIVEKIT_URL } from '../config';
 import { createLocalTracks, Room, RoomEvent } from 'livekit-client';
+import ConnectionStatusBadge from './ConnectionStatusBadge';
 
 /* ─────────────────────────────────────────────────────────────
    ICONS (SVG Components)
@@ -501,6 +502,25 @@ function GroupCallModalLiveKit({
     }
   }, [callId, chatId, callType, fetchIceServers, fetchLiveKitToken, socket, updateRemoteParticipants]);
 
+  const getPeerConnection = useCallback(() => {
+    // LiveKit скрывает RTCPeerConnection внутри engine, но для getStats() он часто доступен.
+    // Это best-effort: если структура изменится, просто не будет stats.
+    const room = roomRef.current;
+    if (!room) return null;
+
+    const candidates = [
+      room?.engine?.pcManager?.publisher?.pc,
+      room?.engine?.pcManager?.subscriber?.pc,
+      room?.engine?.rtcEngine?.pcManager?.publisher?.pc,
+      room?.engine?.rtcEngine?.pcManager?.subscriber?.pc
+    ];
+
+    for (const pc of candidates) {
+      if (pc && typeof pc.getStats === 'function') return pc;
+    }
+    return null;
+  }, []);
+
   const disconnectLiveKit = useCallback(async () => {
     const room = roomRef.current;
     if (room) {
@@ -800,6 +820,9 @@ function GroupCallModalLiveKit({
   ───────────────────────────────────────────────────────────── */
   return (
     <div style={styles.overlay}>
+      {/* Floating connection badge (SFU) */}
+      <ConnectionStatusBadge getPeerConnection={getPeerConnection} connectionKind="sfu" placement="top-right" />
+
       {/* ─── HEADER ─── */}
       <header style={{
         ...styles.header,
@@ -1234,7 +1257,9 @@ const focusStyles = {
   stageVideo: {
     width: '100%',
     height: '100%',
-    objectFit: 'contain'
+    // ВАЖНО: главное видео НЕ cover
+    objectFit: 'contain',
+    background: 'black'
   },
   stagePlaceholder: {
     width: '100%',
@@ -1284,7 +1309,8 @@ const focusStyles = {
 const thumbStyles = {
   bar: {
     flexShrink: 0,
-    padding: '0 0 12px'
+    height: 'clamp(64px, 14vh, 120px)',
+    padding: '8px 0 12px'
   },
   scroll: {
     display: 'flex',
@@ -1297,8 +1323,8 @@ const thumbStyles = {
   item: {
     position: 'relative',
     flex: '0 0 auto',
-    width: 160,
-    height: 90,
+    height: '100%',
+    width: 'min(28vw, 200px)',
     borderRadius: 12,
     overflow: 'hidden',
     border: '1px solid rgba(255, 255, 255, 0.10)',
@@ -1387,8 +1413,8 @@ if (typeof document !== 'undefined') {
     /* Mobile tweaks */
     @media (max-width: 768px) {
       .gvc-thumb {
-        width: 124px;
-        height: 70px;
+        width: min(38vw, 160px);
+        height: 100%;
         border-radius: 10px;
       }
       .gvc-thumb-scroll {

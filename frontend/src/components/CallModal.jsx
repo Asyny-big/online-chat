@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { API_URL } from '../config';
+import ConnectionStatusBadge from './ConnectionStatusBadge';
 
 const Icons = {
   Mic: ({ off }) => (
@@ -92,6 +93,12 @@ function createRingtone() {
     
     return {
       play: () => {
+        <ConnectionStatusBadge
+          getPeerConnection={() => peerConnectionRef.current}
+          connectionKind="p2p"
+          placement="top-right"
+        />
+
         if (isPlaying) return;
         isPlaying = true;
         audioContext.resume();
