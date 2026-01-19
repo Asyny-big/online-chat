@@ -147,12 +147,42 @@ app.post('/api/upload', authMiddleware, upload.single('file'), (req, res) => {
 // SPA fallback (только если есть build)
 const frontendBuild = path.join(__dirname, '../frontend/build');
 if (fs.existsSync(frontendBuild)) {
-  app.use(express.static(frontendBuild));
+  // ВАЖНО: правильная стратегия кеширования для SPA.
+  // - index.html НЕ кешируем (иначе браузер будет грузить старые ссылки на чанки)
+  // - хэшированные ассеты (js/css/media) можно кешировать долго (immutable)
+  app.use(express.static(frontendBuild, {
+    setHeaders: (res, filePath) => {
+      try {
+        const normalized = String(filePath || '').replace(/\\/g, '/');
+        const isHtml = normalized.endsWith('/index.html') || normalized.endsWith('.html');
+        const isServiceWorker = /service-worker\.js$|sw\.js$/i.test(normalized);
+        const isHashedAsset = /\/static\/(css|js)\/.+\.[0-9a-f]{8,}\.(css|js)$/i.test(normalized);
+
+        if (isHtml || isServiceWorker) {
+          // Обновления UI должны применяться сразу на всех браузерах.
+          res.setHeader('Cache-Control', 'no-store, must-revalidate');
+          return;
+        }
+
+        if (isHashedAsset) {
+          // CRA генерирует хэш в имени файла — это безопасно кешировать надолго.
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+          return;
+        }
+
+        // Прочие файлы (manifest, icons и т.п.) — умеренный кеш.
+        res.setHeader('Cache-Control', 'public, max-age=300');
+      } catch (e) {
+        // no-op
+      }
+    }
+  }));
   app.get('*', (req, res) => {
     // Никогда не отдаём SPA вместо API.
     if (req.path && req.path.startsWith('/api/')) {
       return res.status(404).json({ error: 'Not found' });
     }
+    res.setHeader('Cache-Control', 'no-store, must-revalidate');
     res.sendFile(path.join(frontendBuild, 'index.html'));
   });
 }
