@@ -76,35 +76,51 @@ const Icons = {
 };
 
 /* ─────────────────────────────────────────────────────────────
-   VIDEO TRACK COMPONENT (unchanged logic)
+   MEDIASTREAM VIDEO (SFU-only, 1 video element = 1 MediaStream)
+   Важно: не создаём PeerConnection и не трогаем логику SFU.
 ───────────────────────────────────────────────────────────── */
-function TrackVideo({ track, isMuted, style }) {
+const MediaStreamVideo = React.memo(function MediaStreamVideo({ mediaStreamTrack, muted, style }) {
   const ref = useRef(null);
 
   useEffect(() => {
-    if (!track || !ref.current) return undefined;
-    track.attach(ref.current);
+    const el = ref.current;
+    if (!el) return undefined;
+
+    if (!mediaStreamTrack) {
+      el.srcObject = null;
+      return undefined;
+    }
+
+    const stream = new MediaStream([mediaStreamTrack]);
+    el.srcObject = stream;
+
+    const p = el.play?.();
+    if (p && typeof p.catch === 'function') p.catch(() => {});
+
     return () => {
-      track.detach(ref.current);
+      // Не стопаем track (управляет LiveKit), только отвязываем.
+      try {
+        if (el.srcObject === stream) el.srcObject = null;
+      } catch (_) {}
     };
-  }, [track]);
+  }, [mediaStreamTrack]);
 
   return (
     <video
       ref={ref}
       autoPlay
       playsInline
-      muted={isMuted}
+      muted={muted}
       style={{
         width: '100%',
         height: '100%',
         objectFit: 'cover',
-        background: '#1a1f2e',
+        background: '#0b1020',
         ...style
       }}
     />
   );
-}
+});
 
 /* ─────────────────────────────────────────────────────────────
    AUDIO TRACK COMPONENT (unchanged logic)
@@ -126,128 +142,106 @@ function TrackAudio({ track }) {
 /* ─────────────────────────────────────────────────────────────
    PARTICIPANT TILE COMPONENT
 ───────────────────────────────────────────────────────────── */
-function ParticipantTile({ videoTrack, audioTrack, name, isLocal, isMuted: micMuted }) {
-  const [isHovered, setIsHovered] = useState(false);
-  const initials = name ? name.slice(0, 2).toUpperCase() : '??';
+const MainVideo = React.memo(function MainVideo({
+  mediaStreamTrack,
+  displayName,
+  isLocal,
+  isVideoOff,
+  isSpeaking
+}) {
+  const initials = displayName ? displayName.slice(0, 2).toUpperCase() : '??';
 
   return (
     <div
+      className="gvc-stage"
       style={{
-        ...tileStyles.container,
-        ...(isHovered ? tileStyles.containerHover : {})
+        ...focusStyles.stage,
+        ...(isSpeaking ? focusStyles.stageSpeaking : {})
       }}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
     >
-      {videoTrack ? (
-        <TrackVideo track={videoTrack} isMuted={isLocal} />
+      {mediaStreamTrack && !isVideoOff ? (
+        <MediaStreamVideo mediaStreamTrack={mediaStreamTrack} muted={isLocal} style={focusStyles.stageVideo} />
       ) : (
-        <div style={tileStyles.avatarContainer}>
-          <div style={tileStyles.avatar}>{initials}</div>
+        <div style={focusStyles.stagePlaceholder}>
+          <div style={focusStyles.stageAvatar}>{initials}</div>
         </div>
       )}
-      
-      {audioTrack && !isLocal && <TrackAudio track={audioTrack} />}
-      
-      {/* Name badge */}
-      <div style={tileStyles.nameContainer}>
-        <div style={tileStyles.nameBadge}>
-          {micMuted && (
-            <span style={tileStyles.mutedIcon}>
-              <Icons.Mic off />
-            </span>
-          )}
-          <span style={tileStyles.nameText}>{isLocal ? 'Вы' : name || 'Участник'}</span>
-        </div>
-      </div>
 
-      {/* Speaking indicator ring */}
-      <div style={tileStyles.speakingRing} />
+      <div style={focusStyles.nameOverlay}>
+        <span style={focusStyles.nameText}>{displayName || 'Пользователь'}</span>
+      </div>
     </div>
   );
-}
+});
 
-const tileStyles = {
-  container: {
-    position: 'relative',
-    background: 'linear-gradient(145deg, #1e2433 0%, #141820 100%)',
-    borderRadius: 12,
-    overflow: 'hidden',
-    aspectRatio: '16 / 9',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    border: '1px solid rgba(255, 255, 255, 0.06)',
-    transition: 'all 0.2s ease',
-    boxShadow: '0 4px 20px rgba(0, 0, 0, 0.3)'
-  },
-  containerHover: {
-    border: '1px solid rgba(99, 102, 241, 0.4)',
-    transform: 'scale(1.01)',
-    boxShadow: '0 8px 30px rgba(99, 102, 241, 0.15)'
-  },
-  avatarContainer: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: '100%',
-    height: '100%',
-    background: 'linear-gradient(145deg, #2a3142 0%, #1a1f2e 100%)'
-  },
-  avatar: {
-    width: 72,
-    height: 72,
-    borderRadius: '50%',
-    background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: 24,
-    fontWeight: 600,
-    color: '#fff',
-    textShadow: '0 2px 4px rgba(0,0,0,0.2)'
-  },
-  nameContainer: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    padding: '24px 12px 12px',
-    background: 'linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 100%)'
-  },
-  nameBadge: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 6,
-    background: 'rgba(0, 0, 0, 0.5)',
-    backdropFilter: 'blur(8px)',
-    padding: '6px 10px',
-    borderRadius: 8,
-    fontSize: 13,
-    fontWeight: 500,
-    color: '#fff'
-  },
-  nameText: {
-    maxWidth: 120,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap'
-  },
-  mutedIcon: {
-    display: 'flex',
-    alignItems: 'center',
-    color: '#ef4444',
-    opacity: 0.9
-  },
-  speakingRing: {
-    position: 'absolute',
-    inset: 0,
-    borderRadius: 12,
-    border: '2px solid transparent',
-    pointerEvents: 'none',
-    transition: 'border-color 0.2s ease'
-  }
-};
+const VideoThumbnail = React.memo(function VideoThumbnail({
+  participantId,
+  mediaStreamTrack,
+  displayName,
+  isLocal,
+  isActive,
+  isSpeaking,
+  isVideoOff,
+  onSelect
+}) {
+  const initials = displayName ? displayName.slice(0, 2).toUpperCase() : '??';
+
+  const handleClick = useCallback(() => {
+    onSelect?.(participantId);
+  }, [onSelect, participantId]);
+
+  return (
+    <button
+      type="button"
+      className="gvc-thumb"
+      onClick={handleClick}
+      style={{
+        ...thumbStyles.item,
+        ...(isActive ? thumbStyles.itemActive : {}),
+        ...(isSpeaking && !isActive ? thumbStyles.itemSpeaking : {})
+      }}
+      title={displayName || 'Пользователь'}
+    >
+      {mediaStreamTrack && !isVideoOff ? (
+        <MediaStreamVideo
+          mediaStreamTrack={mediaStreamTrack}
+          muted={isLocal}
+          style={thumbStyles.video}
+        />
+      ) : (
+        <div style={thumbStyles.placeholder}>
+          <div style={thumbStyles.avatar}>{initials}</div>
+        </div>
+      )}
+
+      <div style={thumbStyles.nameOverlay}>
+        <span style={thumbStyles.nameText}>{displayName || 'Пользователь'}</span>
+      </div>
+    </button>
+  );
+});
+
+const ThumbnailsBar = React.memo(function ThumbnailsBar({ items, activeParticipantId, activeSpeakerId, onSelect }) {
+  return (
+    <div style={thumbStyles.bar}>
+      <div style={thumbStyles.scroll} className="gvc-thumb-scroll">
+        {items.map((item) => (
+          <VideoThumbnail
+            key={item.participantId}
+            participantId={item.participantId}
+            mediaStreamTrack={item.mediaStreamTrack}
+            displayName={item.displayName}
+            isLocal={item.isLocal}
+            isActive={item.participantId === activeParticipantId}
+            isSpeaking={item.participantId === activeSpeakerId}
+            isVideoOff={item.isVideoOff}
+            onSelect={onSelect}
+          />
+        ))}
+      </div>
+    </div>
+  );
+});
 
 function GroupCallModalLiveKit({
   socket,
@@ -271,6 +265,14 @@ function GroupCallModalLiveKit({
   const [remoteParticipants, setRemoteParticipants] = useState([]);
   const [localVideoTrack, setLocalVideoTrack] = useState(null);
   const [showControls, setShowControls] = useState(true);
+
+  // participants[userId].name — единый источник отображаемых имён
+  const [participantsById, setParticipantsById] = useState(() => ({}));
+
+  // Focus UX: один активный участник
+  const [activeParticipantId, setActiveParticipantId] = useState(() => String(currentUserId || ''));
+  const [activeSpeakerId, setActiveSpeakerId] = useState(null);
+  const userSelectedFocusRef = useRef(false);
 
   const roomRef = useRef(null);
   const localTracksRef = useRef([]);
@@ -381,9 +383,52 @@ function GroupCallModalLiveKit({
     setError(null);
 
     try {
+      // Запрашиваем список участников с именами (backend отдаёт { oderId, userName })
       if (socket && !leaveSentRef.current) {
-        socket.emit('group-call:join', { callId, chatId });
+        await new Promise((resolve) => {
+          socket.emit('group-call:join', { callId, chatId }, (resp) => {
+            try {
+              if (resp?.participants && Array.isArray(resp.participants)) {
+                setParticipantsById((prev) => {
+                  const next = { ...prev };
+                  resp.participants.forEach((p) => {
+                    const pid = String(p?.oderId || '').trim();
+                    if (!pid) return;
+                    next[pid] = { name: String(p?.userName || '').trim() || prev?.[pid]?.name || '' };
+                  });
+                  return next;
+                });
+              }
+            } catch (_) {
+              // no-op
+            }
+            resolve();
+          });
+        });
       }
+
+      // Подмешиваем инициатора и existingParticipants (если пришли)
+      setParticipantsById((prev) => {
+        const next = { ...prev };
+
+        try {
+          const initId = initiator?._id ? String(initiator._id) : '';
+          if (initId) next[initId] = { name: String(initiator?.name || '').trim() || prev?.[initId]?.name || '' };
+        } catch (_) {}
+
+        try {
+          if (Array.isArray(existingParticipants)) {
+            existingParticipants.forEach((p) => {
+              const pid = String(p?._id || p?.oderId || '').trim();
+              const pname = String(p?.name || p?.userName || '').trim();
+              if (!pid) return;
+              next[pid] = { name: pname || prev?.[pid]?.name || '' };
+            });
+          }
+        } catch (_) {}
+
+        return next;
+      });
 
       const [lkToken, iceData] = await Promise.all([fetchLiveKitToken(), fetchIceServers()]);
 
@@ -401,6 +446,25 @@ function GroupCallModalLiveKit({
       room.on(RoomEvent.TrackUnpublished, sync);
       room.on(RoomEvent.TrackSubscribed, sync);
       room.on(RoomEvent.TrackUnsubscribed, sync);
+
+      // Active speaker (для подсветки, и для авто-focus если пользователь не выбирал вручную)
+      room.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
+        try {
+          const list = Array.isArray(speakers) ? speakers : [];
+          const remote = list.filter((p) => p?.identity && p?.identity !== String(currentUserId || ''));
+          if (remote.length === 0) {
+            setActiveSpeakerId(null);
+            return;
+          }
+          // Берём самого громкого из пришедших
+          const loudest = remote
+            .slice()
+            .sort((a, b) => (b?.audioLevel || 0) - (a?.audioLevel || 0))[0];
+          setActiveSpeakerId(String(loudest.identity));
+        } catch (_) {
+          // no-op
+        }
+      });
 
       try {
         await room.connect(LIVEKIT_URL, lkToken, {
@@ -516,6 +580,39 @@ function GroupCallModalLiveKit({
     };
   }, [handleLeave, socket]);
 
+  // Поддерживаем participantsById актуальным по socket событиям
+  useEffect(() => {
+    if (!socket) return undefined;
+
+    const onJoined = (payload) => {
+      try {
+        const pid = String(payload?.oderId || '').trim();
+        const name = String(payload?.userName || '').trim();
+        if (!pid) return;
+        setParticipantsById((prev) => ({
+          ...prev,
+          [pid]: { name: name || prev?.[pid]?.name || '' }
+        }));
+      } catch (_) {}
+    };
+
+    const onLeft = (payload) => {
+      try {
+        const pid = String(payload?.oderId || '').trim();
+        if (!pid) return;
+        // Не удаляем запись — имена могут понадобиться для UI истории/анимаций.
+      } catch (_) {}
+    };
+
+    socket.on('group-call:participant-joined', onJoined);
+    socket.on('group-call:participant-left', onLeft);
+
+    return () => {
+      socket.off('group-call:participant-joined', onJoined);
+      socket.off('group-call:participant-left', onLeft);
+    };
+  }, [socket]);
+
   useEffect(() => {
     return () => {
       mountedRef.current = false;
@@ -523,41 +620,137 @@ function GroupCallModalLiveKit({
     };
   }, [disconnectLiveKit]);
 
-  const remoteTiles = useMemo(() => {
-    return remoteParticipants.map((participant) => {
-      const videoPubs = participant?.videoTrackPublications && typeof participant.videoTrackPublications.values === 'function'
-        ? Array.from(participant.videoTrackPublications.values())
-        : [];
-      const audioPubs = participant?.audioTrackPublications && typeof participant.audioTrackPublications.values === 'function'
-        ? Array.from(participant.audioTrackPublications.values())
-        : [];
+  const participantCount = remoteParticipants.length + 1;
 
-      const videoPub = videoPubs.find((p) => p?.track) || null;
-      const audioPub = audioPubs.find((p) => p?.track) || null;
-      const videoTrack = videoPub?.track || null;
-      const audioTrack = audioPub?.track || null;
+  const remoteMedia = useMemo(() => {
+    return remoteParticipants
+      .map((participant) => {
+        const identity = String(participant?.identity || '').trim();
+        if (!identity) return null;
 
-      return (
-        <ParticipantTile
-          key={participant.sid}
-          videoTrack={videoTrack}
-          audioTrack={audioTrack}
-          name={participant.identity}
-          isLocal={false}
-        />
-      );
-    });
+        const videoPubs = participant?.videoTrackPublications && typeof participant.videoTrackPublications.values === 'function'
+          ? Array.from(participant.videoTrackPublications.values())
+          : [];
+        const audioPubs = participant?.audioTrackPublications && typeof participant.audioTrackPublications.values === 'function'
+          ? Array.from(participant.audioTrackPublications.values())
+          : [];
+
+        const videoPub = videoPubs.find((p) => p?.track) || null;
+        const audioPub = audioPubs.find((p) => p?.track) || null;
+
+        const videoTrack = videoPub?.track || null;
+        const audioTrack = audioPub?.track || null;
+
+        return {
+          participant,
+          participantId: identity,
+          videoTrack,
+          audioTrack,
+          isSpeaking: !!participant?.isSpeaking,
+          audioLevel: typeof participant?.audioLevel === 'number' ? participant.audioLevel : 0
+        };
+      })
+      .filter(Boolean);
   }, [remoteParticipants]);
 
-  // Calculate grid columns based on participant count
-  const participantCount = remoteParticipants.length + 1;
-  const getGridColumns = () => {
-    if (participantCount <= 1) return '1fr';
-    if (participantCount === 2) return 'repeat(2, 1fr)';
-    if (participantCount <= 4) return 'repeat(2, 1fr)';
-    if (participantCount <= 6) return 'repeat(3, 1fr)';
-    return 'repeat(auto-fit, minmax(280px, 1fr))';
-  };
+  const getDisplayName = useCallback((userId) => {
+    const id = String(userId || '').trim();
+    if (!id) return 'Пользователь';
+    if (id === String(currentUserId || '')) return 'Вы';
+    const name = participantsById?.[id]?.name;
+    return (typeof name === 'string' && name.trim()) ? name.trim() : 'Пользователь';
+  }, [currentUserId, participantsById]);
+
+  // Автовыбор focus (инициатор/первый участник), и защита если текущий focus ушёл
+  useEffect(() => {
+    if (callStatus !== 'active') return;
+
+    const current = String(activeParticipantId || '').trim();
+    const localId = String(currentUserId || '').trim();
+
+    const remoteIds = new Set(remoteMedia.map((r) => r.participantId));
+
+    const isCurrentValid = current && (current === localId || remoteIds.has(current));
+    if (isCurrentValid) return;
+
+    // Если focus недействителен — выбираем следующий доступный
+    const initiatorId = initiator?._id ? String(initiator._id) : '';
+    const next =
+      (activeSpeakerId && remoteIds.has(String(activeSpeakerId)) ? String(activeSpeakerId) : '') ||
+      (initiatorId && remoteIds.has(initiatorId) ? initiatorId : '') ||
+      (remoteMedia[0]?.participantId || '') ||
+      localId;
+
+    setActiveParticipantId(next);
+  }, [activeParticipantId, activeSpeakerId, callStatus, currentUserId, initiator, remoteMedia]);
+
+  // Авто-focus на active speaker (только если пользователь не выбирал вручную)
+  useEffect(() => {
+    if (callStatus !== 'active') return;
+    if (userSelectedFocusRef.current) return;
+    if (!activeSpeakerId) return;
+
+    const speakerId = String(activeSpeakerId).trim();
+    if (!speakerId) return;
+
+    const exists = remoteMedia.some((r) => r.participantId === speakerId);
+    if (!exists) return;
+
+    setActiveParticipantId(speakerId);
+  }, [activeSpeakerId, callStatus, remoteMedia]);
+
+  const handleSelectParticipant = useCallback((userId) => {
+    const id = String(userId || '').trim();
+    if (!id) return;
+    userSelectedFocusRef.current = true;
+    setActiveParticipantId(id);
+  }, []);
+
+  const focusTarget = useMemo(() => {
+    const id = String(activeParticipantId || '').trim();
+    const localId = String(currentUserId || '').trim();
+    if (!id || id === localId) {
+      return {
+        participantId: localId,
+        isLocal: true,
+        videoMediaStreamTrack: localVideoTrack?.mediaStreamTrack || null,
+        isVideoOff,
+        displayName: getDisplayName(localId),
+        isSpeaking: false
+      };
+    }
+
+    const remote = remoteMedia.find((r) => r.participantId === id) || null;
+    return {
+      participantId: id,
+      isLocal: false,
+      videoMediaStreamTrack: remote?.videoTrack?.mediaStreamTrack || null,
+      isVideoOff: false,
+      displayName: getDisplayName(id),
+      isSpeaking: id === activeSpeakerId
+    };
+  }, [activeParticipantId, activeSpeakerId, currentUserId, getDisplayName, isVideoOff, localVideoTrack, remoteMedia]);
+
+  const thumbnailItems = useMemo(() => {
+    const localId = String(currentUserId || '').trim();
+    const localItem = {
+      participantId: localId,
+      isLocal: true,
+      mediaStreamTrack: localVideoTrack?.mediaStreamTrack || null,
+      displayName: getDisplayName(localId),
+      isVideoOff
+    };
+
+    const remoteItems = remoteMedia.map((r) => ({
+      participantId: r.participantId,
+      isLocal: false,
+      mediaStreamTrack: r?.videoTrack?.mediaStreamTrack || null,
+      displayName: getDisplayName(r.participantId),
+      isVideoOff: false
+    }));
+
+    return [localItem, ...remoteItems];
+  }, [currentUserId, getDisplayName, isVideoOff, localVideoTrack, remoteMedia]);
 
   const getStatusText = () => {
     switch (callStatus) {
@@ -611,7 +804,7 @@ function GroupCallModalLiveKit({
       <header style={{
         ...styles.header,
         opacity: showControls ? 1 : 0,
-        transform: showControls ? 'translateY(0)' : 'translateY(-20px)'
+        transform: showControls ? 'translateY(0)' : 'translateY(-12px)'
       }}>
         <div style={styles.headerLeft}>
           <div style={styles.headerIcon}>
@@ -632,22 +825,31 @@ function GroupCallModalLiveKit({
         </div>
       )}
 
-      {/* ─── VIDEO GRID ─── */}
-      <main style={styles.videoContainer}>
-        <div style={{
-          ...styles.videoGrid,
-          gridTemplateColumns: getGridColumns()
-        }}>
-          {/* Local participant */}
-          <ParticipantTile
-            videoTrack={localVideoTrack && !isVideoOff ? localVideoTrack : null}
-            name="Вы"
-            isLocal
-            isMuted={isMuted}
-          />
-          {/* Remote participants */}
-          {remoteTiles}
+      {/* ─── MAIN STAGE + THUMBNAILS ─── */}
+      <main style={styles.content}>
+        {/* Аудио выводим отдельно, чтобы не было дублирования при переключении focus */}
+        <div style={styles.hiddenAudioLayer}>
+          {remoteMedia.map((r) => (
+            r.audioTrack ? <TrackAudio key={`aud:${r.participantId}`} track={r.audioTrack} /> : null
+          ))}
         </div>
+
+        <div style={styles.stageWrap}>
+          <MainVideo
+            mediaStreamTrack={focusTarget.videoMediaStreamTrack}
+            displayName={focusTarget.displayName}
+            isLocal={focusTarget.isLocal}
+            isVideoOff={focusTarget.isLocal ? focusTarget.isVideoOff : false}
+            isSpeaking={focusTarget.isSpeaking}
+          />
+        </div>
+
+        <ThumbnailsBar
+          items={thumbnailItems}
+          activeParticipantId={String(activeParticipantId || '').trim()}
+          activeSpeakerId={activeSpeakerId}
+          onSelect={handleSelectParticipant}
+        />
 
         {/* Connecting overlay */}
         {callStatus === 'connecting' && (
@@ -662,7 +864,8 @@ function GroupCallModalLiveKit({
       <footer style={{
         ...styles.controlBar,
         opacity: showControls ? 1 : 0,
-        transform: showControls ? 'translateY(0)' : 'translateY(20px)'
+        transform: showControls ? 'translateY(0)' : 'translateY(12px)',
+        pointerEvents: showControls ? 'auto' : 'none'
       }}>
         <div style={styles.controlsWrapper}>
           {/* Mic button */}
@@ -727,15 +930,14 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
     zIndex: 9999,
-    overflow: 'hidden'
+    overflow: 'hidden',
+    paddingTop: 'env(safe-area-inset-top)',
+    paddingBottom: 'env(safe-area-inset-bottom)'
   },
 
   /* Header */
   header: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
+    position: 'relative',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -774,34 +976,39 @@ const styles = {
     fontWeight: 400
   },
 
-  /* Video Container */
-  videoContainer: {
+  /* Main Content */
+  content: {
     flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    minHeight: 0,
+    position: 'relative',
+    padding: '12px 16px 0'
+  },
+  hiddenAudioLayer: {
+    position: 'absolute',
+    width: 1,
+    height: 1,
+    overflow: 'hidden',
+    clip: 'rect(0 0 0 0)',
+    clipPath: 'inset(50%)'
+  },
+  stageWrap: {
+    flex: 1,
+    minHeight: 0,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: '80px 24px 100px',
-    position: 'relative'
-  },
-  videoGrid: {
-    display: 'grid',
-    gap: 12,
-    width: '100%',
-    maxWidth: 1400,
-    maxHeight: '100%',
-    alignContent: 'center'
+    paddingBottom: 10
   },
 
   /* Control Bar */
   controlBar: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
+    position: 'relative',
     display: 'flex',
     justifyContent: 'center',
-    padding: '20px 24px 28px',
-    background: 'linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 100%)',
+    padding: '12px 16px calc(12px + env(safe-area-inset-bottom))',
+    background: 'linear-gradient(to top, rgba(0,0,0,0.55) 0%, transparent 100%)',
     backdropFilter: 'blur(12px)',
     WebkitBackdropFilter: 'blur(12px)',
     transition: 'all 0.3s ease',
@@ -1002,6 +1209,159 @@ const styles = {
   }
 };
 
+/* ─────────────────────────────────────────────────────────────
+   FOCUS VIEW + THUMBNAILS STYLES
+───────────────────────────────────────────────────────────── */
+const focusStyles = {
+  stage: {
+    position: 'relative',
+    width: '100%',
+    height: '100%',
+    maxWidth: 1600,
+    background: 'rgba(0, 0, 0, 0.25)',
+    borderRadius: 16,
+    overflow: 'hidden',
+    border: '1px solid rgba(255, 255, 255, 0.08)',
+    boxShadow: '0 10px 40px rgba(0,0,0,0.45)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  stageSpeaking: {
+    border: '1px solid rgba(34, 197, 94, 0.45)',
+    boxShadow: '0 10px 50px rgba(34, 197, 94, 0.12)'
+  },
+  stageVideo: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'contain'
+  },
+  stagePlaceholder: {
+    width: '100%',
+    height: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'linear-gradient(145deg, rgba(30, 32, 44, 0.9) 0%, rgba(10, 12, 20, 0.9) 100%)'
+  },
+  stageAvatar: {
+    width: 120,
+    height: 120,
+    borderRadius: '50%',
+    background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: '#fff',
+    fontSize: 34,
+    fontWeight: 700,
+    letterSpacing: '0.02em',
+    boxShadow: '0 12px 40px rgba(99, 102, 241, 0.35)'
+  },
+  nameOverlay: {
+    position: 'absolute',
+    left: 12,
+    bottom: 12,
+    padding: '8px 10px',
+    borderRadius: 10,
+    background: 'rgba(0,0,0,0.55)',
+    border: '1px solid rgba(255,255,255,0.10)',
+    backdropFilter: 'blur(10px)',
+    WebkitBackdropFilter: 'blur(10px)',
+    maxWidth: '75%'
+  },
+  nameText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 600,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    display: 'block'
+  }
+};
+
+const thumbStyles = {
+  bar: {
+    flexShrink: 0,
+    padding: '0 0 12px'
+  },
+  scroll: {
+    display: 'flex',
+    gap: 10,
+    overflowX: 'auto',
+    overflowY: 'hidden',
+    padding: '0 4px',
+    WebkitOverflowScrolling: 'touch'
+  },
+  item: {
+    position: 'relative',
+    flex: '0 0 auto',
+    width: 160,
+    height: 90,
+    borderRadius: 12,
+    overflow: 'hidden',
+    border: '1px solid rgba(255, 255, 255, 0.10)',
+    background: 'rgba(0,0,0,0.25)',
+    padding: 0,
+    cursor: 'pointer',
+    outline: 'none'
+  },
+  itemActive: {
+    border: '2px solid rgba(99, 102, 241, 0.95)',
+    boxShadow: '0 8px 25px rgba(99, 102, 241, 0.22)'
+  },
+  itemSpeaking: {
+    border: '1px solid rgba(34, 197, 94, 0.55)'
+  },
+  video: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover'
+  },
+  placeholder: {
+    width: '100%',
+    height: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'linear-gradient(145deg, rgba(30, 32, 44, 0.9) 0%, rgba(10, 12, 20, 0.9) 100%)'
+  },
+  avatar: {
+    width: 44,
+    height: 44,
+    borderRadius: '50%',
+    background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 700
+  },
+  nameOverlay: {
+    position: 'absolute',
+    left: 6,
+    right: 6,
+    bottom: 6,
+    padding: '4px 6px',
+    borderRadius: 8,
+    background: 'rgba(0,0,0,0.55)',
+    border: '1px solid rgba(255,255,255,0.10)',
+    backdropFilter: 'blur(8px)',
+    WebkitBackdropFilter: 'blur(8px)'
+  },
+  nameText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 600,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    display: 'block'
+  }
+};
+
 /* Inject keyframes for animations */
 if (typeof document !== 'undefined') {
   const styleSheet = document.createElement('style');
@@ -1022,6 +1382,21 @@ if (typeof document !== 'undefined') {
     button:disabled {
       opacity: 0.5;
       cursor: not-allowed;
+    }
+
+    /* Mobile tweaks */
+    @media (max-width: 768px) {
+      .gvc-thumb {
+        width: 124px;
+        height: 70px;
+        border-radius: 10px;
+      }
+      .gvc-thumb-scroll {
+        gap: 8px;
+      }
+      .gvc-stage {
+        border-radius: 14px;
+      }
     }
   `;
   if (!document.querySelector('#group-call-modal-styles')) {
