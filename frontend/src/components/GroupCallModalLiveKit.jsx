@@ -557,6 +557,12 @@ function GroupCallModalLiveKit({
       const tracks = await createLocalTracks({
         audio: true,
         video: callType === 'video'
+          ? {
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+              frameRate: { ideal: 30, max: 30 }
+            }
+          : false
       });
 
       localTracksRef.current = tracks;
