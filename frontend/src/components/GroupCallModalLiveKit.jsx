@@ -79,7 +79,7 @@ const Icons = {
    MEDIASTREAM VIDEO (SFU-only, 1 video element = 1 MediaStream)
    Важно: не создаём PeerConnection и не трогаем логику SFU.
 ───────────────────────────────────────────────────────────── */
-const MediaStreamVideo = React.memo(function MediaStreamVideo({ mediaStreamTrack, muted, style }) {
+const MediaStreamVideo = React.memo(function MediaStreamVideo({ mediaStreamTrack, muted, className, style }) {
   const ref = useRef(null);
 
   useEffect(() => {
@@ -111,13 +111,8 @@ const MediaStreamVideo = React.memo(function MediaStreamVideo({ mediaStreamTrack
       autoPlay
       playsInline
       muted={muted}
-      style={{
-        width: '100%',
-        height: '100%',
-        objectFit: 'cover',
-        background: '#0b1020',
-        ...style
-      }}
+      className={className}
+      style={style} // Fallback if inline style is absolutely needed
     />
   );
 });
@@ -152,23 +147,21 @@ const MainVideo = React.memo(function MainVideo({
   const initials = displayName ? displayName.slice(0, 2).toUpperCase() : '??';
 
   return (
-    <div
-      className="gvc-stage"
-      style={{
-        ...focusStyles.stage,
-        ...(isSpeaking ? focusStyles.stageSpeaking : {})
-      }}
-    >
+    <div className={`gvc-stage ${isSpeaking ? 'speaking' : ''}`}>
       {mediaStreamTrack && !isVideoOff ? (
-        <MediaStreamVideo mediaStreamTrack={mediaStreamTrack} muted={isLocal} style={focusStyles.stageVideo} />
+        <MediaStreamVideo 
+          mediaStreamTrack={mediaStreamTrack} 
+          muted={isLocal} 
+          className="gvc-stage-video"
+        />
       ) : (
-        <div style={focusStyles.stagePlaceholder}>
-          <div style={focusStyles.stageAvatar}>{initials}</div>
+        <div className="gvc-stage-placeholder">
+          <div className="gvc-stage-avatar">{initials}</div>
         </div>
       )}
 
-      <div style={focusStyles.nameOverlay}>
-        <span style={focusStyles.nameText}>{displayName || 'Пользователь'}</span>
+      <div className="gvc-stage-name">
+        <span>{displayName || 'Пользователь'}</span>
       </div>
     </div>
   );
@@ -193,29 +186,24 @@ const VideoThumbnail = React.memo(function VideoThumbnail({
   return (
     <button
       type="button"
-      className="gvc-thumb"
+      className={`gvc-thumb ${isActive ? 'active' : ''} ${isSpeaking && !isActive ? 'speaking' : ''}`}
       onClick={handleClick}
-      style={{
-        ...thumbStyles.item,
-        ...(isActive ? thumbStyles.itemActive : {}),
-        ...(isSpeaking && !isActive ? thumbStyles.itemSpeaking : {})
-      }}
       title={displayName || 'Пользователь'}
     >
       {mediaStreamTrack && !isVideoOff ? (
         <MediaStreamVideo
           mediaStreamTrack={mediaStreamTrack}
           muted={isLocal}
-          style={thumbStyles.video}
+          className="gvc-thumb-video"
         />
       ) : (
-        <div style={thumbStyles.placeholder}>
-          <div style={thumbStyles.avatar}>{initials}</div>
+        <div className="gvc-thumb-placeholder">
+          <div className="gvc-thumb-avatar">{initials}</div>
         </div>
       )}
 
-      <div style={thumbStyles.nameOverlay}>
-        <span style={thumbStyles.nameText}>{displayName || 'Пользователь'}</span>
+      <div className="gvc-thumb-name">
+        <span>{displayName || 'Пользователь'}</span>
       </div>
     </button>
   );
@@ -223,8 +211,8 @@ const VideoThumbnail = React.memo(function VideoThumbnail({
 
 const ThumbnailsBar = React.memo(function ThumbnailsBar({ items, activeParticipantId, activeSpeakerId, onSelect }) {
   return (
-    <div style={thumbStyles.bar}>
-      <div style={thumbStyles.scroll} className="gvc-thumb-scroll">
+    <div className="gvc-strip">
+      <div className="gvc-strip-scroll">
         {items.map((item) => (
           <VideoThumbnail
             key={item.participantId}
@@ -767,26 +755,26 @@ function GroupCallModalLiveKit({
   ───────────────────────────────────────────────────────────── */
   if (callStatus === 'incoming' && !autoJoin) {
     return (
-      <div style={styles.overlay}>
-        <div style={styles.incomingModal}>
+      <div className="gvc-overlay">
+        <div className="gvc-incoming-modal">
           {/* Animated rings */}
-          <div style={styles.incomingRings}>
-            <div style={styles.ring1} />
-            <div style={styles.ring2} />
-            <div style={styles.ring3} />
-            <div style={styles.incomingAvatar}>
+          <div className="gvc-incoming-rings">
+            <div className="ring1" />
+            <div className="ring2" />
+            <div className="ring3" />
+            <div className="gvc-incoming-avatar">
               <Icons.Users />
             </div>
           </div>
 
-          <h2 style={styles.incomingTitle}>{chatName || 'Групповой звонок'}</h2>
-          <p style={styles.incomingSubtitle}>Входящий групповой {callType === 'video' ? 'видео' : ''}звонок</p>
+          <h2 className="gvc-incoming-title">{chatName || 'Групповой звонок'}</h2>
+          <p className="gvc-incoming-subtitle">Входящий групповой {callType === 'video' ? 'видео' : ''}звонок</p>
 
-          <div style={styles.incomingActions}>
-            <button style={styles.declineBtn} onClick={handleLeave}>
+          <div className="gvc-incoming-actions">
+            <button className="gvc-btn-decline" onClick={handleLeave}>
               <Icons.PhoneOff />
             </button>
-            <button style={styles.acceptBtn} onClick={handleJoinClick}>
+            <button className="gvc-btn-accept" onClick={handleJoinClick}>
               <Icons.Phone />
             </button>
           </div>
@@ -799,42 +787,39 @@ function GroupCallModalLiveKit({
      RENDER: MAIN CALL SCREEN
   ───────────────────────────────────────────────────────────── */
   return (
-    <div style={styles.overlay}>
+    <div className="gvc-overlay">
       {/* ─── HEADER ─── */}
-      <header style={{
-        ...styles.header,
-        opacity: showControls ? 1 : 0,
-        transform: showControls ? 'translateY(0)' : 'translateY(-12px)'
-      }}>
-        <div style={styles.headerLeft}>
-          <div style={styles.headerIcon}>
+      <header className={`gvc-header ${showControls ? '' : 'hidden'}`}>
+        <div className="gvc-header-left">
+          <div className="gvc-header-icon">
             <Icons.Users />
           </div>
-          <div>
-            <h1 style={styles.headerTitle}>{chatName || 'Групповой звонок'}</h1>
-            <p style={styles.headerStatus}>{getStatusText()}</p>
+          <div className="gvc-header-info">
+            <h1>{chatName || 'Групповой звонок'}</h1>
+            <p>{getStatusText()}</p>
           </div>
         </div>
       </header>
 
       {/* ─── ERROR TOAST ─── */}
       {error && (
-        <div style={styles.errorToast}>
-          <span style={styles.errorIcon}>⚠</span>
+        <div className="gvc-error-toast">
+          <span style={{ marginRight: 8 }}>⚠</span>
           {error}
         </div>
       )}
 
-      {/* ─── MAIN STAGE + THUMBNAILS ─── */}
-      <main style={styles.content}>
-        {/* Аудио выводим отдельно, чтобы не было дублирования при переключении focus */}
-        <div style={styles.hiddenAudioLayer}>
+      {/* ─── MAIN CONTENT ─── */}
+      <main className="gvc-content">
+        {/* Hidden Audio */}
+        <div style={{ position: 'absolute', width: 0, height: 0, overflow: 'hidden' }}>
           {remoteMedia.map((r) => (
             r.audioTrack ? <TrackAudio key={`aud:${r.participantId}`} track={r.audioTrack} /> : null
           ))}
         </div>
 
-        <div style={styles.stageWrap}>
+        {/* Stage */}
+        <div className="gvc-stage-wrap">
           <MainVideo
             mediaStreamTrack={focusTarget.videoMediaStreamTrack}
             displayName={focusTarget.displayName}
@@ -842,8 +827,40 @@ function GroupCallModalLiveKit({
             isVideoOff={focusTarget.isLocal ? focusTarget.isVideoOff : false}
             isSpeaking={focusTarget.isSpeaking}
           />
+          
+          {/* Controls - Floating above Thumbs */}
+          <div className={`gvc-controls ${showControls ? '' : 'hidden'}`}>
+            <button
+              className={`gvc-btn ${isMuted ? 'off' : ''}`}
+              onClick={toggleMute}
+              disabled={callStatus !== 'active'}
+              title={isMuted ? 'Включить микрофон' : 'Выключить микрофон'}
+            >
+              <Icons.Mic off={isMuted} />
+            </button>
+
+            {callType === 'video' && (
+              <button
+                className={`gvc-btn ${isVideoOff ? 'off' : ''}`}
+                onClick={toggleVideo}
+                disabled={callStatus !== 'active'}
+                title={isVideoOff ? 'Включить камеру' : 'Выключить камеру'}
+              >
+                <Icons.Camera off={isVideoOff} />
+              </button>
+            )}
+
+            <button className="gvc-btn" title="Настройки">
+              <Icons.Settings />
+            </button>
+
+            <button className="gvc-btn leave" onClick={handleLeave} title="Покинуть звонок">
+              <Icons.Hangup />
+            </button>
+          </div>
         </div>
 
+        {/* Thumbnails Strip */}
         <ThumbnailsBar
           items={thumbnailItems}
           activeParticipantId={String(activeParticipantId || '').trim()}
@@ -851,556 +868,166 @@ function GroupCallModalLiveKit({
           onSelect={handleSelectParticipant}
         />
 
-        {/* Connecting overlay */}
+        {/* Connecting Overlay */}
         {callStatus === 'connecting' && (
-          <div style={styles.connectingOverlay}>
-            <div style={styles.spinner} />
-            <p style={styles.connectingText}>Подключение к звонку...</p>
+          <div className="gvc-connecting">
+            <div className="gvc-spinner" />
+            <p>Подключение к звонку...</p>
           </div>
         )}
       </main>
-
-      {/* ─── CONTROL BAR ─── */}
-      <footer style={{
-        ...styles.controlBar,
-        opacity: showControls ? 1 : 0,
-        transform: showControls ? 'translateY(0)' : 'translateY(12px)',
-        pointerEvents: showControls ? 'auto' : 'none'
-      }}>
-        <div style={styles.controlsWrapper}>
-          {/* Mic button */}
-          <button
-            style={{
-              ...styles.controlButton,
-              ...(isMuted ? styles.controlButtonOff : {})
-            }}
-            onClick={toggleMute}
-            disabled={callStatus !== 'active'}
-            title={isMuted ? 'Включить микрофон' : 'Выключить микрофон'}
-          >
-            <Icons.Mic off={isMuted} />
-          </button>
-
-          {/* Camera button */}
-          {callType === 'video' && (
-            <button
-              style={{
-                ...styles.controlButton,
-                ...(isVideoOff ? styles.controlButtonOff : {})
-              }}
-              onClick={toggleVideo}
-              disabled={callStatus !== 'active'}
-              title={isVideoOff ? 'Включить камеру' : 'Выключить камеру'}
-            >
-              <Icons.Camera off={isVideoOff} />
-            </button>
-          )}
-
-          {/* Settings button */}
-          <button
-            style={styles.controlButton}
-            title="Настройки"
-          >
-            <Icons.Settings />
-          </button>
-
-          {/* Leave button */}
-          <button
-            style={styles.leaveButton}
-            onClick={handleLeave}
-            title="Покинуть звонок"
-          >
-            <Icons.Hangup />
-          </button>
-        </div>
-      </footer>
     </div>
   );
 }
 
 /* ─────────────────────────────────────────────────────────────
-   STYLES
+   STYLES (INJECTED)
+   We use a <style> tag approach to keep everything in one file without inline styles.
 ───────────────────────────────────────────────────────────── */
-const styles = {
-  /* Overlay */
-  overlay: {
-    position: 'fixed',
-    inset: 0,
-    background: 'linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #16213e 100%)',
-    display: 'flex',
-    flexDirection: 'column',
-    zIndex: 9999,
-    overflow: 'hidden',
-    paddingTop: 'env(safe-area-inset-top)',
-    paddingBottom: 'env(safe-area-inset-bottom)'
-  },
+const CSS_STYLES = `
+/* BASE LAYOUT */
+.gvc-overlay {
+  position: fixed; inset: 0; background: #000; z-index: 9999;
+  display: flex; flex-direction: column; font-family: sans-serif;
+}
 
-  /* Header */
-  header: {
-    position: 'relative',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '20px 24px',
-    background: 'linear-gradient(to bottom, rgba(0,0,0,0.7) 0%, transparent 100%)',
-    zIndex: 10,
-    transition: 'all 0.3s ease'
-  },
-  headerLeft: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 14
-  },
-  headerIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    color: '#fff',
-    boxShadow: '0 4px 15px rgba(99, 102, 241, 0.4)'
-  },
-  headerTitle: {
-    margin: 0,
-    fontSize: 18,
-    fontWeight: 600,
-    color: '#fff',
-    letterSpacing: '-0.02em'
-  },
-  headerStatus: {
-    margin: 0,
-    fontSize: 13,
-    color: 'rgba(255, 255, 255, 0.6)',
-    fontWeight: 400
-  },
+/* HEADER */
+.gvc-header {
+  position: absolute; top: 0; left: 0; right: 0;
+  padding: 16px 24px; z-index: 20;
+  transition: transform 0.3s ease, opacity 0.3s ease;
+  background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.gvc-header.hidden { transform: translateY(-100%); opacity: 0; pointer-events: none; }
 
-  /* Main Content */
-  content: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-    minHeight: 0,
-    position: 'relative',
-    padding: '12px 16px 0'
-  },
-  hiddenAudioLayer: {
-    position: 'absolute',
-    width: 1,
-    height: 1,
-    overflow: 'hidden',
-    clip: 'rect(0 0 0 0)',
-    clipPath: 'inset(50%)'
-  },
-  stageWrap: {
-    flex: 1,
-    minHeight: 0,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingBottom: 10
-  },
+.gvc-header-left { display: flex; align-items: center; gap: 12px; }
+.gvc-header-icon { 
+  width: 40px; height: 40px; border-radius: 10px; background: #5865f2; 
+  display: flex; align-items: center; justify-content: center; color: white; 
+}
+.gvc-header-info h1 { margin: 0; font-size: 16px; color: white; font-weight: 600; }
+.gvc-header-info p { margin: 0; font-size: 12px; color: rgba(255,255,255,0.7); }
 
-  /* Control Bar */
-  controlBar: {
-    position: 'relative',
-    display: 'flex',
-    justifyContent: 'center',
-    padding: '12px 16px calc(12px + env(safe-area-inset-bottom))',
-    background: 'linear-gradient(to top, rgba(0,0,0,0.55) 0%, transparent 100%)',
-    backdropFilter: 'blur(12px)',
-    WebkitBackdropFilter: 'blur(12px)',
-    transition: 'all 0.3s ease',
-    zIndex: 10
-  },
-  controlsWrapper: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 12,
-    padding: '12px 20px',
-    background: 'rgba(30, 32, 44, 0.85)',
-    borderRadius: 16,
-    border: '1px solid rgba(255, 255, 255, 0.08)',
-    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)'
-  },
-  controlButton: {
-    width: 52,
-    height: 52,
-    borderRadius: 14,
-    border: 'none',
-    background: 'rgba(255, 255, 255, 0.1)',
-    color: '#fff',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
-    transition: 'all 0.2s ease',
-    outline: 'none'
-  },
-  controlButtonOff: {
-    background: 'rgba(239, 68, 68, 0.2)',
-    color: '#ef4444'
-  },
-  leaveButton: {
-    width: 52,
-    height: 52,
-    borderRadius: 14,
-    border: 'none',
-    background: 'linear-gradient(135deg, #dc2626 0%, #ef4444 100%)',
-    color: '#fff',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
-    transition: 'all 0.2s ease',
-    marginLeft: 8,
-    boxShadow: '0 4px 15px rgba(220, 38, 38, 0.4)',
-    outline: 'none'
-  },
+/* CONTENT AREA */
+.gvc-content {
+  flex: 1; display: flex; flex-direction: column; position: relative; overflow: hidden;
+}
 
-  /* Incoming Call Modal */
-  incomingModal: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    textAlign: 'center',
-    padding: 40
-  },
-  incomingRings: {
-    position: 'relative',
-    width: 140,
-    height: 140,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 32
-  },
-  ring1: {
-    position: 'absolute',
-    width: '100%',
-    height: '100%',
-    borderRadius: '50%',
-    border: '2px solid rgba(99, 102, 241, 0.3)',
-    animation: 'pulse 2s ease-out infinite'
-  },
-  ring2: {
-    position: 'absolute',
-    width: '120%',
-    height: '120%',
-    borderRadius: '50%',
-    border: '2px solid rgba(99, 102, 241, 0.2)',
-    animation: 'pulse 2s ease-out infinite 0.5s'
-  },
-  ring3: {
-    position: 'absolute',
-    width: '140%',
-    height: '140%',
-    borderRadius: '50%',
-    border: '2px solid rgba(99, 102, 241, 0.1)',
-    animation: 'pulse 2s ease-out infinite 1s'
-  },
-  incomingAvatar: {
-    width: 80,
-    height: 80,
-    borderRadius: '50%',
-    background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    color: '#fff',
-    boxShadow: '0 8px 30px rgba(99, 102, 241, 0.5)',
-    zIndex: 1
-  },
-  incomingTitle: {
-    margin: 0,
-    fontSize: 26,
-    fontWeight: 600,
-    color: '#fff',
-    marginBottom: 8
-  },
-  incomingSubtitle: {
-    margin: 0,
-    fontSize: 15,
-    color: 'rgba(255, 255, 255, 0.6)',
-    marginBottom: 40
-  },
-  incomingActions: {
-    display: 'flex',
-    gap: 32
-  },
-  acceptBtn: {
-    width: 64,
-    height: 64,
-    borderRadius: '50%',
-    border: 'none',
-    background: 'linear-gradient(135deg, #16a34a 0%, #22c55e 100%)',
-    color: '#fff',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
-    boxShadow: '0 8px 25px rgba(22, 163, 74, 0.5)',
-    transition: 'all 0.2s ease'
-  },
-  declineBtn: {
-    width: 64,
-    height: 64,
-    borderRadius: '50%',
-    border: 'none',
-    background: 'linear-gradient(135deg, #dc2626 0%, #ef4444 100%)',
-    color: '#fff',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
-    boxShadow: '0 8px 25px rgba(220, 38, 38, 0.5)',
-    transition: 'all 0.2s ease'
-  },
+/* STAGE (Main Video) */
+.gvc-stage-wrap {
+  flex: 1; position: relative; background: #000; display: flex; align-items: center; justify-content: center; overflow: hidden;
+}
+.gvc-stage {
+  width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; position: relative;
+}
+.gvc-stage-video {
+  width: 100%; height: 100%; object-fit: contain; background: black;
+}
+.gvc-stage-placeholder {
+  width: 100%; height: 100%; background: #121212; display: flex; align-items: center; justify-content: center;
+}
+.gvc-stage-avatar {
+  width: 120px; height: 120px; border-radius: 50%; background: #5865f2; color: white; 
+  font-size: 40px; display: flex; align-items: center; justify-content: center; font-weight: bold;
+}
+.gvc-stage-name {
+  position: absolute; bottom: 120px; /* Above control bar */ left: 16px; background: rgba(0,0,0,0.6); 
+  padding: 4px 8px; border-radius: 4px; color: white; font-size: 14px; font-weight: 600;
+}
 
-  /* Error Toast */
-  errorToast: {
-    position: 'absolute',
-    top: 80,
-    left: '50%',
-    transform: 'translateX(-50%)',
-    background: 'rgba(127, 29, 29, 0.95)',
-    color: '#fecaca',
-    padding: '12px 20px',
-    borderRadius: 12,
-    fontSize: 14,
-    display: 'flex',
-    alignItems: 'center',
-    gap: 10,
-    zIndex: 20,
-    boxShadow: '0 8px 30px rgba(0, 0, 0, 0.4)',
-    backdropFilter: 'blur(8px)'
-  },
-  errorIcon: {
-    fontSize: 16
-  },
+/* THUMBNAILS STRIP */
+.gvc-strip {
+  height: 112px; flex-shrink: 0; background: #18191c; display: flex; align-items: center; 
+  border-top: 1px solid #202225; z-index: 10;
+}
+.gvc-strip-scroll {
+  display: flex; gap: 8px; padding: 0 16px; overflow-x: auto; width: 100%; height: 100%; align-items: center;
+}
+.gvc-thumb {
+  flex: 0 0 auto; width: 128px; height: 96px; border-radius: 8px; overflow: hidden;
+  position: relative; background: #2f3136; border: 2px solid transparent; cursor: pointer; padding: 0;
+}
+.gvc-thumb:hover { background: #36393f; }
+.gvc-thumb.active { border-color: #5865f2; box-shadow: 0 0 0 2px rgba(88, 101, 242, 0.3); }
+.gvc-thumb.speaking { border-color: #3ba55c; }
+.gvc-thumb-video { width: 100%; height: 100%; object-fit: cover; }
+.gvc-thumb-placeholder { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #36393f; }
+.gvc-thumb-avatar { width: 40px; height: 40px; border-radius: 50%; background: #5865f2; display: flex; align-items: center; justify-content: center; font-weight: bold; color: white; }
+.gvc-thumb-name {
+  position: absolute; bottom: 4px; left: 4px; background: rgba(0,0,0,0.7); 
+  padding: 2px 4px; border-radius: 4px; color: white; font-size: 11px;
+}
 
-  /* Connecting Overlay */
-  connectingOverlay: {
-    position: 'absolute',
-    inset: 0,
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: 'rgba(15, 15, 26, 0.85)',
-    backdropFilter: 'blur(8px)',
-    gap: 20
-  },
-  spinner: {
-    width: 48,
-    height: 48,
-    border: '3px solid rgba(99, 102, 241, 0.2)',
-    borderTopColor: '#6366f1',
-    borderRadius: '50%',
-    animation: 'spin 1s linear infinite'
-  },
-  connectingText: {
-    margin: 0,
-    fontSize: 16,
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontWeight: 500
-  }
-};
+/* CONTROLS (Floating) */
+.gvc-controls {
+  position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 16px; align-items: center; padding: 12px 24px;
+  background: rgba(0,0,0,0.85); border-radius: 32px; z-index: 50;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+.gvc-controls.hidden { opacity: 0; pointer-events: none; transform: translateX(-50%) translateY(20px); }
 
-/* ─────────────────────────────────────────────────────────────
-   FOCUS VIEW + THUMBNAILS STYLES
-───────────────────────────────────────────────────────────── */
-const focusStyles = {
-  stage: {
-    position: 'relative',
-    width: '100%',
-    height: '100%',
-    maxWidth: 1600,
-    background: 'rgba(0, 0, 0, 0.25)',
-    borderRadius: 16,
-    overflow: 'hidden',
-    border: '1px solid rgba(255, 255, 255, 0.08)',
-    boxShadow: '0 10px 40px rgba(0,0,0,0.45)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  stageSpeaking: {
-    border: '1px solid rgba(34, 197, 94, 0.45)',
-    boxShadow: '0 10px 50px rgba(34, 197, 94, 0.12)'
-  },
-  stageVideo: {
-    width: '100%',
-    height: '100%',
-    objectFit: 'contain'
-  },
-  stagePlaceholder: {
-    width: '100%',
-    height: '100%',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: 'linear-gradient(145deg, rgba(30, 32, 44, 0.9) 0%, rgba(10, 12, 20, 0.9) 100%)'
-  },
-  stageAvatar: {
-    width: 120,
-    height: 120,
-    borderRadius: '50%',
-    background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    color: '#fff',
-    fontSize: 34,
-    fontWeight: 700,
-    letterSpacing: '0.02em',
-    boxShadow: '0 12px 40px rgba(99, 102, 241, 0.35)'
-  },
-  nameOverlay: {
-    position: 'absolute',
-    left: 12,
-    bottom: 12,
-    padding: '8px 10px',
-    borderRadius: 10,
-    background: 'rgba(0,0,0,0.55)',
-    border: '1px solid rgba(255,255,255,0.10)',
-    backdropFilter: 'blur(10px)',
-    WebkitBackdropFilter: 'blur(10px)',
-    maxWidth: '75%'
-  },
-  nameText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: 600,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    display: 'block'
-  }
-};
+.gvc-btn {
+   width: 56px; height: 56px; border-radius: 50%; background: #36393f; color: white; 
+   border: none; display: flex; align-items: center; justify-content: center; cursor: pointer;
+   font-size: 24px; transition: background 0.2s, transform 0.1s;
+}
+.gvc-btn:hover { background: #40444b; transform: scale(1.05); }
+.gvc-btn:active { transform: scale(0.95); }
+.gvc-btn.off { background: #ed4245; color: white; }
+.gvc-btn.leave { background: #ed4245; margin-left: 12px; }
 
-const thumbStyles = {
-  bar: {
-    flexShrink: 0,
-    padding: '0 0 12px'
-  },
-  scroll: {
-    display: 'flex',
-    gap: 10,
-    overflowX: 'auto',
-    overflowY: 'hidden',
-    padding: '0 4px',
-    WebkitOverflowScrolling: 'touch'
-  },
-  item: {
-    position: 'relative',
-    flex: '0 0 auto',
-    width: 160,
-    height: 90,
-    borderRadius: 12,
-    overflow: 'hidden',
-    border: '1px solid rgba(255, 255, 255, 0.10)',
-    background: 'rgba(0,0,0,0.25)',
-    padding: 0,
-    cursor: 'pointer',
-    outline: 'none'
-  },
-  itemActive: {
-    border: '2px solid rgba(99, 102, 241, 0.95)',
-    boxShadow: '0 8px 25px rgba(99, 102, 241, 0.22)'
-  },
-  itemSpeaking: {
-    border: '1px solid rgba(34, 197, 94, 0.55)'
-  },
-  video: {
-    width: '100%',
-    height: '100%',
-    objectFit: 'cover'
-  },
-  placeholder: {
-    width: '100%',
-    height: '100%',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: 'linear-gradient(145deg, rgba(30, 32, 44, 0.9) 0%, rgba(10, 12, 20, 0.9) 100%)'
-  },
-  avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: '50%',
-    background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: 700
-  },
-  nameOverlay: {
-    position: 'absolute',
-    left: 6,
-    right: 6,
-    bottom: 6,
-    padding: '4px 6px',
-    borderRadius: 8,
-    background: 'rgba(0,0,0,0.55)',
-    border: '1px solid rgba(255,255,255,0.10)',
-    backdropFilter: 'blur(8px)',
-    WebkitBackdropFilter: 'blur(8px)'
-  },
-  nameText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: 600,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    display: 'block'
-  }
-};
+/* ERROR */
+.gvc-error-toast {
+  position: absolute; top: 80px; left: 50%; transform: translateX(-50%);
+  background: rgba(220, 38, 38, 0.9); color: white; padding: 12px 24px;
+  border-radius: 8px; z-index: 100; font-size: 14px; display: flex; align-items: center;
+}
 
-/* Inject keyframes for animations */
+/* CONNECTING/SPINNER */
+.gvc-connecting {
+  position: absolute; inset: 0; background: rgba(0,0,0,0.7); display: flex; 
+  flex-direction: column; align-items: center; justify-content: center; color: white; z-index: 60;
+}
+.gvc-spinner { 
+  width: 48px; height: 48px; border: 4px solid rgba(255,255,255,0.1); 
+  border-top-color: #5865f2; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 16px;
+}
+
+/* INCOMING CALL */
+.gvc-incoming-modal {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 100%);
+}
+.gvc-incoming-rings { position: relative; width: 120px; height: 120px; display: flex; align-items: center; justify-content: center; margin-bottom: 32px; }
+.ring1, .ring2, .ring3 { position: absolute; border-radius: 50%; border: 2px solid #5865f2; opacity: 0; animation: pulse 2s infinite; }
+.ring1 { width: 100%; height: 100%; animation-delay: 0s; }
+.ring2 { width: 130%; height: 130%; animation-delay: 0.5s; }
+.ring3 { width: 160%; height: 160%; animation-delay: 1s; }
+.gvc-incoming-avatar { position: relative; z-index: 2; width: 80px; height: 80px; border-radius: 50%; background: #5865f2; display: flex; align-items: center; justify-content: center; color: white; font-size: 32px; }
+.gvc-incoming-title { color: white; margin-bottom: 8px; font-size: 24px; }
+.gvc-incoming-subtitle { color: rgba(255,255,255,0.7); margin-bottom: 40px; }
+.gvc-incoming-actions { display: flex; gap: 32px; }
+.gvc-btn-accept { width: 64px; height: 64px; border-radius: 50%; background: #3ba55c; border: none; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 28px; transition: transform 0.2s; }
+.gvc-btn-decline { width: 64px; height: 64px; border-radius: 50%; background: #ed4245; border: none; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 28px; transition: transform 0.2s; }
+.gvc-btn-accept:hover, .gvc-btn-decline:hover { transform: scale(1.1); }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse { 0% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(1.2); } }
+
+/* SCROLLBAR */
+.gvc-strip-scroll::-webkit-scrollbar { height: 6px; }
+.gvc-strip-scroll::-webkit-scrollbar-thumb { background: #202225; border-radius: 3px; }
+.gvc-strip-scroll::-webkit-scrollbar-track { background: transparent; }
+`;
+
+/* Inject styles */
 if (typeof document !== 'undefined') {
-  const styleSheet = document.createElement('style');
-  styleSheet.textContent = `
-    @keyframes pulse {
-      0% { transform: scale(1); opacity: 1; }
-      100% { transform: scale(1.5); opacity: 0; }
-    }
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-    button:hover:not(:disabled) {
-      transform: scale(1.05);
-    }
-    button:active:not(:disabled) {
-      transform: scale(0.95);
-    }
-    button:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    /* Mobile tweaks */
-    @media (max-width: 768px) {
-      .gvc-thumb {
-        width: 124px;
-        height: 70px;
-        border-radius: 10px;
-      }
-      .gvc-thumb-scroll {
-        gap: 8px;
-      }
-      .gvc-stage {
-        border-radius: 14px;
-      }
-    }
-  `;
-  if (!document.querySelector('#group-call-modal-styles')) {
-    styleSheet.id = 'group-call-modal-styles';
+  if (!document.getElementById('gvc-discord-styles')) {
+    const styleSheet = document.createElement('style');
+    styleSheet.id = 'gvc-discord-styles';
+    styleSheet.textContent = CSS_STYLES;
     document.head.appendChild(styleSheet);
   }
 }
