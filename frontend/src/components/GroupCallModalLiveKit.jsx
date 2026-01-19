@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { API_URL, LIVEKIT_URL } from '../config';
-import { createLocalTracks, Room, RoomEvent } from 'livekit-client';
+import { createLocalTracks, Room, RoomEvent, Track } from 'livekit-client';
 
 /* ─────────────────────────────────────────────────────────────
    ICONS (SVG Components)
@@ -72,6 +72,15 @@ const Icons = {
       <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91" />
       <line x1="23" y1="1" x2="1" y2="23" />
     </svg>
+  ),
+  ScreenShare: () => (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+      <path d="M8 21h8" />
+      <path d="M12 17v4" />
+      <path d="M12 7v6" />
+      <path d="M9.5 10.5L12 13l2.5-2.5" />
+    </svg>
   )
 };
 
@@ -79,7 +88,7 @@ const Icons = {
    MEDIASTREAM VIDEO (SFU-only, 1 video element = 1 MediaStream)
    Важно: не создаём PeerConnection и не трогаем логику SFU.
 ───────────────────────────────────────────────────────────── */
-const MediaStreamVideo = React.memo(function MediaStreamVideo({ mediaStreamTrack, muted, className, style }) {
+const MediaStreamVideo = React.memo(function MediaStreamVideo({ mediaStreamTrack, muted, className, onTrackEnded }) {
   const ref = useRef(null);
 
   useEffect(() => {
@@ -97,13 +106,29 @@ const MediaStreamVideo = React.memo(function MediaStreamVideo({ mediaStreamTrack
     const p = el.play?.();
     if (p && typeof p.catch === 'function') p.catch(() => {});
 
+    const handleEnded = () => {
+      try {
+        if (el.srcObject === stream) el.srcObject = null;
+      } catch (_) {}
+      onTrackEnded?.();
+    };
+
+    // Для кейса "track stopped" (ended) — гарантируем, что не останется last frame.
+    try {
+      mediaStreamTrack.addEventListener?.('ended', handleEnded);
+    } catch (_) {}
+
     return () => {
       // Не стопаем track (управляет LiveKit), только отвязываем.
       try {
         if (el.srcObject === stream) el.srcObject = null;
       } catch (_) {}
+
+      try {
+        mediaStreamTrack.removeEventListener?.('ended', handleEnded);
+      } catch (_) {}
     };
-  }, [mediaStreamTrack]);
+  }, [mediaStreamTrack, onTrackEnded]);
 
   return (
     <video
@@ -112,7 +137,6 @@ const MediaStreamVideo = React.memo(function MediaStreamVideo({ mediaStreamTrack
       playsInline
       muted={muted}
       className={className}
-      style={style} // Fallback if inline style is absolutely needed
     />
   );
 });
@@ -142,7 +166,8 @@ const MainVideo = React.memo(function MainVideo({
   displayName,
   isLocal,
   isVideoOff,
-  isSpeaking
+  isSpeaking,
+  onTrackEnded
 }) {
   const initials = displayName ? displayName.slice(0, 2).toUpperCase() : '??';
 
@@ -153,6 +178,7 @@ const MainVideo = React.memo(function MainVideo({
           mediaStreamTrack={mediaStreamTrack} 
           muted={isLocal} 
           className="gvc-stage-video"
+          onTrackEnded={onTrackEnded}
         />
       ) : (
         <div className="gvc-stage-placeholder">
@@ -175,7 +201,8 @@ const VideoThumbnail = React.memo(function VideoThumbnail({
   isActive,
   isSpeaking,
   isVideoOff,
-  onSelect
+  onSelect,
+  onTrackEnded
 }) {
   const initials = displayName ? displayName.slice(0, 2).toUpperCase() : '??';
 
@@ -195,6 +222,7 @@ const VideoThumbnail = React.memo(function VideoThumbnail({
           mediaStreamTrack={mediaStreamTrack}
           muted={isLocal}
           className="gvc-thumb-video"
+          onTrackEnded={onTrackEnded}
         />
       ) : (
         <div className="gvc-thumb-placeholder">
@@ -215,7 +243,7 @@ const ThumbnailsBar = React.memo(function ThumbnailsBar({ items, activeParticipa
       <div className="gvc-strip-scroll">
         {items.map((item) => (
           <VideoThumbnail
-            key={item.participantId}
+            key={item.key}
             participantId={item.participantId}
             mediaStreamTrack={item.mediaStreamTrack}
             displayName={item.displayName}
@@ -224,12 +252,34 @@ const ThumbnailsBar = React.memo(function ThumbnailsBar({ items, activeParticipa
             isSpeaking={item.participantId === activeSpeakerId}
             isVideoOff={item.isVideoOff}
             onSelect={onSelect}
+            onTrackEnded={item.onTrackEnded}
           />
         ))}
       </div>
     </div>
   );
 });
+
+function isLiveMediaStreamTrack(track) {
+  return !!track && track.readyState === 'live';
+}
+
+function isScreenSharePublication(pub) {
+  const source = pub?.source;
+  const ss = Track?.Source?.ScreenShare;
+  if (ss && source === ss) return true;
+  const s = String(source || '').toLowerCase();
+  return s.includes('screen');
+}
+
+function isCameraPublication(pub) {
+  const source = pub?.source;
+  const cam = Track?.Source?.Camera;
+  if (cam && source === cam) return true;
+  const s = String(source || '').toLowerCase();
+  // fallback: not screen share and is video
+  return !s.includes('screen');
+}
 
 function GroupCallModalLiveKit({
   socket,
@@ -252,7 +302,8 @@ function GroupCallModalLiveKit({
   const [error, setError] = useState(null);
   const [remoteParticipants, setRemoteParticipants] = useState([]);
   const [localVideoTrack, setLocalVideoTrack] = useState(null);
-  const [showControls, setShowControls] = useState(true);
+  // UI-only: всегда показываем контролы (без таймеров/auto-hide)
+  const showControls = true;
 
   // participants[userId].name — единый источник отображаемых имён
   const [participantsById, setParticipantsById] = useState(() => ({}));
@@ -267,43 +318,6 @@ function GroupCallModalLiveKit({
   const isConnectingRef = useRef(false);
   const leaveSentRef = useRef(false);
   const mountedRef = useRef(true);
-  const controlsTimeoutRef = useRef(null);
-
-  /* ─────────────────────────────────────────────────────────────
-     AUTO-HIDE CONTROLS
-  ───────────────────────────────────────────────────────────── */
-  useEffect(() => {
-    const handleActivity = () => {
-      setShowControls(true);
-      if (controlsTimeoutRef.current) {
-        clearTimeout(controlsTimeoutRef.current);
-      }
-      controlsTimeoutRef.current = setTimeout(() => {
-        if (callStatus === 'active') {
-          setShowControls(false);
-        }
-      }, 3500);
-    };
-
-    window.addEventListener('mousemove', handleActivity);
-    window.addEventListener('touchstart', handleActivity);
-    window.addEventListener('click', handleActivity);
-
-    controlsTimeoutRef.current = setTimeout(() => {
-      if (callStatus === 'active') {
-        setShowControls(false);
-      }
-    }, 3500);
-
-    return () => {
-      window.removeEventListener('mousemove', handleActivity);
-      window.removeEventListener('touchstart', handleActivity);
-      window.removeEventListener('click', handleActivity);
-      if (controlsTimeoutRef.current) {
-        clearTimeout(controlsTimeoutRef.current);
-      }
-    };
-  }, [callStatus]);
 
   const updateRemoteParticipants = useCallback(() => {
     const room = roomRef.current;
@@ -317,6 +331,12 @@ function GroupCallModalLiveKit({
 
     setRemoteParticipants(Array.from(map.values()));
   }, []);
+
+  const syncUiFromTracks = useCallback(() => {
+    // Один лёгкий setState для перерендера UI при изменениях track lifecycle
+    // (muted/unmuted/unsubscribed/unpublished/ended).
+    updateRemoteParticipants();
+  }, [updateRemoteParticipants]);
 
   const fetchIceServers = useCallback(async () => {
     try {
@@ -435,6 +455,10 @@ function GroupCallModalLiveKit({
       room.on(RoomEvent.TrackSubscribed, sync);
       room.on(RoomEvent.TrackUnsubscribed, sync);
 
+      // Для кейса "видео выключено" (muted) — обновляем UI без костылей.
+      if (RoomEvent.TrackMuted) room.on(RoomEvent.TrackMuted, sync);
+      if (RoomEvent.TrackUnmuted) room.on(RoomEvent.TrackUnmuted, sync);
+
       // Active speaker (для подсветки, и для авто-focus если пользователь не выбирал вручную)
       room.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
         try {
@@ -547,6 +571,20 @@ function GroupCallModalLiveKit({
     setIsVideoOff(next);
   }, [isVideoOff]);
 
+  const toggleScreenShare = useCallback(async () => {
+    const room = roomRef.current;
+    const lp = room?.localParticipant;
+    if (!lp || typeof lp.setScreenShareEnabled !== 'function') return;
+
+    const pubs = lp.videoTrackPublications && typeof lp.videoTrackPublications.values === 'function'
+      ? Array.from(lp.videoTrackPublications.values())
+      : [];
+
+    const hasScreen = pubs.some((p) => isScreenSharePublication(p) && p?.track);
+    await lp.setScreenShareEnabled(!hasScreen);
+    syncUiFromTracks();
+  }, [syncUiFromTracks]);
+
   useEffect(() => {
     if (autoJoin) {
       handleJoinClick();
@@ -623,16 +661,27 @@ function GroupCallModalLiveKit({
           ? Array.from(participant.audioTrackPublications.values())
           : [];
 
-        const videoPub = videoPubs.find((p) => p?.track) || null;
+        const screenPub = videoPubs.find((p) => isScreenSharePublication(p) && p?.track) || null;
+        const cameraPub = videoPubs.find((p) => isCameraPublication(p) && p?.track) || null;
         const audioPub = audioPubs.find((p) => p?.track) || null;
 
-        const videoTrack = videoPub?.track || null;
+        const cameraTrack = cameraPub?.track || null;
+        const screenTrack = screenPub?.track || null;
         const audioTrack = audioPub?.track || null;
+
+        const cameraMs = cameraTrack?.mediaStreamTrack || null;
+        const screenMs = screenTrack?.mediaStreamTrack || null;
+
+        const cameraActive = !!cameraPub && !cameraPub.isMuted && isLiveMediaStreamTrack(cameraMs);
+        const screenActive = !!screenPub && !screenPub.isMuted && isLiveMediaStreamTrack(screenMs);
 
         return {
           participant,
           participantId: identity,
-          videoTrack,
+          cameraMediaStreamTrack: cameraActive ? cameraMs : null,
+          screenMediaStreamTrack: screenActive ? screenMs : null,
+          isCameraOff: !cameraActive,
+          isScreenOff: !screenActive,
           audioTrack,
           isSpeaking: !!participant?.isSpeaking,
           audioLevel: typeof participant?.audioLevel === 'number' ? participant.audioLevel : 0
@@ -640,6 +689,19 @@ function GroupCallModalLiveKit({
       })
       .filter(Boolean);
   }, [remoteParticipants]);
+
+  const localScreenMediaStreamTrack = useMemo(() => {
+    const room = roomRef.current;
+    const lp = room?.localParticipant;
+    const pubs = lp?.videoTrackPublications && typeof lp.videoTrackPublications.values === 'function'
+      ? Array.from(lp.videoTrackPublications.values())
+      : [];
+    const screenPub = pubs.find((p) => isScreenSharePublication(p) && p?.track) || null;
+    const screenTrack = screenPub?.track || null;
+    const ms = screenTrack?.mediaStreamTrack || null;
+    const active = !!screenPub && !screenPub.isMuted && isLiveMediaStreamTrack(ms);
+    return active ? ms : null;
+  }, [callStatus, remoteParticipants]);
 
   const getDisplayName = useCallback((userId) => {
     const id = String(userId || '').trim();
@@ -697,6 +759,31 @@ function GroupCallModalLiveKit({
   const focusTarget = useMemo(() => {
     const id = String(activeParticipantId || '').trim();
     const localId = String(currentUserId || '').trim();
+
+    // Screen share всегда приоритетнее camera
+    if (localScreenMediaStreamTrack) {
+      return {
+        participantId: localId,
+        isLocal: true,
+        videoMediaStreamTrack: localScreenMediaStreamTrack,
+        isVideoOff: false,
+        displayName: `${getDisplayName(localId)} (Экран)`,
+        isSpeaking: false
+      };
+    }
+
+    const remoteScreen = remoteMedia.find((r) => r?.screenMediaStreamTrack) || null;
+    if (remoteScreen) {
+      return {
+        participantId: remoteScreen.participantId,
+        isLocal: false,
+        videoMediaStreamTrack: remoteScreen.screenMediaStreamTrack,
+        isVideoOff: false,
+        displayName: `${getDisplayName(remoteScreen.participantId)} (Экран)`,
+        isSpeaking: false
+      };
+    }
+
     if (!id || id === localId) {
       return {
         participantId: localId,
@@ -712,33 +799,68 @@ function GroupCallModalLiveKit({
     return {
       participantId: id,
       isLocal: false,
-      videoMediaStreamTrack: remote?.videoTrack?.mediaStreamTrack || null,
+      videoMediaStreamTrack: remote?.cameraMediaStreamTrack || null,
       isVideoOff: false,
       displayName: getDisplayName(id),
       isSpeaking: id === activeSpeakerId
     };
-  }, [activeParticipantId, activeSpeakerId, currentUserId, getDisplayName, isVideoOff, localVideoTrack, remoteMedia]);
+  }, [activeParticipantId, activeSpeakerId, callStatus, currentUserId, getDisplayName, isVideoOff, localScreenMediaStreamTrack, localVideoTrack, remoteMedia]);
 
   const thumbnailItems = useMemo(() => {
     const localId = String(currentUserId || '').trim();
-    const localItem = {
+    const items = [];
+
+    // Local screen share tile (separate track)
+    if (localScreenMediaStreamTrack) {
+      items.push({
+        key: `${localId}:screen`,
+        participantId: localId,
+        isLocal: true,
+        mediaStreamTrack: localScreenMediaStreamTrack,
+        displayName: `${getDisplayName(localId)} (Экран)`,
+        isVideoOff: false,
+        onTrackEnded: syncUiFromTracks
+      });
+    }
+
+    // Local camera tile
+    items.push({
+      key: `${localId}:cam`,
       participantId: localId,
       isLocal: true,
-      mediaStreamTrack: localVideoTrack?.mediaStreamTrack || null,
+      mediaStreamTrack: !isVideoOff ? (localVideoTrack?.mediaStreamTrack || null) : null,
       displayName: getDisplayName(localId),
-      isVideoOff
-    };
+      isVideoOff,
+      onTrackEnded: syncUiFromTracks
+    });
 
-    const remoteItems = remoteMedia.map((r) => ({
-      participantId: r.participantId,
-      isLocal: false,
-      mediaStreamTrack: r?.videoTrack?.mediaStreamTrack || null,
-      displayName: getDisplayName(r.participantId),
-      isVideoOff: false
-    }));
+    // Remote tiles (screen share separate from camera)
+    remoteMedia.forEach((r) => {
+      if (r?.screenMediaStreamTrack) {
+        items.push({
+          key: `${r.participantId}:screen`,
+          participantId: r.participantId,
+          isLocal: false,
+          mediaStreamTrack: r.screenMediaStreamTrack,
+          displayName: `${getDisplayName(r.participantId)} (Экран)`,
+          isVideoOff: false,
+          onTrackEnded: syncUiFromTracks
+        });
+      }
 
-    return [localItem, ...remoteItems];
-  }, [currentUserId, getDisplayName, isVideoOff, localVideoTrack, remoteMedia]);
+      items.push({
+        key: `${r.participantId}:cam`,
+        participantId: r.participantId,
+        isLocal: false,
+        mediaStreamTrack: r.cameraMediaStreamTrack,
+        displayName: getDisplayName(r.participantId),
+        isVideoOff: r.isCameraOff,
+        onTrackEnded: syncUiFromTracks
+      });
+    });
+
+    return items;
+  }, [currentUserId, getDisplayName, isVideoOff, localScreenMediaStreamTrack, localVideoTrack, remoteMedia, syncUiFromTracks]);
 
   const getStatusText = () => {
     switch (callStatus) {
@@ -804,7 +926,7 @@ function GroupCallModalLiveKit({
       {/* ─── ERROR TOAST ─── */}
       {error && (
         <div className="gvc-error-toast">
-          <span style={{ marginRight: 8 }}>⚠</span>
+          <span className="gvc-error-icon">⚠</span>
           {error}
         </div>
       )}
@@ -812,7 +934,7 @@ function GroupCallModalLiveKit({
       {/* ─── MAIN CONTENT ─── */}
       <main className="gvc-content">
         {/* Hidden Audio */}
-        <div style={{ position: 'absolute', width: 0, height: 0, overflow: 'hidden' }}>
+        <div className="gvc-hidden-audio">
           {remoteMedia.map((r) => (
             r.audioTrack ? <TrackAudio key={`aud:${r.participantId}`} track={r.audioTrack} /> : null
           ))}
@@ -826,6 +948,7 @@ function GroupCallModalLiveKit({
             isLocal={focusTarget.isLocal}
             isVideoOff={focusTarget.isLocal ? focusTarget.isVideoOff : false}
             isSpeaking={focusTarget.isSpeaking}
+            onTrackEnded={syncUiFromTracks}
           />
           
           {/* Controls - Floating above Thumbs */}
@@ -849,6 +972,16 @@ function GroupCallModalLiveKit({
                 <Icons.Camera off={isVideoOff} />
               </button>
             )}
+
+            {/* Desktop only: Screen Share */}
+            <button
+              className="gvc-btn gvc-btn-screenshare"
+              onClick={toggleScreenShare}
+              disabled={callStatus !== 'active' || callType !== 'video'}
+              title="Демонстрация экрана"
+            >
+              <Icons.ScreenShare />
+            </button>
 
             <button className="gvc-btn" title="Настройки">
               <Icons.Settings />
@@ -912,6 +1045,15 @@ const CSS_STYLES = `
 /* CONTENT AREA */
 .gvc-content {
   flex: 1; display: flex; flex-direction: column; position: relative; overflow: hidden;
+}
+
+.gvc-hidden-audio {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
 }
 
 /* STAGE (Main Video) */
@@ -978,12 +1120,19 @@ const CSS_STYLES = `
 .gvc-btn.off { background: #ed4245; color: white; }
 .gvc-btn.leave { background: #ed4245; margin-left: 12px; }
 
+/* Desktop-only: hide on mobile */
+@media (max-width: 768px) {
+  .gvc-btn-screenshare { display: none; }
+}
+
 /* ERROR */
 .gvc-error-toast {
   position: absolute; top: 80px; left: 50%; transform: translateX(-50%);
   background: rgba(220, 38, 38, 0.9); color: white; padding: 12px 24px;
   border-radius: 8px; z-index: 100; font-size: 14px; display: flex; align-items: center;
 }
+
+.gvc-error-icon { margin-right: 8px; }
 
 /* CONNECTING/SPINNER */
 .gvc-connecting {
