@@ -460,8 +460,16 @@ function GroupCallModalLiveKit({
   const [error, setError] = useState(null);
   const [remoteParticipants, setRemoteParticipants] = useState([]);
   const [localVideoTrack, setLocalVideoTrack] = useState(null);
-  // UI-only: всегда показываем контролы (без таймеров/auto-hide)
-  const showControls = true;
+
+  // Controls auto-hide (Discord-like):
+  // - Появляются при активности (mousemove/touchstart/click)
+  // - Скрываются через 2.5s без активности
+  // - Не скрываются, если открыта панель состояния
+  // - Mobile-first: первый тап показывает controls, второй выполняет действие
+  const CONTROLS_AUTOHIDE_MS = 2500;
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const hideControlsTimerRef = useRef(null);
+  const isCoarsePointerRef = useRef(false);
 
   // participants[userId].name — единый источник отображаемых имён
   const [participantsById, setParticipantsById] = useState(() => ({}));
@@ -477,6 +485,9 @@ function GroupCallModalLiveKit({
   const leaveSentRef = useRef(false);
   const mountedRef = useRef(true);
 
+  // Room connection state (публичное поле + event в разных версиях SDK)
+  const [lkConnectionState, setLkConnectionState] = useState('');
+
   // UI: небольшая панель статуса качества (опционально)
   const [showConnStatus, setShowConnStatus] = useState(false);
   const [stageQualityRequested, setStageQualityRequested] = useState('');
@@ -484,6 +495,8 @@ function GroupCallModalLiveKit({
   const [connProtocol, setConnProtocol] = useState('');
   const [videoInKbps, setVideoInKbps] = useState(null);
   const [videoOutKbps, setVideoOutKbps] = useState(null);
+  const [actualVideoInRes, setActualVideoInRes] = useState(null);
+  const [actualVideoOutRes, setActualVideoOutRes] = useState(null);
   const [statsNote, setStatsNote] = useState('');
 
   // Для responsive: ширина stage и примерная ширина превью
@@ -502,12 +515,51 @@ function GroupCallModalLiveKit({
     outBytes: 0
   });
 
+  const clearHideTimer = useCallback(() => {
+    const t = hideControlsTimerRef.current;
+    if (t) {
+      hideControlsTimerRef.current = null;
+      try { clearTimeout(t); } catch (_) {}
+    }
+  }, []);
+
+  const scheduleHideControls = useCallback(() => {
+    clearHideTimer();
+    // Скрываем только во время активного звонка и когда не открыта панель статуса.
+    if (callStatus !== 'active') return;
+    if (showConnStatus) return;
+    hideControlsTimerRef.current = setTimeout(() => {
+      if (!mountedRef.current) return;
+      // Если панель статуса открылась позже — не скрываем.
+      if (showConnStatus) return;
+      setControlsVisible(false);
+    }, CONTROLS_AUTOHIDE_MS);
+  }, [callStatus, clearHideTimer, showConnStatus]);
+
+  const bumpControls = useCallback(() => {
+    // Любая активность показывает controls и перезапускает таймер.
+    if (!mountedRef.current) return;
+    if (!controlsVisible) setControlsVisible(true);
+    scheduleHideControls();
+  }, [controlsVisible, scheduleHideControls]);
+
+  // Определяем "mobile-like" поведение (coarse pointer) один раз.
+  useEffect(() => {
+    try {
+      isCoarsePointerRef.current = !!window.matchMedia?.('(pointer: coarse)')?.matches;
+    } catch (_) {
+      isCoarsePointerRef.current = false;
+    }
+  }, []);
+
   useEffect(() => {
     const stageEl = stageWrapRef.current;
     const thumbsEl = thumbsWrapRef.current;
     if (!stageEl && !thumbsEl) return undefined;
 
-    const update = () => {
+    let raf = 0;
+
+    const updateNow = () => {
       try {
         if (stageEl) {
           const r = stageEl.getBoundingClientRect?.();
@@ -518,12 +570,22 @@ function GroupCallModalLiveKit({
         if (thumbsEl) {
           const first = thumbsEl.querySelector?.('.gvc-thumb');
           const w = first?.getBoundingClientRect?.().width;
-          setThumbWidth(Math.round(w || 0));
+          const next = Math.round(w || 0);
+          setThumbWidth((prev) => (prev === next ? prev : next));
         }
       } catch (_) {}
     };
 
-    update();
+    // ResizeObserver может стрелять очень часто — используем rAF throttle.
+    const update = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        updateNow();
+      });
+    };
+
+    updateNow();
 
     const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null;
     try {
@@ -534,9 +596,22 @@ function GroupCallModalLiveKit({
     window.addEventListener?.('resize', update);
     return () => {
       window.removeEventListener?.('resize', update);
+      try { if (raf) cancelAnimationFrame(raf); } catch (_) {}
       try { ro?.disconnect?.(); } catch (_) {}
     };
   }, []);
+
+  // Если пользователь открыл панель статуса — фиксируем controls открытыми.
+  useEffect(() => {
+    if (!mountedRef.current) return;
+    if (showConnStatus) {
+      setControlsVisible(true);
+      clearHideTimer();
+      return;
+    }
+    // Если закрыли панель — начинаем авто-hide с текущего момента.
+    scheduleHideControls();
+  }, [clearHideTimer, scheduleHideControls, showConnStatus]);
 
   // Best-effort stats для панели "Состояние соединения".
   // Важно:
@@ -592,6 +667,10 @@ function GroupCallModalLiveKit({
     const sumVideoBytes = (rows) => {
       let inBytes = 0;
       let outBytes = 0;
+      let maxInW = 0;
+      let maxInH = 0;
+      let maxOutW = 0;
+      let maxOutH = 0;
       rows.forEach((r) => {
         const type = r?.type;
         const kind = r?.kind || r?.mediaType;
@@ -600,12 +679,24 @@ function GroupCallModalLiveKit({
         // inbound-rtp/outbound-rtp есть в стандартном getStats()
         if (type === 'inbound-rtp') {
           inBytes += Number(r?.bytesReceived || 0);
+          const fw = Number(r?.frameWidth || 0);
+          const fh = Number(r?.frameHeight || 0);
+          if (fw * fh > maxInW * maxInH) {
+            maxInW = fw;
+            maxInH = fh;
+          }
         }
         if (type === 'outbound-rtp') {
           outBytes += Number(r?.bytesSent || 0);
+          const fw = Number(r?.frameWidth || 0);
+          const fh = Number(r?.frameHeight || 0);
+          if (fw * fh > maxOutW * maxOutH) {
+            maxOutW = fw;
+            maxOutH = fh;
+          }
         }
       });
-      return { inBytes, outBytes };
+      return { inBytes, outBytes, maxInW, maxInH, maxOutW, maxOutH };
     };
 
     const tick = async () => {
@@ -637,13 +728,21 @@ function GroupCallModalLiveKit({
       }
 
       const protoLabel = pickProtocol(rows);
-      const { inBytes, outBytes } = sumVideoBytes(rows);
+      const { inBytes, outBytes, maxInW, maxInH, maxOutW, maxOutH } = sumVideoBytes(rows);
       const now = Date.now();
       const prev = lastStatsSampleRef.current;
       const dt = prev.ts ? (now - prev.ts) / 1000 : 0;
 
       if (!cancelled) {
         if (protoLabel) setConnProtocol(protoLabel);
+
+        // Actual resolution (best-effort): берём самый большой видео-поток из inbound/outbound.
+        // Обычно это соответствует stage, т.к. stage запрашивает более высокий слой.
+        const inRes = maxInW && maxInH ? `${maxInW}×${maxInH}` : null;
+        const outRes = maxOutW && maxOutH ? `${maxOutW}×${maxOutH}` : null;
+        setActualVideoInRes(inRes);
+        setActualVideoOutRes(outRes);
+
         if (dt > 0.5) {
           const inKbps = Math.max(0, Math.round(((inBytes - prev.inBytes) * 8) / dt / 1000));
           const outKbps = Math.max(0, Math.round(((outBytes - prev.outBytes) * 8) / dt / 1000));
@@ -792,6 +891,20 @@ function GroupCallModalLiveKit({
       const room = new Room({ adaptiveStream: true, dynacast: true });
       roomRef.current = room;
 
+      // Обновляем connectionState (помогает UI статуса даже без stats).
+      try {
+        setLkConnectionState(String(room.connectionState || ''));
+      } catch (_) {}
+
+      try {
+        if (RoomEvent.ConnectionStateChanged) {
+          room.on(RoomEvent.ConnectionStateChanged, (state) => {
+            if (!mountedRef.current) return;
+            setLkConnectionState(String(state || ''));
+          });
+        }
+      } catch (_) {}
+
       // Важно: подписки на события до/после connect допустимы,
       // но state-апдейты защищаем mountedRef.
       const sync = () => updateRemoteParticipants();
@@ -856,6 +969,9 @@ function GroupCallModalLiveKit({
         setCallStatus('active');
       }
       updateRemoteParticipants();
+
+      // При старте активного звонка: показываем controls и запускаем auto-hide.
+      bumpControls();
     } catch (err) {
       if (mountedRef.current) {
         setError(err?.message || 'LiveKit connection failed');
@@ -995,9 +1111,10 @@ function GroupCallModalLiveKit({
   useEffect(() => {
     return () => {
       mountedRef.current = false;
+      clearHideTimer();
       disconnectLiveKit();
     };
-  }, [disconnectLiveKit]);
+  }, [clearHideTimer, disconnectLiveKit]);
 
   const participantCount = remoteParticipants.length + 1;
 
@@ -1236,20 +1353,20 @@ function GroupCallModalLiveKit({
     const stagePubKey = stagePub ? publicationId(stagePub) : null;
 
     // Stage качество:
-    // - Главный экран должен запрашивать HIGH слой (чтобы не залипать на 180p).
-    // - Но на очень маленьких экранах (узкий контейнер) MEDIUM визуально почти не хуже,
-    //   а нагрузка заметно ниже — это важно для мобильных.
-    // Пороговые значения выбраны под типичные simulcast слои: ~180p/360p/720p.
-    const desiredStageQuality = (() => {
-      const w = Number(stageSize?.width || 0);
-      if (!w) return VideoQuality?.HIGH;
-      if (w >= 700) return VideoQuality?.HIGH;
-      return VideoQuality?.MEDIUM;
-    })();
+    // Требование: HIGH если ширина >= 600px, иначе MEDIUM.
+    // Это соответствует типичным simulcast слоям: LOW~180p, MEDIUM~360p, HIGH~720p.
+    const STAGE_HIGH_MIN_WIDTH_PX = 600;
+    const desiredStageQuality = Number(stageSize?.width || 0) >= STAGE_HIGH_MIN_WIDTH_PX
+      ? VideoQuality?.HIGH
+      : VideoQuality?.MEDIUM;
 
     // Превью тайлы обычно 128x96. LOW достаточно и экономит трафик.
     // Если тайл большой (например, tablet/desktop с увеличенными плитками), просим MEDIUM.
-    const desiredTilesQuality = thumbWidth >= 220 ? VideoQuality?.MEDIUM : VideoQuality?.LOW;
+    // Tiles качество:
+    // - LOW по умолчанию (миниатюры обычно ~128x96)
+    // - MEDIUM если тайл реально большой (например, tablet/desktop, широкие плитки)
+    const TILE_MEDIUM_MIN_WIDTH_PX = 220;
+    const desiredTilesQuality = thumbWidth >= TILE_MEDIUM_MIN_WIDTH_PX ? VideoQuality?.MEDIUM : VideoQuality?.LOW;
 
     setStageQualityRequested(qualityLabel(desiredStageQuality));
     setTilesQualityRequested(qualityLabel(desiredTilesQuality));
@@ -1277,6 +1394,37 @@ function GroupCallModalLiveKit({
       apply(pub, desiredTilesQuality);
     });
   }, [callStatus, focusTarget, stageSize, thumbWidth, thumbnailItems]);
+
+  // Auto-hide UX: слушаем активность на overlay.
+  const handleOverlayMouseMove = useCallback(() => {
+    bumpControls();
+  }, [bumpControls]);
+
+  const handleOverlayTouchStart = useCallback(() => {
+    bumpControls();
+  }, [bumpControls]);
+
+  const handleOverlayClickCapture = useCallback((e) => {
+    // Mobile-first: если controls скрыты — первый тап только показывает их.
+    // (чтобы не случалось "случайных" hangup/mute/selection с первого тапа)
+    if (!isCoarsePointerRef.current) {
+      bumpControls();
+      return;
+    }
+
+    if (callStatus !== 'active') {
+      bumpControls();
+      return;
+    }
+
+    if (!controlsVisible && !showConnStatus) {
+      bumpControls();
+      try {
+        e.preventDefault?.();
+        e.stopPropagation?.();
+      } catch (_) {}
+    }
+  }, [bumpControls, callStatus, controlsVisible, showConnStatus]);
 
   const getStatusText = () => {
     switch (callStatus) {
@@ -1324,8 +1472,15 @@ function GroupCallModalLiveKit({
   /* ─────────────────────────────────────────────────────────────
      RENDER: MAIN CALL SCREEN
   ───────────────────────────────────────────────────────────── */
+  const showControls = controlsVisible || showConnStatus || callStatus !== 'active';
+
   return (
-    <div className="gvc-overlay">
+    <div
+      className="gvc-overlay"
+      onMouseMove={handleOverlayMouseMove}
+      onTouchStart={handleOverlayTouchStart}
+      onClickCapture={handleOverlayClickCapture}
+    >
       {/* ─── HEADER ─── */}
       <header className={`gvc-header ${showControls ? '' : 'hidden'}`}>
         <div className="gvc-header-left">
@@ -1402,7 +1557,11 @@ function GroupCallModalLiveKit({
             <button
               className={`gvc-btn ${showConnStatus ? 'off' : ''}`}
               title={showConnStatus ? 'Скрыть состояние соединения' : 'Состояние соединения'}
-              onClick={() => setShowConnStatus((v) => !v)}
+              onClick={() => {
+                // Открытие панели фиксирует controls видимыми.
+                setShowConnStatus((v) => !v);
+                bumpControls();
+              }}
               disabled={callStatus !== 'active'}
             >
               <Icons.Settings />
@@ -1436,11 +1595,20 @@ function GroupCallModalLiveKit({
       {showConnStatus && callStatus === 'active' && (
         <div className="gvc-conn-status">
           <div className="gvc-conn-title">Состояние соединения</div>
-          <div className="gvc-conn-row"><span>Protocol</span><b>{connProtocol || 'N/A'}</b></div>
-          <div className="gvc-conn-row"><span>Video in</span><b>{typeof videoInKbps === 'number' ? `${videoInKbps} kbps` : 'N/A'}</b></div>
-          <div className="gvc-conn-row"><span>Video out</span><b>{typeof videoOutKbps === 'number' ? `${videoOutKbps} kbps` : 'N/A'}</b></div>
-          <div className="gvc-conn-row"><span>Stage layer</span><b>{stageQualityRequested || 'N/A'}</b></div>
-          <div className="gvc-conn-row"><span>Tiles layer</span><b>{tilesQualityRequested || 'N/A'}</b></div>
+          <div className="gvc-conn-row">
+            <span>Protocol</span>
+            <b>{connProtocol || (lkConnectionState ? `auto (${lkConnectionState})` : 'auto')}</b>
+          </div>
+          <div className="gvc-conn-row"><span>Requested (stage)</span><b>{stageQualityRequested || 'auto'}</b></div>
+          <div className="gvc-conn-row"><span>Requested (tiles)</span><b>{tilesQualityRequested || 'auto'}</b></div>
+          <div className="gvc-conn-row">
+            <span>Actual (video)</span>
+            <b>
+              {actualVideoInRes || actualVideoOutRes || 'auto (stats unavailable)'}
+            </b>
+          </div>
+          <div className="gvc-conn-row"><span>Bitrate (in)</span><b>{typeof videoInKbps === 'number' ? `${videoInKbps} kbps` : 'N/A'}</b></div>
+          <div className="gvc-conn-row"><span>Bitrate (out)</span><b>{typeof videoOutKbps === 'number' ? `${videoOutKbps} kbps` : 'N/A'}</b></div>
           <div className="gvc-conn-hint">
             Layer выставляется через LiveKit SDK и подстраивается под размер элемента.
             {statsNote ? ` (${statsNote})` : ''}
