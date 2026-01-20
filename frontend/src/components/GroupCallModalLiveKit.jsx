@@ -567,7 +567,27 @@ function GroupCallModalLiveKit({
 
       localTracksRef.current = tracks;
 
-      await Promise.all(tracks.map((track) => room.localParticipant.publishTrack(track)));
+      // Явно задаём publish параметры для видео.
+      // Без этого некоторые девайсы/сети агрессивно уходят в слишком низкий bitrate,
+      // что выглядит как "мыло" даже при большом элементе на экране.
+      await Promise.all(
+        tracks.map((track) => {
+          if (track.kind !== Track.Kind.Video) {
+            return room.localParticipant.publishTrack(track);
+          }
+
+          return room.localParticipant.publishTrack(track, {
+            // simulcast помогает SFU отдавать подходящий слой, но также позволяет быстро подниматься
+            // до высокого качества для большого stage-элемента.
+            simulcast: true,
+            videoEncoding: {
+              // bps. 2.5Mbps обычно комфортно для 720p@30 при нормальной сети.
+              maxBitrate: 2_500_000,
+              maxFramerate: 30
+            }
+          });
+        })
+      );
 
       const localVideo = tracks.find((t) => t.kind === 'video') || null;
       if (mountedRef.current) {

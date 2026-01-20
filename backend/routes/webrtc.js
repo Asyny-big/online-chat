@@ -39,6 +39,35 @@ function generateTurnCredentials(userId) {
   };
 }
 
+function buildTurnUrls() {
+  const host = config.TURN_HOST || 'govchat.ru';
+
+  // Базовые порты coturn часто: 3478 (udp/tcp), 5349 (tls). 443/80 — опционально.
+  const port3478 = Number(config.TURN_PORT || 3478);
+  const tlsPort = Number(config.TURN_TLS_PORT || 5349);
+  const enable443 = Boolean(config.TURN_ENABLE_443);
+  const enable80 = Boolean(config.TURN_ENABLE_80);
+
+  const urls = [
+    `turn:${host}:${port3478}?transport=udp`,
+    `turn:${host}:${port3478}?transport=tcp`,
+  ];
+
+  // TURN over TLS (желательно для мобильных/корп сетей).
+  if (tlsPort > 0) {
+    urls.push(`turns:${host}:${tlsPort}?transport=tcp`);
+  }
+  if (enable443) {
+    urls.push(`turns:${host}:443?transport=tcp`);
+    urls.push(`turn:${host}:443?transport=tcp`);
+  }
+  if (enable80) {
+    urls.push(`turn:${host}:80?transport=tcp`);
+  }
+
+  return urls;
+}
+
 /**
  * GET /api/webrtc/ice
  * Возвращает ICE серверы с временными TURN credentials
@@ -58,10 +87,7 @@ router.get('/ice', (req, res) => {
         
         // Собственный TURN сервер с временными credentials
         {
-          urls: [
-            'turn:govchat.ru:3478?transport=udp',
-            'turn:govchat.ru:3478?transport=tcp'
-          ],
+          urls: buildTurnUrls(),
           username: turnCredentials.username,
           credential: turnCredentials.credential
         }
@@ -97,10 +123,7 @@ router.get('/config', (req, res) => {
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
         {
-          urls: [
-            'turn:govchat.ru:3478?transport=udp',
-            'turn:govchat.ru:3478?transport=tcp'
-          ],
+          urls: buildTurnUrls(),
           username: turnCredentials.username,
           credential: turnCredentials.credential
         }
