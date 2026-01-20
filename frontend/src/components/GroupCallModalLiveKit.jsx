@@ -508,6 +508,10 @@ function GroupCallModalLiveKit({
   // Guard, чтобы не спамить setSubscribedQuality на каждом рендере
   const lastQualityByPubIdRef = useRef(new Map());
 
+  // Guard от дрожания: не дёргаем setSubscribedQuality чаще, чем раз в 500ms.
+  // Храним timestamp по publication, чтобы смена фокуса/resize не вызывали бурст.
+  const lastQualitySetAtByPubIdRef = useRef(new Map());
+
   // Guard для bitrate (bytes deltas)
   const lastStatsSampleRef = useRef({
     ts: 0,
@@ -954,7 +958,10 @@ function GroupCallModalLiveKit({
           ? {
               width: { ideal: 1280 },
               height: { ideal: 720 },
-              frameRate: { ideal: 30, max: 30 }
+              // FPS smoothing:
+              // Ограничиваем FPS на capture-уровне (getUserMedia constraints), без SDP/setParameters.
+              // Это снижает нагрузку на энкодер/девайс и уменьшает микрофризы, особенно на мобилках.
+              frameRate: { ideal: 24, max: 24 }
             }
           : false
       });
@@ -1352,10 +1359,12 @@ function GroupCallModalLiveKit({
     const stagePub = focusTarget?.isLocal ? null : focusTarget?.videoPublication;
     const stagePubKey = stagePub ? publicationId(stagePub) : null;
 
-    // Stage качество:
-    // Требование: HIGH если ширина >= 600px, иначе MEDIUM.
-    // Это соответствует типичным simulcast слоям: LOW~180p, MEDIUM~360p, HIGH~720p.
-    const STAGE_HIGH_MIN_WIDTH_PX = 600;
+    // Stage качество (смягчённая policy против дрожания):
+    // - HIGH только если ширина stage >= 800px
+    // - 600–799px: MEDIUM
+    // - <600px: MEDIUM
+    // Цель: реже переключаться между слоями и снизить jitter/микрофризы.
+    const STAGE_HIGH_MIN_WIDTH_PX = 800;
     const desiredStageQuality = Number(stageSize?.width || 0) >= STAGE_HIGH_MIN_WIDTH_PX
       ? VideoQuality?.HIGH
       : VideoQuality?.MEDIUM;
@@ -1363,8 +1372,9 @@ function GroupCallModalLiveKit({
     // Превью тайлы обычно 128x96. LOW достаточно и экономит трафик.
     // Если тайл большой (например, tablet/desktop с увеличенными плитками), просим MEDIUM.
     // Tiles качество:
-    // - LOW по умолчанию (миниатюры обычно ~128x96)
-    // - MEDIUM если тайл реально большой (например, tablet/desktop, широкие плитки)
+    // - LOW по умолчанию
+    // - MEDIUM только если тайл реально большой
+    // - НИКОГДА не запрашиваем HIGH для tiles
     const TILE_MEDIUM_MIN_WIDTH_PX = 220;
     const desiredTilesQuality = thumbWidth >= TILE_MEDIUM_MIN_WIDTH_PX ? VideoQuality?.MEDIUM : VideoQuality?.LOW;
 
@@ -1375,9 +1385,18 @@ function GroupCallModalLiveKit({
       if (!pub || q == null) return;
       const id = publicationId(pub);
       if (!id) return;
+
+      // 1) Не вызываем, если requested не изменился.
       const prev = lastQualityByPubIdRef.current.get(id);
       if (prev === q) return;
+
+      // 2) Не чаще, чем раз в 500ms на publication.
+      const now = Date.now();
+      const lastAt = lastQualitySetAtByPubIdRef.current.get(id) || 0;
+      if (now - lastAt < 500) return;
+
       lastQualityByPubIdRef.current.set(id, q);
+      lastQualitySetAtByPubIdRef.current.set(id, now);
       setPublicationSubscribedQuality(pub, q);
     };
 
