@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { API_URL, LIVEKIT_URL } from '../config';
-import { createLocalTracks, Room, RoomEvent, Track } from 'livekit-client';
+import { createLocalTracks, Room, RoomEvent, Track, VideoQuality } from 'livekit-client';
 
 /* ─────────────────────────────────────────────────────────────
    ICONS (SVG Components)
@@ -208,6 +208,56 @@ const MediaStreamVideo = React.memo(function MediaStreamVideo({ mediaStreamTrack
 });
 
 /* ─────────────────────────────────────────────────────────────
+   LIVEKIT VIDEO (track.attach)
+
+   Важно: LiveKit adaptiveStream выбирает simulcast слой, учитывая размер
+   HTMLVideoElement, к которому трек прикреплён через track.attach().
+   Если рендерить только MediaStreamTrack через srcObject, SDK не знает про
+   размеры элемента и может держать LOW слой даже на большом stage.
+───────────────────────────────────────────────────────────── */
+const LiveKitVideo = React.memo(function LiveKitVideo({ track, muted, className, onTrackEnded }) {
+  const videoRef = useRef(null);
+
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el || !track) return undefined;
+
+    try {
+      track.attach(el);
+    } catch (_) {
+      // no-op
+    }
+
+    const mst = track?.mediaStreamTrack || null;
+    const handleEnded = () => onTrackEnded?.();
+    try {
+      mst?.addEventListener?.('ended', handleEnded);
+    } catch (_) {}
+
+    return () => {
+      try {
+        mst?.removeEventListener?.('ended', handleEnded);
+      } catch (_) {}
+      try {
+        track.detach(el);
+      } catch (_) {
+        // no-op
+      }
+    };
+  }, [track, onTrackEnded]);
+
+  return (
+    <video
+      ref={videoRef}
+      autoPlay
+      playsInline
+      muted={muted}
+      className={className}
+    />
+  );
+});
+
+/* ─────────────────────────────────────────────────────────────
    AUDIO TRACK COMPONENT (unchanged logic)
 ───────────────────────────────────────────────────────────── */
 function TrackAudio({ track }) {
@@ -228,7 +278,7 @@ function TrackAudio({ track }) {
    PARTICIPANT TILE COMPONENT
 ───────────────────────────────────────────────────────────── */
 const MainVideo = React.memo(function MainVideo({
-  mediaStreamTrack,
+  videoTrack,
   displayName,
   isLocal,
   isVideoOff,
@@ -239,10 +289,10 @@ const MainVideo = React.memo(function MainVideo({
 
   return (
     <div className={`gvc-stage ${isSpeaking ? 'speaking' : ''}`}>
-      {mediaStreamTrack && !isVideoOff ? (
-        <MediaStreamVideo 
-          mediaStreamTrack={mediaStreamTrack} 
-          muted={isLocal} 
+      {videoTrack && !isVideoOff ? (
+        <LiveKitVideo
+          track={videoTrack}
+          muted={isLocal}
           className="gvc-stage-video"
           onTrackEnded={onTrackEnded}
         />
@@ -261,7 +311,7 @@ const MainVideo = React.memo(function MainVideo({
 
 const VideoThumbnail = React.memo(function VideoThumbnail({
   participantId,
-  mediaStreamTrack,
+  videoTrack,
   displayName,
   isLocal,
   isActive,
@@ -283,9 +333,9 @@ const VideoThumbnail = React.memo(function VideoThumbnail({
       onClick={handleClick}
       title={displayName || 'Пользователь'}
     >
-      {mediaStreamTrack && !isVideoOff ? (
-        <MediaStreamVideo
-          mediaStreamTrack={mediaStreamTrack}
+      {videoTrack && !isVideoOff ? (
+        <LiveKitVideo
+          track={videoTrack}
           muted={isLocal}
           className="gvc-thumb-video"
           onTrackEnded={onTrackEnded}
@@ -311,7 +361,7 @@ const ThumbnailsBar = React.memo(function ThumbnailsBar({ items, activeParticipa
           <VideoThumbnail
             key={item.key}
             participantId={item.participantId}
-            mediaStreamTrack={item.mediaStreamTrack}
+            videoTrack={item.videoTrack}
             displayName={item.displayName}
             isLocal={item.isLocal}
             isActive={item.participantId === activeParticipantId}
@@ -326,8 +376,50 @@ const ThumbnailsBar = React.memo(function ThumbnailsBar({ items, activeParticipa
   );
 });
 
-function isLiveMediaStreamTrack(track) {
-  return !!track && track.readyState === 'live';
+function isLiveVideoTrack(track) {
+  const mst = track?.mediaStreamTrack;
+  return !!mst && mst.readyState === 'live';
+}
+
+function publicationId(pub) {
+  return String(pub?.trackSid || pub?.sid || '') || null;
+}
+
+function qualityLabel(q) {
+  try {
+    if (q === VideoQuality.HIGH) return 'HIGH';
+    if (q === VideoQuality.MEDIUM) return 'MEDIUM';
+    if (q === VideoQuality.LOW) return 'LOW';
+  } catch (_) {}
+  return 'N/A';
+}
+
+function setPublicationSubscribedQuality(pub, quality) {
+  if (!pub) return;
+
+  // Публичные варианты API в разных версиях livekit-client:
+  // - publication.setSubscribedQuality(VideoQuality)
+  // - publication.setVideoQuality(VideoQuality)
+  // - publication.track.setSubscribedQuality(VideoQuality)
+  try {
+    if (typeof pub.setSubscribedQuality === 'function') {
+      pub.setSubscribedQuality(quality);
+      return;
+    }
+  } catch (_) {}
+
+  try {
+    if (typeof pub.setVideoQuality === 'function') {
+      pub.setVideoQuality(quality);
+      return;
+    }
+  } catch (_) {}
+
+  try {
+    if (pub.track && typeof pub.track.setSubscribedQuality === 'function') {
+      pub.track.setSubscribedQuality(quality);
+    }
+  } catch (_) {}
 }
 
 function isScreenSharePublication(pub) {
@@ -384,6 +476,195 @@ function GroupCallModalLiveKit({
   const isConnectingRef = useRef(false);
   const leaveSentRef = useRef(false);
   const mountedRef = useRef(true);
+
+  // UI: небольшая панель статуса качества (опционально)
+  const [showConnStatus, setShowConnStatus] = useState(false);
+  const [stageQualityRequested, setStageQualityRequested] = useState('');
+  const [tilesQualityRequested, setTilesQualityRequested] = useState('');
+  const [connProtocol, setConnProtocol] = useState('');
+  const [videoInKbps, setVideoInKbps] = useState(null);
+  const [videoOutKbps, setVideoOutKbps] = useState(null);
+  const [statsNote, setStatsNote] = useState('');
+
+  // Для responsive: ширина stage и примерная ширина превью
+  const stageWrapRef = useRef(null);
+  const thumbsWrapRef = useRef(null);
+  const [thumbWidth, setThumbWidth] = useState(0);
+  const [stageSize, setStageSize] = useState(() => ({ width: 0, height: 0 }));
+
+  // Guard, чтобы не спамить setSubscribedQuality на каждом рендере
+  const lastQualityByPubIdRef = useRef(new Map());
+
+  // Guard для bitrate (bytes deltas)
+  const lastStatsSampleRef = useRef({
+    ts: 0,
+    inBytes: 0,
+    outBytes: 0
+  });
+
+  useEffect(() => {
+    const stageEl = stageWrapRef.current;
+    const thumbsEl = thumbsWrapRef.current;
+    if (!stageEl && !thumbsEl) return undefined;
+
+    const update = () => {
+      try {
+        if (stageEl) {
+          const r = stageEl.getBoundingClientRect?.();
+          const w = Math.round(r?.width || 0);
+          const h = Math.round(r?.height || 0);
+          setStageSize((prev) => (prev.width === w && prev.height === h ? prev : { width: w, height: h }));
+        }
+        if (thumbsEl) {
+          const first = thumbsEl.querySelector?.('.gvc-thumb');
+          const w = first?.getBoundingClientRect?.().width;
+          setThumbWidth(Math.round(w || 0));
+        }
+      } catch (_) {}
+    };
+
+    update();
+
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null;
+    try {
+      if (ro && stageEl) ro.observe(stageEl);
+      if (ro && thumbsEl) ro.observe(thumbsEl);
+    } catch (_) {}
+
+    window.addEventListener?.('resize', update);
+    return () => {
+      window.removeEventListener?.('resize', update);
+      try { ro?.disconnect?.(); } catch (_) {}
+    };
+  }, []);
+
+  // Best-effort stats для панели "Состояние соединения".
+  // Важно:
+  // - Включается только когда пользователь открыл панель.
+  // - Не делает частый polling (2с) и аккуратно очищается.
+  useEffect(() => {
+    if (!showConnStatus) return undefined;
+    if (callStatus !== 'active') return undefined;
+
+    let cancelled = false;
+    let timer = null;
+
+    const flatten = (stats) => {
+      const out = [];
+      if (!stats) return out;
+      if (typeof stats.forEach === 'function') {
+        // Map / RTCStatsReport
+        stats.forEach((v) => out.push(v));
+        return out;
+      }
+      if (Array.isArray(stats)) return stats;
+      // object map
+      try {
+        Object.keys(stats).forEach((k) => out.push(stats[k]));
+      } catch (_) {}
+      return out;
+    };
+
+    const pickProtocol = (rows) => {
+      try {
+        const byId = new Map();
+        rows.forEach((r) => {
+          if (r && r.id) byId.set(r.id, r);
+        });
+        const pair = rows.find((r) => r?.type === 'candidate-pair' && (r?.selected || r?.nominated)) || null;
+        const local = pair?.localCandidateId ? byId.get(pair.localCandidateId) : null;
+        const remote = pair?.remoteCandidateId ? byId.get(pair.remoteCandidateId) : null;
+        const proto = String(local?.protocol || pair?.transportId || '').toLowerCase();
+        const candidateType = String(local?.candidateType || '').toLowerCase();
+        const isRelay = candidateType === 'relay';
+
+        if (isRelay) {
+          return `TURN${proto ? ' / ' + proto.toUpperCase() : ''}`;
+        }
+        if (proto.includes('tcp')) return 'TCP';
+        if (proto.includes('udp')) return 'UDP';
+        // fallback
+        if (remote?.protocol) return String(remote.protocol).toUpperCase();
+      } catch (_) {}
+      return '';
+    };
+
+    const sumVideoBytes = (rows) => {
+      let inBytes = 0;
+      let outBytes = 0;
+      rows.forEach((r) => {
+        const type = r?.type;
+        const kind = r?.kind || r?.mediaType;
+        if (kind !== 'video') return;
+
+        // inbound-rtp/outbound-rtp есть в стандартном getStats()
+        if (type === 'inbound-rtp') {
+          inBytes += Number(r?.bytesReceived || 0);
+        }
+        if (type === 'outbound-rtp') {
+          outBytes += Number(r?.bytesSent || 0);
+        }
+      });
+      return { inBytes, outBytes };
+    };
+
+    const tick = async () => {
+      const room = roomRef.current;
+      if (!room) return;
+
+      // Публичные варианты API в зависимости от версии:
+      // - room.getStats()
+      // - room.localParticipant.getStats()
+      let stats = null;
+      try {
+        if (typeof room.getStats === 'function') {
+          stats = await room.getStats();
+        } else if (room.localParticipant && typeof room.localParticipant.getStats === 'function') {
+          stats = await room.localParticipant.getStats();
+        }
+      } catch (e) {
+        // Если SDK не поддерживает метод — просто отключаем подробные stats.
+        if (!cancelled) {
+          setStatsNote('Stats недоступны в текущей версии SDK');
+        }
+        return;
+      }
+
+      const rows = flatten(stats);
+      if (!rows.length) {
+        if (!cancelled) setStatsNote('Нет данных stats');
+        return;
+      }
+
+      const protoLabel = pickProtocol(rows);
+      const { inBytes, outBytes } = sumVideoBytes(rows);
+      const now = Date.now();
+      const prev = lastStatsSampleRef.current;
+      const dt = prev.ts ? (now - prev.ts) / 1000 : 0;
+
+      if (!cancelled) {
+        if (protoLabel) setConnProtocol(protoLabel);
+        if (dt > 0.5) {
+          const inKbps = Math.max(0, Math.round(((inBytes - prev.inBytes) * 8) / dt / 1000));
+          const outKbps = Math.max(0, Math.round(((outBytes - prev.outBytes) * 8) / dt / 1000));
+          setVideoInKbps(Number.isFinite(inKbps) ? inKbps : null);
+          setVideoOutKbps(Number.isFinite(outKbps) ? outKbps : null);
+        }
+        setStatsNote('');
+      }
+
+      lastStatsSampleRef.current = { ts: now, inBytes, outBytes };
+    };
+
+    // Быстрый первый замер и затем редкий polling.
+    tick();
+    timer = setInterval(tick, 2000);
+
+    return () => {
+      cancelled = true;
+      try { if (timer) clearInterval(timer); } catch (_) {}
+    };
+  }, [callStatus, showConnStatus]);
 
   const updateRemoteParticipants = useCallback(() => {
     const room = roomRef.current;
@@ -567,27 +848,7 @@ function GroupCallModalLiveKit({
 
       localTracksRef.current = tracks;
 
-      // Явно задаём publish параметры для видео.
-      // Без этого некоторые девайсы/сети агрессивно уходят в слишком низкий bitrate,
-      // что выглядит как "мыло" даже при большом элементе на экране.
-      await Promise.all(
-        tracks.map((track) => {
-          if (track.kind !== Track.Kind.Video) {
-            return room.localParticipant.publishTrack(track);
-          }
-
-          return room.localParticipant.publishTrack(track, {
-            // simulcast помогает SFU отдавать подходящий слой, но также позволяет быстро подниматься
-            // до высокого качества для большого stage-элемента.
-            simulcast: true,
-            videoEncoding: {
-              // bps. 2.5Mbps обычно комфортно для 720p@30 при нормальной сети.
-              maxBitrate: 2_500_000,
-              maxFramerate: 30
-            }
-          });
-        })
-      );
+      await Promise.all(tracks.map((track) => room.localParticipant.publishTrack(track)));
 
       const localVideo = tracks.find((t) => t.kind === 'video') || null;
       if (mountedRef.current) {
@@ -761,17 +1022,16 @@ function GroupCallModalLiveKit({
         const screenTrack = screenPub?.track || null;
         const audioTrack = audioPub?.track || null;
 
-        const cameraMs = cameraTrack?.mediaStreamTrack || null;
-        const screenMs = screenTrack?.mediaStreamTrack || null;
-
-        const cameraActive = !!cameraPub && !cameraPub.isMuted && isLiveMediaStreamTrack(cameraMs);
-        const screenActive = !!screenPub && !screenPub.isMuted && isLiveMediaStreamTrack(screenMs);
+        const cameraActive = !!cameraPub && !cameraPub.isMuted && isLiveVideoTrack(cameraTrack);
+        const screenActive = !!screenPub && !screenPub.isMuted && isLiveVideoTrack(screenTrack);
 
         return {
           participant,
           participantId: identity,
-          cameraMediaStreamTrack: cameraActive ? cameraMs : null,
-          screenMediaStreamTrack: screenActive ? screenMs : null,
+          cameraPublication: cameraPub,
+          screenPublication: screenPub,
+          cameraTrack: cameraActive ? cameraTrack : null,
+          screenTrack: screenActive ? screenTrack : null,
           isCameraOff: !cameraActive,
           isScreenOff: !screenActive,
           audioTrack,
@@ -782,7 +1042,7 @@ function GroupCallModalLiveKit({
       .filter(Boolean);
   }, [remoteParticipants]);
 
-  const localScreenMediaStreamTrack = useMemo(() => {
+  const localScreen = useMemo(() => {
     const room = roomRef.current;
     const lp = room?.localParticipant;
     const pubs = lp?.videoTrackPublications && typeof lp.videoTrackPublications.values === 'function'
@@ -790,9 +1050,11 @@ function GroupCallModalLiveKit({
       : [];
     const screenPub = pubs.find((p) => isScreenSharePublication(p) && p?.track) || null;
     const screenTrack = screenPub?.track || null;
-    const ms = screenTrack?.mediaStreamTrack || null;
-    const active = !!screenPub && !screenPub.isMuted && isLiveMediaStreamTrack(ms);
-    return active ? ms : null;
+    const active = !!screenPub && !screenPub.isMuted && isLiveVideoTrack(screenTrack);
+    return {
+      publication: active ? screenPub : null,
+      track: active ? screenTrack : null
+    };
   }, [callStatus, remoteParticipants]);
 
   const getDisplayName = useCallback((userId) => {
@@ -853,23 +1115,25 @@ function GroupCallModalLiveKit({
     const localId = String(currentUserId || '').trim();
 
     // Screen share всегда приоритетнее camera
-    if (localScreenMediaStreamTrack) {
+    if (localScreen?.track) {
       return {
         participantId: localId,
         isLocal: true,
-        videoMediaStreamTrack: localScreenMediaStreamTrack,
+        videoTrack: localScreen.track,
+        videoPublication: localScreen.publication,
         isVideoOff: false,
         displayName: `${getDisplayName(localId)} (Экран)`,
         isSpeaking: false
       };
     }
 
-    const remoteScreen = remoteMedia.find((r) => r?.screenMediaStreamTrack) || null;
+    const remoteScreen = remoteMedia.find((r) => r?.screenTrack) || null;
     if (remoteScreen) {
       return {
         participantId: remoteScreen.participantId,
         isLocal: false,
-        videoMediaStreamTrack: remoteScreen.screenMediaStreamTrack,
+        videoTrack: remoteScreen.screenTrack,
+        videoPublication: remoteScreen.screenPublication,
         isVideoOff: false,
         displayName: `${getDisplayName(remoteScreen.participantId)} (Экран)`,
         isSpeaking: false
@@ -880,7 +1144,8 @@ function GroupCallModalLiveKit({
       return {
         participantId: localId,
         isLocal: true,
-        videoMediaStreamTrack: localVideoTrack?.mediaStreamTrack || null,
+        videoTrack: localVideoTrack || null,
+        videoPublication: null,
         isVideoOff,
         displayName: getDisplayName(localId),
         isSpeaking: false
@@ -891,24 +1156,26 @@ function GroupCallModalLiveKit({
     return {
       participantId: id,
       isLocal: false,
-      videoMediaStreamTrack: remote?.cameraMediaStreamTrack || null,
+      videoTrack: remote?.cameraTrack || null,
+      videoPublication: remote?.cameraPublication || null,
       isVideoOff: false,
       displayName: getDisplayName(id),
       isSpeaking: id === activeSpeakerId
     };
-  }, [activeParticipantId, activeSpeakerId, callStatus, currentUserId, getDisplayName, isVideoOff, localScreenMediaStreamTrack, localVideoTrack, remoteMedia]);
+  }, [activeParticipantId, activeSpeakerId, callStatus, currentUserId, getDisplayName, isVideoOff, localScreen, localVideoTrack, remoteMedia]);
 
   const thumbnailItems = useMemo(() => {
     const localId = String(currentUserId || '').trim();
     const items = [];
 
     // Local screen share tile (separate track)
-    if (localScreenMediaStreamTrack) {
+    if (localScreen?.track) {
       items.push({
         key: `${localId}:screen`,
         participantId: localId,
         isLocal: true,
-        mediaStreamTrack: localScreenMediaStreamTrack,
+        videoTrack: localScreen.track,
+        videoPublication: localScreen.publication,
         displayName: `${getDisplayName(localId)} (Экран)`,
         isVideoOff: false,
         onTrackEnded: syncUiFromTracks
@@ -920,7 +1187,8 @@ function GroupCallModalLiveKit({
       key: `${localId}:cam`,
       participantId: localId,
       isLocal: true,
-      mediaStreamTrack: !isVideoOff ? (localVideoTrack?.mediaStreamTrack || null) : null,
+      videoTrack: !isVideoOff ? (localVideoTrack || null) : null,
+      videoPublication: null,
       displayName: getDisplayName(localId),
       isVideoOff,
       onTrackEnded: syncUiFromTracks
@@ -928,12 +1196,13 @@ function GroupCallModalLiveKit({
 
     // Remote tiles (screen share separate from camera)
     remoteMedia.forEach((r) => {
-      if (r?.screenMediaStreamTrack) {
+      if (r?.screenTrack) {
         items.push({
           key: `${r.participantId}:screen`,
           participantId: r.participantId,
           isLocal: false,
-          mediaStreamTrack: r.screenMediaStreamTrack,
+          videoTrack: r.screenTrack,
+          videoPublication: r.screenPublication,
           displayName: `${getDisplayName(r.participantId)} (Экран)`,
           isVideoOff: false,
           onTrackEnded: syncUiFromTracks
@@ -944,7 +1213,8 @@ function GroupCallModalLiveKit({
         key: `${r.participantId}:cam`,
         participantId: r.participantId,
         isLocal: false,
-        mediaStreamTrack: r.cameraMediaStreamTrack,
+        videoTrack: r.cameraTrack,
+        videoPublication: r.cameraPublication,
         displayName: getDisplayName(r.participantId),
         isVideoOff: r.isCameraOff,
         onTrackEnded: syncUiFromTracks
@@ -952,7 +1222,61 @@ function GroupCallModalLiveKit({
     });
 
     return items;
-  }, [currentUserId, getDisplayName, isVideoOff, localScreenMediaStreamTrack, localVideoTrack, remoteMedia, syncUiFromTracks]);
+  }, [currentUserId, getDisplayName, isVideoOff, localScreen, localVideoTrack, remoteMedia, syncUiFromTracks]);
+
+  // Управление simulcast layer через публичный API.
+  // Требования:
+  // - Главное видео (stage) должно получать HIGH quality (если доступно)
+  // - Превью должны быть LOW или MEDIUM
+  // - Не перегружать мобилки: MEDIUM запрашиваем только если превью реально большое
+  useEffect(() => {
+    if (callStatus !== 'active') return;
+
+    const stagePub = focusTarget?.isLocal ? null : focusTarget?.videoPublication;
+    const stagePubKey = stagePub ? publicationId(stagePub) : null;
+
+    // Stage качество:
+    // - Главный экран должен запрашивать HIGH слой (чтобы не залипать на 180p).
+    // - Но на очень маленьких экранах (узкий контейнер) MEDIUM визуально почти не хуже,
+    //   а нагрузка заметно ниже — это важно для мобильных.
+    // Пороговые значения выбраны под типичные simulcast слои: ~180p/360p/720p.
+    const desiredStageQuality = (() => {
+      const w = Number(stageSize?.width || 0);
+      if (!w) return VideoQuality?.HIGH;
+      if (w >= 700) return VideoQuality?.HIGH;
+      return VideoQuality?.MEDIUM;
+    })();
+
+    // Превью тайлы обычно 128x96. LOW достаточно и экономит трафик.
+    // Если тайл большой (например, tablet/desktop с увеличенными плитками), просим MEDIUM.
+    const desiredTilesQuality = thumbWidth >= 220 ? VideoQuality?.MEDIUM : VideoQuality?.LOW;
+
+    setStageQualityRequested(qualityLabel(desiredStageQuality));
+    setTilesQualityRequested(qualityLabel(desiredTilesQuality));
+
+    const apply = (pub, q) => {
+      if (!pub || q == null) return;
+      const id = publicationId(pub);
+      if (!id) return;
+      const prev = lastQualityByPubIdRef.current.get(id);
+      if (prev === q) return;
+      lastQualityByPubIdRef.current.set(id, q);
+      setPublicationSubscribedQuality(pub, q);
+    };
+
+    // 1) Stage -> HIGH
+    if (stagePub) apply(stagePub, desiredStageQuality);
+
+    // 2) Все остальные удалённые видео -> LOW/MEDIUM
+    thumbnailItems.forEach((it) => {
+      if (it.isLocal) return;
+      const pub = it.videoPublication;
+      const id = publicationId(pub);
+      if (!pub || !id) return;
+      if (stagePubKey && id === stagePubKey) return;
+      apply(pub, desiredTilesQuality);
+    });
+  }, [callStatus, focusTarget, stageSize, thumbWidth, thumbnailItems]);
 
   const getStatusText = () => {
     switch (callStatus) {
@@ -1033,9 +1357,9 @@ function GroupCallModalLiveKit({
         </div>
 
         {/* Stage */}
-        <div className="gvc-stage-wrap">
+        <div className="gvc-stage-wrap" ref={stageWrapRef}>
           <MainVideo
-            mediaStreamTrack={focusTarget.videoMediaStreamTrack}
+            videoTrack={focusTarget.videoTrack}
             displayName={focusTarget.displayName}
             isLocal={focusTarget.isLocal}
             isVideoOff={focusTarget.isLocal ? focusTarget.isVideoOff : false}
@@ -1075,7 +1399,12 @@ function GroupCallModalLiveKit({
               <Icons.ScreenShare />
             </button>
 
-            <button className="gvc-btn" title="Настройки">
+            <button
+              className={`gvc-btn ${showConnStatus ? 'off' : ''}`}
+              title={showConnStatus ? 'Скрыть состояние соединения' : 'Состояние соединения'}
+              onClick={() => setShowConnStatus((v) => !v)}
+              disabled={callStatus !== 'active'}
+            >
               <Icons.Settings />
             </button>
 
@@ -1086,12 +1415,14 @@ function GroupCallModalLiveKit({
         </div>
 
         {/* Thumbnails Strip */}
-        <ThumbnailsBar
-          items={thumbnailItems}
-          activeParticipantId={String(activeParticipantId || '').trim()}
-          activeSpeakerId={activeSpeakerId}
-          onSelect={handleSelectParticipant}
-        />
+        <div ref={thumbsWrapRef}>
+          <ThumbnailsBar
+            items={thumbnailItems}
+            activeParticipantId={String(activeParticipantId || '').trim()}
+            activeSpeakerId={activeSpeakerId}
+            onSelect={handleSelectParticipant}
+          />
+        </div>
 
         {/* Connecting Overlay */}
         {callStatus === 'connecting' && (
@@ -1101,6 +1432,21 @@ function GroupCallModalLiveKit({
           </div>
         )}
       </main>
+
+      {showConnStatus && callStatus === 'active' && (
+        <div className="gvc-conn-status">
+          <div className="gvc-conn-title">Состояние соединения</div>
+          <div className="gvc-conn-row"><span>Protocol</span><b>{connProtocol || 'N/A'}</b></div>
+          <div className="gvc-conn-row"><span>Video in</span><b>{typeof videoInKbps === 'number' ? `${videoInKbps} kbps` : 'N/A'}</b></div>
+          <div className="gvc-conn-row"><span>Video out</span><b>{typeof videoOutKbps === 'number' ? `${videoOutKbps} kbps` : 'N/A'}</b></div>
+          <div className="gvc-conn-row"><span>Stage layer</span><b>{stageQualityRequested || 'N/A'}</b></div>
+          <div className="gvc-conn-row"><span>Tiles layer</span><b>{tilesQualityRequested || 'N/A'}</b></div>
+          <div className="gvc-conn-hint">
+            Layer выставляется через LiveKit SDK и подстраивается под размер элемента.
+            {statsNote ? ` (${statsNote})` : ''}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
