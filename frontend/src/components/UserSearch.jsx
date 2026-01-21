@@ -1,74 +1,43 @@
-import React, { useState, useEffect } from 'react';
-import axios from 'axios';
-import { API_URL } from '../config';
+import React from 'react';
+import { usePhoneUserLookup } from '../hooks/usePhoneUserLookup';
 
 function UserSearch({ token, onCreateChat }) {
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState([]);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (!query.trim()) {
-      setResults([]);
-      return;
-    }
-
-    const timer = setTimeout(async () => {
-      setLoading(true);
-      try {
-        const res = await axios.get(
-          `${API_URL}/users/search?phone=${encodeURIComponent(query)}`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        setResults(res.data || []);
-      } catch {
-        setResults([]);
-      } finally {
-        setLoading(false);
-      }
-    }, 300);
-
-    return () => clearTimeout(timer);
-  }, [query, token]);
+  const { phone, setPhone, status, user, error } = usePhoneUserLookup({ token, minLen: 9, debounceMs: 400 });
 
   const handleSelectUser = (userId) => {
     onCreateChat(userId);
-    setQuery('');
-    setResults([]);
+    setPhone('');
   };
 
   return (
     <div style={styles.container}>
       <input
         type="text"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
+        value={phone}
+        onChange={(e) => setPhone(e.target.value)}
         placeholder="Найдите пользователя по номеру телефона"
         style={styles.input}
       />
 
-      {query && (
+      {phone && (
         <div style={styles.results}>
-          {loading && <div style={styles.hint}>Поиск...</div>}
+          {status === 'too_short' && <div style={styles.hint}>Введите номер телефона полностью</div>}
+          {status === 'loading' && <div style={styles.hint}>Поиск...</div>}
 
-          {!loading && results.length === 0 && (
-            <div style={styles.hint}>Пользователь не найден</div>
+          {status === 'not_found' && <div style={styles.hint}>Пользователь не найден</div>}
+          {status === 'rate_limited' && <div style={styles.hint}>{error || 'Слишком много запросов'}</div>}
+          {status === 'error' && <div style={styles.hint}>{error || 'Ошибка поиска'}</div>}
+
+          {status === 'found' && user && (
+            <button onClick={() => handleSelectUser(user.id)} style={styles.userItem}>
+              <div style={styles.userAvatar}>{user.name?.charAt(0)?.toUpperCase() || '?'}</div>
+              <div style={styles.userInfo}>
+                <div style={styles.userName}>{user.name}</div>
+                <div style={styles.userPhone}>{phone}</div>
+              </div>
+              <div style={styles.cta}>Начать чат</div>
+            </button>
           )}
-
-          {!loading &&
-            results.map((user) => (
-              <button
-                key={user._id}
-                onClick={() => handleSelectUser(user._id)}
-                style={styles.userItem}
-              >
-                <div style={styles.userAvatar}>{user.name?.charAt(0)?.toUpperCase() || '?'}</div>
-                <div style={styles.userInfo}>
-                  <div style={styles.userName}>{user.name}</div>
-                  <div style={styles.userPhone}>{user.phone}</div>
-                </div>
-              </button>
-            ))}
         </div>
       )}
     </div>
@@ -141,6 +110,12 @@ const styles = {
   userPhone: {
     fontSize: '12px',
     color: '#94a3b8',
+  },
+  cta: {
+    fontSize: '12px',
+    color: '#22c55e',
+    fontWeight: '600',
+    flexShrink: 0,
   },
 };
 

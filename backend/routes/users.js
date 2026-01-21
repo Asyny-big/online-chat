@@ -3,8 +3,12 @@ const router = express.Router();
 const User = require('../models/User');
 const Chat = require('../models/Chat');
 const authMiddleware = require('../middleware/auth');
+const HttpRateLimiter = require('../utils/httpRateLimiter');
+const { isValidPhoneExact, findUserByExactPhone } = require('../utils/userLookup');
 
 router.use(authMiddleware);
+
+const searchLimiter = new HttpRateLimiter({ windowMs: 60_000, maxRequests: 20 });
 
 // Получение контактов (пользователи из существующих чатов)
 router.get('/contacts', async (req, res) => {
@@ -40,37 +44,36 @@ router.get('/contacts', async (req, res) => {
   }
 });
 
-// Поиск пользователей по номеру телефона (частичное совпадение)
+// Поиск пользователя по номеру телефона (ТОЧНОЕ совпадение, single-result).
+// Контракт:
+// - phone: строка в едином формате (без нормализации на backend)
+// - длина < 9 -> 400
+// - ответ: { id, name, avatar } | null
 router.get('/search', async (req, res) => {
   try {
     const { phone } = req.query;
 
-    if (!phone || !phone.trim()) {
-      return res.json([]);
+    if (typeof phone !== 'string') {
+      return res.status(400).json({ error: 'phone is required' });
     }
 
-    const phoneNormalized = phone.replace(/[\s\-()]/g, '');
-    
-    // Частичное совпадение по началу номера
-    const users = await User.find({
-      phoneNormalized: { $regex: `^${phoneNormalized}` },
-      _id: { $ne: req.userId } // Не показывать себя
-    })
-    .select('name phone phoneNormalized avatarUrl status')
-    .limit(10)
-    .lean();
+    // Порог защиты от перебора/частичных запросов.
+    if (phone.length < 9) {
+      return res.status(400).json({ error: 'phone is too short' });
+    }
 
-    const results = users.map(u => ({
-      _id: u._id,
-      id: u._id,
-      name: u.name,
-      phone: u.phone,
-      phoneNormalized: u.phoneNormalized,
-      avatarUrl: u.avatarUrl,
-      status: u.status
-    }));
+    if (!isValidPhoneExact(phone)) {
+      return res.status(400).json({ error: 'invalid phone format' });
+    }
 
-    res.json(results);
+    // Rate limit (пер-юзер). Короткий ввод никогда не приводит к выдаче пользователей.
+    const key = String(req.userId || 'anon');
+    if (!searchLimiter.take(key)) {
+      return res.status(429).json({ error: 'too many requests' });
+    }
+
+    const result = await findUserByExactPhone({ phone, excludeUserId: req.userId });
+    return res.json(result);
   } catch (error) {
     console.error('Search users error:', error);
     res.status(500).json({ error: 'Ошибка поиска' });

@@ -1,76 +1,32 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import { API_URL } from '../config';
+import { usePhoneUserLookup } from '../hooks/usePhoneUserLookup';
 
 /**
  * CreateGroupModal - Модальное окно для создания группового чата
  */
 function CreateGroupModal({ token, onClose, onGroupCreated }) {
   const [groupName, setGroupName] = useState('');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [contacts, setContacts] = useState([]);
-  const [searchResults, setSearchResults] = useState([]);
   const [selectedUsers, setSelectedUsers] = useState([]);
-  const [isLoading, setIsLoading] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState('');
 
-  // Загрузка контактов (пользователи из существующих чатов)
-  useEffect(() => {
-    const fetchContacts = async () => {
-      try {
-        setIsLoading(true);
-        const res = await fetch(`${API_URL}/users/contacts`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setContacts(data || []);
-        }
-      } catch (err) {
-        console.error('Failed to fetch contacts:', err);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    fetchContacts();
-  }, [token]);
-
-  // Поиск пользователей по телефону
-  const handleSearch = useCallback(async (query) => {
-    setSearchQuery(query);
-    
-    if (!query || query.length < 3) {
-      setSearchResults([]);
-      return;
-    }
-
-    try {
-      const res = await fetch(`${API_URL}/users/search?phone=${encodeURIComponent(query)}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        // Исключаем уже выбранных пользователей
-        const filtered = data.filter(u => !selectedUsers.find(s => s._id === u._id));
-        setSearchResults(filtered);
-      }
-    } catch (err) {
-      console.error('Search error:', err);
-    }
-  }, [token, selectedUsers]);
+  const { phone, setPhone, status, user, error: lookupError } = usePhoneUserLookup({ token, minLen: 9, debounceMs: 400 });
 
   // Добавление пользователя в выбранные
-  const handleSelectUser = (user) => {
-    if (!selectedUsers.find(u => u._id === user._id)) {
-      setSelectedUsers(prev => [...prev, user]);
+  const handleSelectUser = useCallback(() => {
+    if (!user?.id) return;
+    if (selectedUsers.some((u) => u.id === user.id)) {
+      setPhone('');
+      return;
     }
-    setSearchQuery('');
-    setSearchResults([]);
-  };
+    setSelectedUsers((prev) => [...prev, user]);
+    setPhone('');
+  }, [selectedUsers, setPhone, user]);
 
   // Удаление пользователя из выбранных
   const handleRemoveUser = (userId) => {
-    setSelectedUsers(prev => prev.filter(u => u._id !== userId));
+    setSelectedUsers(prev => prev.filter(u => u.id !== userId));
   };
 
   // Создание группового чата
@@ -97,7 +53,7 @@ function CreateGroupModal({ token, onClose, onGroupCreated }) {
         },
         body: JSON.stringify({
           name: groupName.trim(),
-          participantIds: selectedUsers.map(u => u._id)
+          participantIds: selectedUsers.map(u => u.id)
         })
       });
 
@@ -115,8 +71,17 @@ function CreateGroupModal({ token, onClose, onGroupCreated }) {
     }
   };
 
-  // Список для отображения (контакты или результаты поиска)
-  const displayList = searchQuery.length >= 3 ? searchResults : contacts;
+  const isAlreadySelected = !!(user?.id && selectedUsers.some((u) => u.id === user.id));
+
+  const lookupHint = (() => {
+    if (!phone) return '';
+    if (status === 'too_short') return 'Введите номер телефона полностью';
+    if (status === 'loading') return 'Поиск...';
+    if (status === 'not_found') return 'Пользователь не найден';
+    if (status === 'rate_limited') return lookupError || 'Слишком много запросов. Попробуйте позже.';
+    if (status === 'error') return lookupError || 'Ошибка поиска';
+    return '';
+  })();
 
   return (
     <div style={styles.overlay} onClick={onClose}>
@@ -146,13 +111,13 @@ function CreateGroupModal({ token, onClose, onGroupCreated }) {
             <label style={styles.label}>Участники ({selectedUsers.length})</label>
             <div style={styles.selectedList}>
               {selectedUsers.map(user => (
-                <div key={user._id} style={styles.selectedChip}>
+                <div key={user.id} style={styles.selectedChip}>
                   <span style={styles.chipAvatar}>
                     {user.name?.charAt(0).toUpperCase() || '?'}
                   </span>
                   <span style={styles.chipName}>{user.name}</span>
                   <button
-                    onClick={() => handleRemoveUser(user._id)}
+                    onClick={() => handleRemoveUser(user.id)}
                     style={styles.chipRemove}
                   >
                     ✕
@@ -168,42 +133,38 @@ function CreateGroupModal({ token, onClose, onGroupCreated }) {
           <label style={styles.label}>Добавить участников</label>
           <input
             type="text"
-            value={searchQuery}
-            onChange={(e) => handleSearch(e.target.value)}
-            placeholder="Поиск по номеру телефона..."
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="Введите номер телефона..."
             style={styles.input}
           />
         </div>
 
-        {/* Список контактов/результатов */}
+        {/* Результат поиска (single-result, без списков) */}
         <div style={styles.listContainer}>
-          {isLoading ? (
-            <div style={styles.loading}>Загрузка...</div>
-          ) : displayList.length === 0 ? (
-            <div style={styles.empty}>
-              {searchQuery.length >= 3 
-                ? 'Пользователи не найдены' 
-                : 'Нет контактов'}
+          {!!lookupHint && <div style={styles.hint}>{lookupHint}</div>}
+
+          {status === 'found' && user && (
+            <div style={styles.singleResultCard}>
+              <div style={styles.contactAvatar}>
+                {user.name?.charAt(0).toUpperCase() || '?'}
+              </div>
+              <div style={styles.contactInfo}>
+                <div style={styles.contactName}>{user.name}</div>
+                <div style={styles.contactPhone}>{phone}</div>
+              </div>
+              <button
+                type="button"
+                onClick={handleSelectUser}
+                disabled={isAlreadySelected}
+                style={{
+                  ...styles.addUserBtn,
+                  ...(isAlreadySelected ? styles.addUserBtnDisabled : {}),
+                }}
+              >
+                {isAlreadySelected ? 'Уже добавлен' : 'Добавить в группу'}
+              </button>
             </div>
-          ) : (
-            displayList
-              .filter(user => !selectedUsers.find(s => s._id === user._id))
-              .map(user => (
-                <button
-                  key={user._id}
-                  onClick={() => handleSelectUser(user)}
-                  style={styles.contactItem}
-                >
-                  <div style={styles.contactAvatar}>
-                    {user.name?.charAt(0).toUpperCase() || '?'}
-                  </div>
-                  <div style={styles.contactInfo}>
-                    <div style={styles.contactName}>{user.name}</div>
-                    <div style={styles.contactPhone}>{user.phone}</div>
-                  </div>
-                  <span style={styles.addIcon}>+</span>
-                </button>
-              ))
           )}
         </div>
 
@@ -356,30 +317,19 @@ const styles = {
     minHeight: '200px',
     maxHeight: '300px',
   },
-  loading: {
+  hint: {
     textAlign: 'center',
     color: '#64748b',
-    padding: '20px',
+    padding: '12px',
+    fontSize: '13px',
   },
-  empty: {
-    textAlign: 'center',
-    color: '#64748b',
-    padding: '20px',
-  },
-  contactItem: {
-    width: '100%',
-    padding: '10px 12px',
-    background: 'transparent',
-    border: 'none',
-    borderRadius: '10px',
-    color: '#fff',
-    cursor: 'pointer',
+  singleResultCard: {
     display: 'flex',
     alignItems: 'center',
     gap: '12px',
-    marginBottom: '4px',
-    transition: 'background 0.2s',
-    textAlign: 'left',
+    padding: '12px',
+    border: '1px solid #334155',
+    borderRadius: '12px',
   },
   contactAvatar: {
     width: '40px',
@@ -406,16 +356,20 @@ const styles = {
     fontSize: '12px',
     color: '#64748b',
   },
-  addIcon: {
-    width: '28px',
-    height: '28px',
-    borderRadius: '50%',
-    background: '#334155',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: '18px',
-    color: '#3b82f6',
+  addUserBtn: {
+    marginLeft: 'auto',
+    padding: '10px 12px',
+    borderRadius: '10px',
+    border: 'none',
+    background: '#3b82f6',
+    color: '#fff',
+    fontWeight: '600',
+    cursor: 'pointer',
+    flexShrink: 0,
+  },
+  addUserBtnDisabled: {
+    opacity: 0.6,
+    cursor: 'not-allowed',
   },
   error: {
     padding: '0 20px',

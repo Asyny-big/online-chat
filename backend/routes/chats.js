@@ -79,8 +79,8 @@ router.post('/private', async (req, res) => {
     if (targetUserId) {
       targetUser = await User.findById(targetUserId);
     } else if (phone) {
-      const phoneNormalized = phone.replace(/[\s\-()]/g, '');
-      targetUser = await User.findOne({ phoneNormalized });
+      // Без нормализации: ожидаем единый формат номера, поиск по точному совпадению.
+      targetUser = await User.findOne({ phone });
     } else {
       return res.status(400).json({ error: 'Укажите userId или phone' });
     }
@@ -143,8 +143,8 @@ router.post('/group', async (req, res) => {
 
     // Добавляем участников по phone
     for (const phone of participantPhones) {
-      const phoneNormalized = phone.replace(/[\s\-()]/g, '');
-      const user = await User.findOne({ phoneNormalized });
+      // Без нормализации: ожидаем единый формат номера, поиск по точному совпадению.
+      const user = await User.findOne({ phone });
       if (user && user._id.toString() !== userId) {
         if (!participants.find(p => p.user.toString() === user._id.toString())) {
           participants.push({ user: user._id, role: 'member' });
@@ -224,8 +224,8 @@ router.post('/:chatId/participants', checkChatAdmin, async (req, res) => {
     const { phone } = req.body;
     const chat = req.chat;
 
-    const phoneNormalized = phone.replace(/[\s\-()]/g, '');
-    const newUser = await User.findOne({ phoneNormalized });
+    // Без нормализации: ожидаем единый формат номера, поиск по точному совпадению.
+    const newUser = await User.findOne({ phone });
 
     if (!newUser) {
       return res.status(404).json({ error: 'Пользователь не найден' });
