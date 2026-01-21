@@ -281,11 +281,13 @@ const MainVideo = React.memo(function MainVideo({
   videoTrack,
   displayName,
   isLocal,
+  isScreenShare,
   isVideoOff,
   isSpeaking,
   onTrackEnded
 }) {
   const initials = displayName ? displayName.slice(0, 2).toUpperCase() : '??';
+  const mirrorClass = isLocal && !isScreenShare ? ' gvc-video-mirror' : '';
 
   return (
     <div className={`gvc-stage ${isSpeaking ? 'speaking' : ''}`}>
@@ -293,7 +295,7 @@ const MainVideo = React.memo(function MainVideo({
         <LiveKitVideo
           track={videoTrack}
           muted={isLocal}
-          className="gvc-stage-video"
+          className={`gvc-stage-video${mirrorClass}`}
           onTrackEnded={onTrackEnded}
         />
       ) : (
@@ -314,6 +316,7 @@ const VideoThumbnail = React.memo(function VideoThumbnail({
   videoTrack,
   displayName,
   isLocal,
+  isScreenShare,
   isActive,
   isSpeaking,
   isVideoOff,
@@ -321,6 +324,7 @@ const VideoThumbnail = React.memo(function VideoThumbnail({
   onTrackEnded
 }) {
   const initials = displayName ? displayName.slice(0, 2).toUpperCase() : '??';
+  const mirrorClass = isLocal && !isScreenShare ? ' gvc-video-mirror' : '';
 
   const handleClick = useCallback(() => {
     onSelect?.(participantId);
@@ -337,7 +341,7 @@ const VideoThumbnail = React.memo(function VideoThumbnail({
         <LiveKitVideo
           track={videoTrack}
           muted={isLocal}
-          className="gvc-thumb-video"
+          className={`gvc-thumb-video${mirrorClass}`}
           onTrackEnded={onTrackEnded}
         />
       ) : (
@@ -364,6 +368,7 @@ const ThumbnailsBar = React.memo(function ThumbnailsBar({ items, activeParticipa
             videoTrack={item.videoTrack}
             displayName={item.displayName}
             isLocal={item.isLocal}
+            isScreenShare={!!item.isScreenShare}
             isActive={item.participantId === activeParticipantId}
             isSpeaking={item.participantId === activeSpeakerId}
             isVideoOff={item.isVideoOff}
@@ -1243,6 +1248,7 @@ function GroupCallModalLiveKit({
       return {
         participantId: localId,
         isLocal: true,
+        isScreenShare: true,
         videoTrack: localScreen.track,
         videoPublication: localScreen.publication,
         isVideoOff: false,
@@ -1256,6 +1262,7 @@ function GroupCallModalLiveKit({
       return {
         participantId: remoteScreen.participantId,
         isLocal: false,
+        isScreenShare: true,
         videoTrack: remoteScreen.screenTrack,
         videoPublication: remoteScreen.screenPublication,
         isVideoOff: false,
@@ -1268,6 +1275,7 @@ function GroupCallModalLiveKit({
       return {
         participantId: localId,
         isLocal: true,
+        isScreenShare: false,
         videoTrack: localVideoTrack || null,
         videoPublication: null,
         isVideoOff,
@@ -1280,6 +1288,7 @@ function GroupCallModalLiveKit({
     return {
       participantId: id,
       isLocal: false,
+      isScreenShare: false,
       videoTrack: remote?.cameraTrack || null,
       videoPublication: remote?.cameraPublication || null,
       isVideoOff: false,
@@ -1298,6 +1307,7 @@ function GroupCallModalLiveKit({
         key: `${localId}:screen`,
         participantId: localId,
         isLocal: true,
+        isScreenShare: true,
         videoTrack: localScreen.track,
         videoPublication: localScreen.publication,
         displayName: `${getDisplayName(localId)} (Экран)`,
@@ -1311,6 +1321,7 @@ function GroupCallModalLiveKit({
       key: `${localId}:cam`,
       participantId: localId,
       isLocal: true,
+      isScreenShare: false,
       videoTrack: !isVideoOff ? (localVideoTrack || null) : null,
       videoPublication: null,
       displayName: getDisplayName(localId),
@@ -1325,6 +1336,7 @@ function GroupCallModalLiveKit({
           key: `${r.participantId}:screen`,
           participantId: r.participantId,
           isLocal: false,
+          isScreenShare: true,
           videoTrack: r.screenTrack,
           videoPublication: r.screenPublication,
           displayName: `${getDisplayName(r.participantId)} (Экран)`,
@@ -1337,6 +1349,7 @@ function GroupCallModalLiveKit({
         key: `${r.participantId}:cam`,
         participantId: r.participantId,
         isLocal: false,
+        isScreenShare: false,
         videoTrack: r.cameraTrack,
         videoPublication: r.cameraPublication,
         displayName: getDisplayName(r.participantId),
@@ -1536,6 +1549,7 @@ function GroupCallModalLiveKit({
             videoTrack={focusTarget.videoTrack}
             displayName={focusTarget.displayName}
             isLocal={focusTarget.isLocal}
+            isScreenShare={!!focusTarget.isScreenShare}
             isVideoOff={focusTarget.isLocal ? focusTarget.isVideoOff : false}
             isSpeaking={focusTarget.isSpeaking}
             onTrackEnded={syncUiFromTracks}
@@ -1691,6 +1705,7 @@ const CSS_STYLES = `
 .gvc-stage-video {
   width: 100%; height: 100%; object-fit: contain; background: black;
 }
+.gvc-video-mirror { transform: scaleX(-1); transform-origin: center; }
 .gvc-stage-placeholder {
   width: 100%; height: 100%; background: #121212; display: flex; align-items: center; justify-content: center;
 }

@@ -1311,7 +1311,10 @@ function GroupCallModal({
                 muted
                 style={{
                   ...styles.mainVideo,
-                  ...(isVideoOff ? styles.videoHidden : {})
+                  ...(isVideoOff ? styles.videoHidden : {}),
+                  // Self-view (локальная камера) — зеркалим ТОЛЬКО в UI.
+                  // Screen share (если включат/вернут) никогда не зеркалим.
+                  ...(!isScreenSharing ? { transform: 'scaleX(-1)', transformOrigin: 'center' } : {})
                 }}
               />
               {isVideoOff && (
@@ -1363,7 +1366,10 @@ function GroupCallModal({
                 muted
                 style={{
                   ...styles.mainVideo,
-                  ...(isVideoOff ? styles.videoHidden : {})
+                  ...(isVideoOff ? styles.videoHidden : {}),
+                  // Self-view (локальная камера) — зеркалим ТОЛЬКО в UI.
+                  // Screen share (если включат/вернут) никогда не зеркалим.
+                  ...(!isScreenSharing ? { transform: 'scaleX(-1)', transformOrigin: 'center' } : {})
                 }}
               />
               {isVideoOff && (
@@ -1400,7 +1406,10 @@ function GroupCallModal({
                     muted
                     style={{
                       ...styles.previewVideo,
-                      ...(isVideoOff ? styles.videoHidden : {})
+                      ...(isVideoOff ? styles.videoHidden : {}),
+                      // Self-view (локальная камера) — зеркалим ТОЛЬКО в UI.
+                      // Screen share (если включат/вернут) никогда не зеркалим.
+                      ...(!isScreenSharing ? { transform: 'scaleX(-1)', transformOrigin: 'center' } : {})
                     }}
                   />
                   {isVideoOff && (

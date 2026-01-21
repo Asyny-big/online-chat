@@ -1083,6 +1083,8 @@ function CallModal({
                 opacity: hasLocalStream ? 1 : 0,
                 // Локальная демонстрация экрана тоже без кропа
                 objectFit: localVideoMode === 'screen' ? 'contain' : 'cover',
+                // Self-view (камера) — зеркалим ТОЛЬКО в UI. Screen share никогда не зеркалим.
+                ...(localVideoMode !== 'screen' ? { transform: 'scaleX(-1)', transformOrigin: 'center' } : {}),
                 // Уменьшаем для мобилок
                 ...(isMobile && localVideoMode !== 'screen' ? {
                     width: '100px', // Меньше на мобилке
