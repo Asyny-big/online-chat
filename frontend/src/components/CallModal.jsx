@@ -144,12 +144,8 @@ function CallModal({
   // P2P swap UX (как Telegram/FaceTime): клик по PiP меняет местами local/remote.
   // Важно: только layout/рендер-стили, без изменения MediaStream/WebRTC.
   const [isLocalFullscreen, setIsLocalFullscreen] = useState(false);
-  const [isPipHovered, setIsPipHovered] = useState(false);
-  const [pipPosition, setPipPosition] = useState(null); // { x, y } top-left in px (mobile only)
-  const pipPositionRef = useRef(pipPosition);
-  useEffect(() => {
-    pipPositionRef.current = pipPosition;
-  }, [pipPosition]);
+
+  const videoContainerRef = useRef(null);
   const pipDragRef = useRef({
     active: false,
     pointerId: null,
@@ -159,7 +155,10 @@ function CallModal({
     originY: 0,
     moved: false,
     startTs: 0,
+    bounds: null, // { w, h, margin, pipW, pipH }
   });
+  const pipPosRef = useRef(null); // { x, y } относительная позиция PiP (в px)
+  const pipElRef = useRef(null); // текущий video-element PiP (local или remote)
   const pipRafRef = useRef({ raf: 0, next: null });
 
   // UI state for floating controls
@@ -219,14 +218,12 @@ function CallModal({
   useEffect(() => {
     if (!swapEnabled) {
       setIsLocalFullscreen(false);
-      setIsPipHovered(false);
     }
   }, [swapEnabled]);
 
   const toggleSwap = useCallback(() => {
     if (!swapEnabled) return;
     setIsLocalFullscreen((v) => !v);
-    setIsPipHovered(false);
   }, [swapEnabled]);
 
   // Явно НЕ поддерживаем screen share в мобильных браузерах.
@@ -373,8 +370,8 @@ function CallModal({
     setLocalVideoMode('camera');
     setRemoteVideoMode('camera');
     setIsLocalFullscreen(false);
-    setIsPipHovered(false);
-    setPipPosition(null);
+    pipPosRef.current = null;
+    pipElRef.current = null;
   }, []);
 
   // Initialize media (CRITICAL: This MUST work)
@@ -1056,37 +1053,75 @@ function CallModal({
   // controls.bottom=40px + контролы~(52px + padding) => держим PiP выше.
   const MOBILE_PIP_BOTTOM_CLEARANCE = 140;
 
-  const clampMobilePipPosition = useCallback((x, y) => {
-    const vw = window.innerWidth || 0;
-    const vh = window.innerHeight || 0;
-    const minX = MOBILE_PIP_MARGIN;
-    const minY = MOBILE_PIP_MARGIN;
+  const DESKTOP_PIP_W = 180;
+  const DESKTOP_PIP_H = 240; // aspectRatio 3/4
+  const DESKTOP_PIP_MARGIN = 24;
 
-    const maxX = Math.max(minX, vw - MOBILE_PIP_W - MOBILE_PIP_MARGIN);
-    const maxY = Math.max(minY, vh - MOBILE_PIP_H - MOBILE_PIP_BOTTOM_CLEARANCE);
-
+  const clampWithin = useCallback((x, y, bounds) => {
+    const { w, h, margin, pipW, pipH } = bounds;
+    const minX = margin;
+    const minY = margin;
+    const maxX = Math.max(minX, w - pipW - margin);
+    const maxY = Math.max(minY, h - pipH - margin);
     return {
       x: Math.min(Math.max(x, minX), maxX),
       y: Math.min(Math.max(y, minY), maxY),
     };
   }, []);
 
-  const getDefaultMobilePipPosition = useCallback(() => {
-    const vw = window.innerWidth || 0;
-    const vh = window.innerHeight || 0;
-    return clampMobilePipPosition(vw - MOBILE_PIP_W - MOBILE_PIP_MARGIN, vh - MOBILE_PIP_H - MOBILE_PIP_BOTTOM_CLEARANCE);
-  }, [clampMobilePipPosition]);
+  const computeBounds = useCallback(() => {
+    if (isMobileVideoLayout) {
+      const w = window.innerWidth || 0;
+      const h = window.innerHeight || 0;
+      return {
+        w,
+        h: Math.max(0, h - MOBILE_PIP_BOTTOM_CLEARANCE),
+        margin: MOBILE_PIP_MARGIN,
+        pipW: MOBILE_PIP_W,
+        pipH: MOBILE_PIP_H,
+      };
+    }
 
-  const schedulePipPosition = useCallback((next) => {
-    pipRafRef.current.next = next;
+    const rect = videoContainerRef.current?.getBoundingClientRect?.();
+    const w = rect?.width || 0;
+    const h = rect?.height || 0;
+    return {
+      w,
+      h,
+      margin: DESKTOP_PIP_MARGIN,
+      pipW: DESKTOP_PIP_W,
+      pipH: DESKTOP_PIP_H,
+    };
+  }, [isMobileVideoLayout]);
+
+  const getDefaultPipPosition = useCallback(() => {
+    const b = computeBounds();
+    // по умолчанию: справа сверху (как было), но на mobile ограничение по нижней панели.
+    const x = Math.max(b.margin, b.w - b.pipW - b.margin);
+    const y = b.margin;
+    return clampWithin(x, y, b);
+  }, [clampWithin, computeBounds]);
+
+  const applyPipVars = useCallback((el, x, y) => {
+    if (!el) return;
+    try {
+      el.style.setProperty('--pip-x', `${Math.round(x)}px`);
+      el.style.setProperty('--pip-y', `${Math.round(y)}px`);
+    } catch (_) {}
+  }, []);
+
+  const schedulePipVars = useCallback((x, y) => {
+    pipRafRef.current.next = { x, y };
     if (pipRafRef.current.raf) return;
     pipRafRef.current.raf = requestAnimationFrame(() => {
       pipRafRef.current.raf = 0;
-      const v = pipRafRef.current.next;
+      const next = pipRafRef.current.next;
       pipRafRef.current.next = null;
-      if (v) setPipPosition(v);
+      if (!next) return;
+      const el = pipElRef.current;
+      applyPipVars(el, next.x, next.y);
     });
-  }, []);
+  }, [applyPipVars]);
 
   // Screen share никогда не участвует в swap:
   // - если удалённый шарит экран -> удалённый всегда main
@@ -1105,62 +1140,32 @@ function CallModal({
     hasLocalStream &&
     hasRemoteStream;
 
-  const pipHoverHandlers = (isThisPip) =>
-    pipClickable && isThisPip
-      ? {
-          onMouseEnter: () => setIsPipHovered(true),
-          onMouseLeave: () => setIsPipHovered(false)
-        }
-      : {
-          onMouseEnter: undefined,
-          onMouseLeave: undefined
-        };
-
-  const getMobilePipHandlers = useCallback((isThisPip) => {
-    if (!isMobileVideoLayout || !isThisPip) {
-      return {};
-    }
+  const getPipHandlers = useCallback((isThisPip) => {
+    if (!isThisPip) return {};
 
     const onPointerDown = (e) => {
-      try {
-        if (e.pointerType === 'mouse' && window.innerWidth >= 768) return;
-      } catch (_) {}
-
       const target = e.currentTarget;
       try {
         target?.setPointerCapture?.(e.pointerId);
       } catch (_) {}
 
-      const existing = pipPositionRef.current;
-      let originX = existing?.x;
-      let originY = existing?.y;
-
-      if (typeof originX !== 'number' || typeof originY !== 'number') {
-        const rect = target?.getBoundingClientRect?.();
-        if (rect) {
-          originX = rect.left;
-          originY = rect.top;
-        } else {
-          const def = getDefaultMobilePipPosition();
-          originX = def.x;
-          originY = def.y;
-        }
-      }
+      const b = computeBounds();
+      const existing = pipPosRef.current || getDefaultPipPosition();
+      const origin = clampWithin(existing.x, existing.y, b);
+      pipPosRef.current = origin;
+      applyPipVars(target, origin.x, origin.y);
 
       pipDragRef.current = {
         active: true,
         pointerId: e.pointerId,
         startX: e.clientX,
         startY: e.clientY,
-        originX,
-        originY,
+        originX: origin.x,
+        originY: origin.y,
         moved: false,
         startTs: performance.now(),
+        bounds: b,
       };
-
-      setIsPipHovered(true); // показываем ⤢ на tap/hold
-      // если позиция ещё не фиксирована — фиксируем сразу
-      schedulePipPosition(clampMobilePipPosition(originX, originY));
 
       try {
         e.preventDefault();
@@ -1173,12 +1178,12 @@ function CallModal({
 
       const dx = e.clientX - st.startX;
       const dy = e.clientY - st.startY;
-      if (!st.moved && (Math.abs(dx) > 7 || Math.abs(dy) > 7)) {
-        st.moved = true;
-      }
+      if (!st.moved && (Math.abs(dx) > 7 || Math.abs(dy) > 7)) st.moved = true;
 
-      const next = clampMobilePipPosition(st.originX + dx, st.originY + dy);
-      schedulePipPosition(next);
+      const b = st.bounds || computeBounds();
+      const next = clampWithin(st.originX + dx, st.originY + dy, b);
+      pipPosRef.current = next;
+      schedulePipVars(next.x, next.y);
 
       try {
         e.preventDefault();
@@ -1198,14 +1203,7 @@ function CallModal({
 
       const dt = performance.now() - (st.startTs || 0);
       const isTap = !st.moved && dt < 280;
-
-      // Tap по PiP -> swap. Drag не должен триггерить swap.
-      if (isTap && pipClickable) {
-        toggleSwap();
-      }
-
-      // Лёгкий hint после tap/drag
-      setTimeout(() => setIsPipHovered(false), 650);
+      if (isTap && pipClickable) toggleSwap();
 
       try {
         e.preventDefault();
@@ -1217,14 +1215,13 @@ function CallModal({
       if (!st.active || st.pointerId !== e.pointerId) return;
       pipDragRef.current.active = false;
       pipDragRef.current.pointerId = null;
-      setTimeout(() => setIsPipHovered(false), 300);
       try {
         e.currentTarget?.releasePointerCapture?.(e.pointerId);
       } catch (_) {}
     };
 
     return { onPointerDown, onPointerMove, onPointerUp, onPointerCancel };
-  }, [clampMobilePipPosition, getDefaultMobilePipPosition, isMobileVideoLayout, pipClickable, schedulePipPosition, toggleSwap]);
+  }, [applyPipVars, clampWithin, computeBounds, getDefaultPipPosition, pipClickable, schedulePipVars, toggleSwap]);
 
   const mobileFullscreenVideoStyle = useMemo(() => {
     if (!isMobileVideoLayout) return null;
@@ -1240,37 +1237,58 @@ function CallModal({
     };
   }, [isMobileVideoLayout]);
 
-  const mobilePipVideoStyle = useMemo(() => {
-    if (!isMobileVideoLayout) return null;
+  const pipVideoStyle = useMemo(() => {
+    const isMobile = isMobileVideoLayout;
+    const size = isMobile
+      ? { w: MOBILE_PIP_W, h: MOBILE_PIP_H, margin: MOBILE_PIP_MARGIN }
+      : { w: DESKTOP_PIP_W, h: DESKTOP_PIP_H, margin: DESKTOP_PIP_MARGIN };
 
-    const pos = pipPosition || getDefaultMobilePipPosition();
     return {
-      position: 'fixed',
-      left: `${Math.round(pos.x)}px`,
-      top: `${Math.round(pos.y)}px`,
-      width: `${MOBILE_PIP_W}px`,
-      height: `${MOBILE_PIP_H}px`,
-      borderRadius: '14px',
+      position: isMobile ? 'fixed' : 'absolute',
+      top: 0,
+      left: 0,
+      width: `${size.w}px`,
+      height: `${size.h}px`,
+      borderRadius: isMobile ? '14px' : '16px',
       zIndex: 40,
-      border: '2px solid rgba(255,255,255,0.10)',
+      border: '2px solid rgba(255, 255, 255, 0.10)',
       boxShadow: '0 10px 28px rgba(0,0,0,0.55)',
       background: '#111',
-      transition: 'all 220ms ease',
-      touchAction: 'none', // важно: drag без скролла страницы
+      // Обновляем позицию только через transform (CSS vars) — без лишних re-render.
+      transform: 'translate3d(var(--pip-x, 0px), var(--pip-y, 0px), 0)',
+      willChange: 'transform',
+      transition: 'transform 220ms ease',
+      touchAction: 'none',
+      userSelect: 'none',
     };
-  }, [getDefaultMobilePipPosition, isMobileVideoLayout, pipPosition]);
+  }, [isMobileVideoLayout]);
 
-  // При повороте экрана/resize удерживаем PiP в пределах viewport.
+  // Держим PiP в пределах viewport/контейнера и переносим координаты при swap (PiP перескакивает на другой video).
   useEffect(() => {
-    if (!isMobileVideoLayout) return undefined;
+    const el = localIsPip ? localVideoRef.current : remoteIsPip ? remoteVideoRef.current : null;
+    pipElRef.current = el;
+    if (!el) return;
+
+    const b = computeBounds();
+    const cur = pipPosRef.current || getDefaultPipPosition();
+    const next = clampWithin(cur.x, cur.y, b);
+    pipPosRef.current = next;
+    applyPipVars(el, next.x, next.y);
+  }, [applyPipVars, clampWithin, computeBounds, getDefaultPipPosition, localIsPip, remoteIsPip]);
+
+  useEffect(() => {
     const handleResize = () => {
-      const cur = pipPositionRef.current;
-      if (!cur) return;
-      setPipPosition(clampMobilePipPosition(cur.x, cur.y));
+      const el = pipElRef.current;
+      const cur = pipPosRef.current;
+      if (!el || !cur) return;
+      const b = computeBounds();
+      const next = clampWithin(cur.x, cur.y, b);
+      pipPosRef.current = next;
+      applyPipVars(el, next.x, next.y);
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, [clampMobilePipPosition, isMobileVideoLayout]);
+  }, [applyPipVars, clampWithin, computeBounds]);
 
   // Если это web-desktop, мы хотим "модальное" окно, а не full-screen
   // Если мобилка - full screen
@@ -1302,28 +1320,25 @@ function CallModal({
             ...styles.videoContainer,
             background: isMobile ? '#000' : '#0f172a', // Чуть светлее фон на десктопе для контейнера
             borderRadius: isMobile ? 0 : '24px', 
-        }}>
+        }} ref={videoContainerRef}>
           {/* Remote video (full screen) */}
           {callType === 'video' ? (
             <video
               ref={remoteVideoRef}
               autoPlay
               playsInline
-              onClick={!isMobileVideoLayout && pipClickable && remoteIsPip ? toggleSwap : undefined}
-              {...pipHoverHandlers(remoteIsPip)}
-              {...getMobilePipHandlers(remoteIsPip)}
+              {...getPipHandlers(remoteIsPip)}
               style={{
-                ...(isMobileVideoLayout
-                  ? (remoteIsPip ? mobilePipVideoStyle : mobileFullscreenVideoStyle)
-                  : (remoteIsPip ? styles.localVideo : styles.remoteVideo)),
+                ...(isMobileVideoLayout ? (remoteIsPip ? pipVideoStyle : mobileFullscreenVideoStyle) : (remoteIsPip ? pipVideoStyle : styles.remoteVideo)),
                 display: hasRemoteStream ? 'block' : 'none',
                 // Если собеседник шлёт screen — показываем без кропа
                 objectFit: remoteVideoMode === 'screen'
                   ? 'contain'
                   : (isMobileVideoLayout ? (remoteIsPip ? 'cover' : 'cover') : (remoteIsPip ? 'cover' : 'contain')),
-                borderRadius: isMobile ? 0 : '20px', 
+                borderRadius: isMobileVideoLayout ? (remoteIsPip ? '14px' : 0) : '20px',
                 transition: 'all 200ms ease',
-                cursor: pipClickable && remoteIsPip ? 'pointer' : 'default'
+                cursor: pipClickable && remoteIsPip ? 'pointer' : 'default',
+                ...(remoteIsPip ? { pointerEvents: 'auto' } : {})
               }}
             />
           ) : null}
@@ -1351,52 +1366,26 @@ function CallModal({
               autoPlay
               playsInline
               muted
-              onClick={!isMobileVideoLayout && pipClickable && localIsPip ? toggleSwap : undefined}
-              {...pipHoverHandlers(localIsPip)}
-              {...getMobilePipHandlers(localIsPip)}
+              {...getPipHandlers(localIsPip)}
               style={{
-                ...(isMobileVideoLayout
-                  ? (localIsPip ? mobilePipVideoStyle : mobileFullscreenVideoStyle)
-                  : (localIsPip ? styles.localVideo : styles.remoteVideo)),
+                ...(isMobileVideoLayout ? (localIsPip ? pipVideoStyle : mobileFullscreenVideoStyle) : (localIsPip ? pipVideoStyle : styles.remoteVideo)),
                 opacity: hasLocalStream ? 1 : 0,
                 // Локальная демонстрация экрана тоже без кропа
                 objectFit: localVideoMode === 'screen'
                   ? 'contain'
                   : (isMobileVideoLayout ? (localIsPip ? 'cover' : 'cover') : (localIsPip ? 'cover' : 'contain')),
                 // Self-view (камера) — зеркалим ТОЛЬКО в UI. Screen share никогда не зеркалим.
-                ...(localVideoMode !== 'screen' ? { transform: 'scaleX(-1)', transformOrigin: 'center' } : {}),
+                // Важно: для PiP комбинируем translate(var(--pip-x/y)) и scaleX(-1).
+                ...(localVideoMode !== 'screen'
+                  ? (localIsPip
+                      ? { transform: 'translate3d(var(--pip-x, 0px), var(--pip-y, 0px), 0) scaleX(-1)', transformOrigin: 'center' }
+                      : { transform: 'scaleX(-1)', transformOrigin: 'center' })
+                  : {}),
                 transition: 'all 200ms ease',
                 cursor: pipClickable && localIsPip ? 'pointer' : 'default',
-                ...(isMobileVideoLayout && localIsPip ? { cursor: pipClickable ? 'pointer' : 'grab' } : {})
+                ...(localIsPip ? { pointerEvents: 'auto' } : {})
               }}
             />
-          )}
-
-          {/* Hover hint for swap (только когда PiP кликабелен) */}
-          {pipClickable && isPipHovered && (
-            <div
-              style={{
-                position: isMobileVideoLayout ? 'fixed' : 'absolute',
-                top: isMobileVideoLayout ? `${Math.round((pipPosition || getDefaultMobilePipPosition()).y + 10)}px` : (isMobile ? '24px' : '32px'),
-                left: isMobileVideoLayout ? `${Math.round((pipPosition || getDefaultMobilePipPosition()).x + MOBILE_PIP_W - 36)}px` : undefined,
-                right: isMobileVideoLayout ? undefined : (isMobile ? '24px' : '32px'),
-                zIndex: 80,
-                width: '28px',
-                height: '28px',
-                borderRadius: '8px',
-                background: 'rgba(0,0,0,0.55)',
-                color: '#fff',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '16px',
-                pointerEvents: 'none',
-                userSelect: 'none'
-              }}
-              title="Поменять местами"
-            >
-              ⤢
-            </div>
           )}
         </div>
         
