@@ -12,7 +12,7 @@ router.get('/contacts', async (req, res) => {
     // Находим все приватные чаты пользователя
     const chats = await Chat.find({
       'participants.user': req.userId,
-      isGroup: false
+      type: 'private'
     }).populate('participants.user', 'name phone avatarUrl status');
 
     // Извлекаем уникальных пользователей (не себя)
