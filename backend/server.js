@@ -17,6 +17,7 @@ const messagesRoutes = require('./routes/messages');
 const usersRoutes = require('./routes/users');
 const webrtcRoutes = require('./routes/webrtc');
 const livekitRoutes = require('./routes/livekit');
+const meRoutes = require('./routes/me');
 
 // Socket.IO
 const setupSocket = require('./socket');
@@ -127,6 +128,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/chats', chatsRoutes);
 app.use('/api/messages', messagesRoutes);
 app.use('/api/users', usersRoutes);
+app.use('/api/me', meRoutes);
 app.use('/api/webrtc', webrtcRoutes);
 app.use('/api/livekit', livekitRoutes);
 

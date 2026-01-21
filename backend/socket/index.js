@@ -90,6 +90,15 @@ module.exports = function(io) {
         return next(new Error('USER_NOT_FOUND'));
       }
 
+      // logout-all: токен должен быть выпущен после tokensValidAfter
+      try {
+        const iatMs = typeof decoded.iat === 'number' ? decoded.iat * 1000 : null;
+        const validAfter = user.tokensValidAfter ? new Date(user.tokensValidAfter).getTime() : 0;
+        if (iatMs !== null && iatMs < validAfter) {
+          return next(new Error('TOKEN_REVOKED'));
+        }
+      } catch (_) {}
+
       socket.userId = user._id.toString();
       socket.user = user;
       next();

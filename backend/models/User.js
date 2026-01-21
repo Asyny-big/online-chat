@@ -60,6 +60,13 @@ const userSchema = new mongoose.Schema({
   fcmToken: {
     type: String,
     default: null
+  },
+  // Инвалидация JWT "выйти со всех устройств".
+  // Все токены с iat < tokensValidAfter считаем недействительными.
+  tokensValidAfter: {
+    type: Date,
+    default: new Date(0),
+    index: true
   }
 }, {
   timestamps: true

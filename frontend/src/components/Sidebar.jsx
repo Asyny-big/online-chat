@@ -2,9 +2,11 @@ import React, { useState } from 'react';
 import UserSearch from './UserSearch';
 import ChatList from './ChatList';
 import CreateGroupModal from './CreateGroupModal';
+import ProfileDrawer from './ProfileDrawer';
 
 function Sidebar({ token, chats, selectedChat, onSelectChat, onCreateChat, onAddChat, onLogout, incomingCallChatId }) {
   const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
   return (
     <div style={styles.sidebar}>
       {/* Заголовок и кнопки */}
@@ -21,9 +23,6 @@ function Sidebar({ token, chats, selectedChat, onSelectChat, onCreateChat, onAdd
           >
             👥
           </button>
-          <button onClick={onLogout} style={styles.logoutBtn} title="Выйти">
-            ⎋
-          </button>
         </div>
       </div>
 
@@ -38,6 +37,14 @@ function Sidebar({ token, chats, selectedChat, onSelectChat, onCreateChat, onAdd
         incomingCallChatId={incomingCallChatId}
       />
 
+      {/* Внизу списка чатов */}
+      <div style={styles.bottomBar}>
+        <button style={styles.profileBtn} onClick={() => setShowProfile(true)}>
+          <span style={styles.profileIcon}>👤</span>
+          <span style={styles.profileText}>Профиль</span>
+        </button>
+      </div>
+
       {/* Модал создания группового чата */}
       {showCreateGroupModal && (
         <CreateGroupModal
@@ -48,6 +55,14 @@ function Sidebar({ token, chats, selectedChat, onSelectChat, onCreateChat, onAdd
             onSelectChat?.(groupChat);
             setShowCreateGroupModal(false);
           }}
+        />
+      )}
+
+      {showProfile && (
+        <ProfileDrawer
+          token={token}
+          onClose={() => setShowProfile(false)}
+          onLogout={onLogout}
         />
       )}
     </div>
@@ -88,20 +103,6 @@ const styles = {
   logo: {
     fontSize: '24px',
   },
-  logoutBtn: {
-    width: '36px',
-    height: '36px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: 'transparent',
-    color: '#ef4444',
-    border: '1px solid #ef4444',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    fontSize: '18px',
-    transition: 'all 0.2s',
-  },
   groupChatBtn: {
     width: '36px',
     height: '36px',
@@ -115,6 +116,40 @@ const styles = {
     cursor: 'pointer',
     fontSize: '16px',
     transition: 'all 0.2s',
+  },
+  bottomBar: {
+    marginTop: 'auto',
+    padding: '12px',
+    borderTop: '1px solid #334155',
+    background: 'rgba(15,23,42,0.35)',
+  },
+  profileBtn: {
+    width: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    padding: '12px 14px',
+    borderRadius: '14px',
+    border: '1px solid rgba(148,163,184,0.18)',
+    background: 'rgba(2,6,23,0.35)',
+    color: '#fff',
+    cursor: 'pointer',
+    transition: 'transform 0.15s ease, background 0.15s ease',
+  },
+  profileIcon: {
+    width: '34px',
+    height: '34px',
+    borderRadius: '50%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+    flexShrink: 0,
+  },
+  profileText: {
+    fontSize: '14px',
+    fontWeight: '700',
+    letterSpacing: 0.1,
   },
 };
 
