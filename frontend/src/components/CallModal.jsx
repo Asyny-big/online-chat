@@ -141,6 +141,11 @@ function CallModal({
   const [hasRemoteStream, setHasRemoteStream] = useState(false);
   const [iceServers, setIceServers] = useState(null);
 
+  // P2P swap UX (как Telegram/FaceTime): клик по PiP меняет местами local/remote.
+  // Важно: только layout/рендер-стили, без изменения MediaStream/WebRTC.
+  const [isLocalFullscreen, setIsLocalFullscreen] = useState(false);
+  const [isPipHovered, setIsPipHovered] = useState(false);
+
   // UI state for floating controls
   const [showControls, setShowControls] = useState(true);
   const controlsTimeoutRef = useRef(null);
@@ -190,6 +195,23 @@ function CallModal({
   useEffect(() => {
     localVideoModeRef.current = localVideoMode;
   }, [localVideoMode]);
+
+  // Swap доступен только когда оба потока — камера (screen share не участвует).
+  const swapEnabled = callType === 'video' && localVideoMode !== 'screen' && remoteVideoMode !== 'screen';
+
+  // Если включили screen share (локально/удалённо) — сбрасываем swap на дефолт.
+  useEffect(() => {
+    if (!swapEnabled) {
+      setIsLocalFullscreen(false);
+      setIsPipHovered(false);
+    }
+  }, [swapEnabled]);
+
+  const toggleSwap = useCallback(() => {
+    if (!swapEnabled) return;
+    setIsLocalFullscreen((v) => !v);
+    setIsPipHovered(false);
+  }, [swapEnabled]);
 
   // Явно НЕ поддерживаем screen share в мобильных браузерах.
   // (Android WebView/Chrome mobile и iOS Safari имеют другие ограничения; под них будет отдельная логика в будущем.)
@@ -1008,6 +1030,34 @@ function CallModal({
 
   const isMobile = isMobileBrowser() || window.innerWidth < 768;
 
+  // Screen share никогда не участвует в swap:
+  // - если удалённый шарит экран -> удалённый всегда main
+  // - если локальный шарит экран -> локальный всегда main
+  const localShouldBeMain =
+    callType === 'video' &&
+    remoteVideoMode !== 'screen' &&
+    (localVideoMode === 'screen' || (swapEnabled && isLocalFullscreen));
+  const remoteIsPip = callType === 'video' && localShouldBeMain;
+  const localIsPip = callType === 'video' && !localShouldBeMain;
+
+  const pipClickable =
+    callType === 'video' &&
+    callState === 'active' &&
+    swapEnabled &&
+    hasLocalStream &&
+    hasRemoteStream;
+
+  const pipHoverHandlers = (isThisPip) =>
+    pipClickable && isThisPip
+      ? {
+          onMouseEnter: () => setIsPipHovered(true),
+          onMouseLeave: () => setIsPipHovered(false)
+        }
+      : {
+          onMouseEnter: undefined,
+          onMouseLeave: undefined
+        };
+
   // Если это web-desktop, мы хотим "модальное" окно, а не full-screen
   // Если мобилка - full screen
   
@@ -1045,12 +1095,16 @@ function CallModal({
               ref={remoteVideoRef}
               autoPlay
               playsInline
+              onClick={pipClickable && remoteIsPip ? toggleSwap : undefined}
+              {...pipHoverHandlers(remoteIsPip)}
               style={{
-                ...(localVideoMode === 'screen' ? styles.localVideo : styles.remoteVideo),
+                ...(remoteIsPip ? styles.localVideo : styles.remoteVideo),
                 display: hasRemoteStream ? 'block' : 'none',
                 // Если собеседник шлёт screen — показываем без кропа
-                objectFit: remoteVideoMode === 'screen' ? 'contain' : (localVideoMode === 'screen' ? 'cover' : 'contain'),
+                objectFit: remoteVideoMode === 'screen' ? 'contain' : (remoteIsPip ? 'cover' : 'contain'),
                 borderRadius: isMobile ? 0 : '20px', 
+                transition: 'all 200ms ease',
+                cursor: pipClickable && remoteIsPip ? 'pointer' : 'default'
               }}
             />
           ) : null}
@@ -1078,13 +1132,17 @@ function CallModal({
               autoPlay
               playsInline
               muted
+              onClick={pipClickable && localIsPip ? toggleSwap : undefined}
+              {...pipHoverHandlers(localIsPip)}
               style={{
-                ...(localVideoMode === 'screen' ? styles.remoteVideo : styles.localVideo),
+                ...(localIsPip ? styles.localVideo : styles.remoteVideo),
                 opacity: hasLocalStream ? 1 : 0,
                 // Локальная демонстрация экрана тоже без кропа
-                objectFit: localVideoMode === 'screen' ? 'contain' : 'cover',
+                objectFit: localVideoMode === 'screen' ? 'contain' : (localIsPip ? 'cover' : 'contain'),
                 // Self-view (камера) — зеркалим ТОЛЬКО в UI. Screen share никогда не зеркалим.
                 ...(localVideoMode !== 'screen' ? { transform: 'scaleX(-1)', transformOrigin: 'center' } : {}),
+                transition: 'all 200ms ease',
+                cursor: pipClickable && localIsPip ? 'pointer' : 'default',
                 // Уменьшаем для мобилок
                 ...(isMobile && localVideoMode !== 'screen' ? {
                     width: '100px', // Меньше на мобилке
@@ -1094,6 +1152,32 @@ function CallModal({
                 } : {})
               }}
             />
+          )}
+
+          {/* Hover hint for swap (только когда PiP кликабелен) */}
+          {pipClickable && isPipHovered && (
+            <div
+              style={{
+                position: 'absolute',
+                top: isMobile ? '24px' : '32px',
+                right: isMobile ? '24px' : '32px',
+                zIndex: 30,
+                width: '28px',
+                height: '28px',
+                borderRadius: '8px',
+                background: 'rgba(0,0,0,0.55)',
+                color: '#fff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '16px',
+                pointerEvents: 'none',
+                userSelect: 'none'
+              }}
+              title="Поменять местами"
+            >
+              ⤢
+            </div>
           )}
         </div>
         
