@@ -20,7 +20,6 @@ const livekitRoutes = require('./routes/livekit');
 const meRoutes = require('./routes/me');
 const economyRoutes = require('./routes/economy');
 const adminEconomyRoutes = require('./routes/adminEconomy');
-const missionsRoutes = require('./routes/missions');
 
 // Socket.IO
 const setupSocket = require('./socket');
@@ -136,7 +135,6 @@ app.use('/api/webrtc', webrtcRoutes);
 app.use('/api/livekit', livekitRoutes);
 app.use('/api/economy', economyRoutes);
 app.use('/api/admin/economy', adminEconomyRoutes);
-app.use('/api/missions', missionsRoutes);
 
 // Загрузка файлов
 const authMiddleware = require('./middleware/auth');

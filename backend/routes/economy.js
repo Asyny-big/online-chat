@@ -1,8 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const authMiddleware = require('../middleware/auth');
-const { getWallet, listWalletTransactions } = require('../economy/walletService');
-const { longToString } = require('../economy/long');
+const { getBalanceHrumString, listWalletTransactions } = require('../economy/walletService');
 const { claimDailyLogin } = require('../economy/rewardsService');
 const { listShopItems, buyShopItem } = require('../economy/shopService');
 
@@ -10,14 +9,8 @@ router.use(authMiddleware);
 
 router.get('/wallet', async (req, res) => {
   try {
-    const wallet = await getWallet({ userId: req.userId });
-    const balanceHrum = wallet ? longToString(wallet.balanceHrum) : '0';
-    res.json({
-      balanceHrum,
-      lastDailyAt: wallet?.lastDailyAt || null,
-      dailyStreak: typeof wallet?.dailyStreak === 'number' ? wallet.dailyStreak : 0,
-      nextDailyAt: wallet?.nextDailyAt || null
-    });
+    const balanceHrum = await getBalanceHrumString({ userId: req.userId });
+    res.json({ balanceHrum });
   } catch (_err) {
     res.status(500).json({ error: 'wallet_failed' });
   }
@@ -42,10 +35,7 @@ router.post('/earn/daily-login', async (req, res) => {
     const result = await claimDailyLogin({ userId: req.userId, ip, userAgent, deviceId });
     res.json(result);
   } catch (err) {
-    if (err?.code === 'DAILY_ALREADY_CLAIMED') {
-      console.warn('[Economy] daily-login repeat attempt:', { userId: req.userId, nextDailyAt: err?.nextDailyAt });
-      return res.status(400).json({ error: 'DAILY_ALREADY_CLAIMED', nextDailyAt: err?.nextDailyAt || null });
-    }
+    if (err?.code === 'COOLDOWN_ACTIVE') return res.status(429).json({ error: 'cooldown_active' });
     console.error('[Economy] daily-login failed:', {
       userId: req.userId,
       code: err?.code,
