@@ -201,11 +201,10 @@ async function incrementDailyCounter({ session, userId, key, dayKey, limit, ttlD
       scopeId: new ObjectId(userId),
       key,
       bucket: dayKey,
-      count: 0,
       createdAt: now,
-      expiresAt
     },
-    $set: { updatedAt: now },
+    // Keep TTL fresh even if the doc already exists (best-effort).
+    $set: { updatedAt: now, expiresAt },
     $inc: { count: 1 }
   };
   const res = await economyLimits.findOneAndUpdate(filter, update, {

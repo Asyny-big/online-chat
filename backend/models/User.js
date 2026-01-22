@@ -109,7 +109,6 @@ userSchema.methods.checkPassword = async function(password) {
 };
 
 // Индексы
-userSchema.index({ phoneNormalized: 1 });
 userSchema.index({ status: 1 });
 
 module.exports = mongoose.model('User', userSchema);
