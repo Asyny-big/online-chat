@@ -6,8 +6,11 @@ import Sidebar from '../components/Sidebar';
 import ChatWindow from '../components/ChatWindow';
 import CallModal from '../components/CallModal';
 import GroupCallModalLiveKit from '../components/GroupCallModalLiveKit';
+import { HrumToastProvider, useHrumToast } from '../components/HrumToast';
+import { claimDailyLogin, getTransactions } from '../economy/api';
 
-function ChatPage({ token, onLogout }) {
+function ChatPageInner({ token, onLogout }) {
+  const { showEarn } = useHrumToast();
   const [chats, setChats] = useState([]);
   const [selectedChat, setSelectedChat] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -46,6 +49,40 @@ function ChatPage({ token, onLogout }) {
   useEffect(() => { currentUserIdRef.current = currentUserId; }, [currentUserId]);
   useEffect(() => { groupCallStateRef.current = groupCallState; }, [groupCallState]);
   useEffect(() => { groupCallDataRef.current = groupCallData; }, [groupCallData]);
+
+  const economyProbe = useCallback(
+    async (expectedReasonCode) => {
+      if (!token) return;
+      try {
+        const data = await getTransactions({ token, limit: 1 });
+        const t = data?.items?.[0];
+        if (!t || t.reasonCode !== expectedReasonCode) return;
+        const raw = String(t.deltaHrum ?? '').trim();
+        if (!raw) return;
+        const abs = raw.startsWith('-') ? raw.slice(1) : raw.startsWith('+') ? raw.slice(1) : raw;
+        showEarn({ amountHrum: abs, txId: t.id });
+      } catch (_) {}
+    },
+    [token, showEarn]
+  );
+
+  const economyProbeCallStart = useCallback(() => {
+    setTimeout(() => economyProbe('earn:call_start'), 800);
+    setTimeout(() => economyProbe('earn:call_start'), 2200);
+  }, [economyProbe]);
+
+  // Daily login: best-effort on entering chat (backend decides claimed vs cooldown).
+  const didDailyRef = useRef(false);
+  useEffect(() => {
+    if (!token || didDailyRef.current) return;
+    didDailyRef.current = true;
+    (async () => {
+      try {
+        const res = await claimDailyLogin({ token });
+        if (res?.claimed && res?.amountHrum) showEarn({ amountHrum: res.amountHrum });
+      } catch (_) {}
+    })();
+  }, [token, showEarn]);
 
   // Получение текущего пользователя
   useEffect(() => {
@@ -438,9 +475,10 @@ function ChatPage({ token, onLogout }) {
         resetCallState();
       } else {
         setCallId(response.callId);
+        economyProbeCallStart();
       }
     });
-  }, [selectedChat, currentUserId]);
+  }, [selectedChat, currentUserId, economyProbeCallStart]);
 
   const resetCallState = () => {
     setCallState('idle');
@@ -505,9 +543,10 @@ function ChatPage({ token, onLogout }) {
           type,
           isInitiator: true
         });
+        economyProbeCallStart();
       }
     });
-  }, [selectedChat]);
+  }, [selectedChat, economyProbeCallStart]);
 
   const handleJoinGroupCall = useCallback((callIdFromUi, typeFromUi) => {
     // Присоединение может происходить из баннера входящего звонка.
@@ -720,4 +759,12 @@ if (typeof window !== 'undefined') {
   document.head.appendChild(styleSheet);
 }
 
-export default ChatPage;
+function ChatPageWithToasts(props) {
+  return (
+    <HrumToastProvider>
+      <ChatPageInner {...props} />
+    </HrumToastProvider>
+  );
+}
+
+export default ChatPageWithToasts;

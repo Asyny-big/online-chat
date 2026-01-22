@@ -1,8 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
 import { API_URL } from '../config';
+import { getTransactions } from '../economy/api';
+import { useHrumToast } from './HrumToast';
 
 function MessageInput({ chatId, socket, token, onTyping }) {
+  const { showEarn } = useHrumToast();
   const [input, setInput] = useState('');
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
@@ -14,6 +17,7 @@ function MessageInput({ chatId, socket, token, onTyping }) {
   const fileInputRef = useRef(null);
   const timerRef = useRef(null);
   const typingTimeoutRef = useRef(null);
+  const lastEconomyProbeAtRef = useRef(0);
 
   // Очистка при размонтировании
   useEffect(() => {
@@ -41,10 +45,32 @@ function MessageInput({ chatId, socket, token, onTyping }) {
     e?.preventDefault();
     if (!input.trim() || !chatId || !socket) return;
 
+    const text = input.trim();
+
     socket.emit('message:send', {
       chatId,
-      text: input.trim(),
+      text,
       type: 'text'
+    }, (response) => {
+      if (!response?.success) return;
+      if (!token) return;
+      if (String(text).trim().length < 20) return;
+
+      const now = Date.now();
+      if (now - lastEconomyProbeAtRef.current < 1200) return;
+      lastEconomyProbeAtRef.current = now;
+
+      setTimeout(async () => {
+        try {
+          const data = await getTransactions({ token, limit: 1 });
+          const t = data?.items?.[0];
+          if (!t || t.reasonCode !== 'earn:message') return;
+          const raw = String(t.deltaHrum ?? '').trim();
+          const abs = raw.startsWith('-') ? raw.slice(1) : raw.startsWith('+') ? raw.slice(1) : raw;
+          if (!abs) return;
+          showEarn({ amountHrum: abs, txId: t.id });
+        } catch (_) {}
+      }, 650);
     });
 
     setInput('');

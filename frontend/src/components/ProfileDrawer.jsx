@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { API_URL } from '../config';
 import { CLIENT_VERSION } from '../version';
+import HrumPanel from './HrumPanel';
 
 function formatDate(value) {
   try {
@@ -241,6 +242,8 @@ function ProfileDrawer({ token, onClose, onLogout }) {
                 </div>
               </div>
             </div>
+
+            <HrumPanel token={token} />
 
             {/* Account */}
             <div style={styles.card}>
@@ -570,4 +573,3 @@ const styles = {
 };
 
 export default ProfileDrawer;
-
