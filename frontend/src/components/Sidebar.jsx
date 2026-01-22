@@ -3,10 +3,13 @@ import UserSearch from './UserSearch';
 import ChatList from './ChatList';
 import CreateGroupModal from './CreateGroupModal';
 import ProfileDrawer from './ProfileDrawer';
+import ProfilePage from '../pages/ProfilePage';
+import { useMediaQuery } from '../hooks/useMediaQuery';
 
 function Sidebar({ token, chats, selectedChat, onSelectChat, onCreateChat, onAddChat, onLogout, incomingCallChatId }) {
   const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const isDesktop = useMediaQuery('(min-width: 769px)', { defaultValue: true });
   return (
     <div style={styles.sidebar}>
       {/* Заголовок и кнопки */}
@@ -59,11 +62,11 @@ function Sidebar({ token, chats, selectedChat, onSelectChat, onCreateChat, onAdd
       )}
 
       {showProfile && (
-        <ProfileDrawer
-          token={token}
-          onClose={() => setShowProfile(false)}
-          onLogout={onLogout}
-        />
+        isDesktop ? (
+          <ProfilePage token={token} onClose={() => setShowProfile(false)} onLogout={onLogout} />
+        ) : (
+          <ProfileDrawer token={token} onClose={() => setShowProfile(false)} onLogout={onLogout} />
+        )
       )}
     </div>
   );

@@ -51,6 +51,14 @@ export function buyShopItem({ token, sku, signal }) {
   return economyRequest({ token, path: '/economy/shop/buy', method: 'POST', body: { sku }, signal });
 }
 
+export function getTasks({ token, signal }) {
+  return economyRequest({ token, path: '/economy/tasks', signal });
+}
+
+export function claimTask({ token, taskId, signal }) {
+  return economyRequest({ token, path: '/economy/tasks/claim', method: 'POST', body: { taskId }, signal });
+}
+
 export function claimDailyLogin({ token, deviceId, signal }) {
   return economyRequest({
     token,
@@ -60,4 +68,3 @@ export function claimDailyLogin({ token, deviceId, signal }) {
     signal
   });
 }
-

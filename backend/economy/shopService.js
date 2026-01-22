@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 const { ObjectId } = require('mongodb');
-const { toLong, longNeg, longToString } = require('./long');
+const { toLong, longNeg, longToString, longGte } = require('./long');
 const { withMongoTransaction } = require('./tx');
 const { ensureWallet, applyWalletDeltaInSession } = require('./walletService');
 
@@ -24,6 +24,49 @@ async function listShopItems() {
   }));
 }
 
+async function listOwnedSkus({ userId }) {
+  const db = getDb();
+  const userItems = db.collection('user_items');
+  const docs = await userItems
+    .find({ userId: new ObjectId(userId) }, { projection: { sku: 1 } })
+    .sort({ acquiredAt: -1, _id: -1 })
+    .toArray();
+  return docs.map((d) => String(d?.sku || '')).filter(Boolean);
+}
+
+async function listShopItemsForUser({ userId }) {
+  const db = getDb();
+  const shopItems = db.collection('shop_items');
+
+  // Ensure wallet exists, so "canPurchase" is meaningful for brand-new users.
+  const wallet = await ensureWallet({ userId });
+  const balance = toLong(wallet?.balanceHrum || 0);
+
+  const ownedSkus = new Set(await listOwnedSkus({ userId }));
+  const items = await shopItems.find({ enabled: true }).sort({ sort: 1, sku: 1 }).toArray();
+
+  return {
+    balanceHrum: longToString(balance),
+    ownedSkus: Array.from(ownedSkus),
+    items: items.map((i) => {
+      const sku = String(i.sku);
+      const owned = ownedSkus.has(sku);
+      const price = toLong(i.priceHrum);
+      const canPurchase = !owned && longGte(balance, price);
+      return {
+        sku,
+        type: i.type,
+        title: i.title,
+        description: i.description,
+        priceHrum: longToString(price),
+        owned,
+        canPurchase,
+        meta: i.meta || {}
+      };
+    })
+  };
+}
+
 async function buyShopItem({ userId, sku }) {
   if (!sku || typeof sku !== 'string') throw new Error('sku is required');
 
@@ -39,10 +82,18 @@ async function buyShopItem({ userId, sku }) {
       throw err;
     }
 
-    await ensureWallet({ userId, session });
+    const wallet = await ensureWallet({ userId, session });
 
     const existing = await userItems.findOne({ userId: new ObjectId(userId), itemId: item._id }, { session });
-    if (existing) return { ok: true, purchased: false, reason: 'already_owned' };
+    if (existing) {
+      return {
+        ok: true,
+        purchased: false,
+        reason: 'already_owned',
+        sku,
+        balanceHrum: longToString(wallet?.balanceHrum || 0)
+      };
+    }
 
     const amount = toLong(item.priceHrum);
 
@@ -76,4 +127,4 @@ async function buyShopItem({ userId, sku }) {
   });
 }
 
-module.exports = { listShopItems, buyShopItem };
+module.exports = { listShopItems, listOwnedSkus, listShopItemsForUser, buyShopItem };

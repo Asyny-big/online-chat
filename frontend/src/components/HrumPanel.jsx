@@ -103,6 +103,9 @@ export default function HrumPanel({ token }) {
       const data = await getShopItems({ token });
       if (!mountedRef.current) return;
       setShopItemsState(Array.isArray(data?.items) ? data.items : []);
+      if (Array.isArray(data?.ownedSkus)) {
+        setOwnedSkus(new Set(data.ownedSkus.map((s) => String(s || '')).filter(Boolean)));
+      }
     } catch (e) {
       if (!mountedRef.current) return;
       setShopError(e?.message || 'shop_failed');
