@@ -1,6 +1,8 @@
 async function ensureEconomyIndexes(db) {
   const wallets = db.collection('wallets');
   const walletTransactions = db.collection('wallet_transactions');
+  const missionProgress = db.collection('mission_progress');
+  const missionEventDedupe = db.collection('mission_event_dedupe');
   const rewards = db.collection('rewards');
   const shopItems = db.collection('shop_items');
   const userItems = db.collection('user_items');
@@ -41,7 +43,15 @@ async function ensureEconomyIndexes(db) {
     { unique: true, name: 'uniq_limits_scope_key_bucket' }
   );
   await economyLimits.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0, name: 'ttl_limits_expiresAt' });
+
+  await missionProgress.createIndex({ userId: 1, missionId: 1, scopeKey: 1 }, { unique: true, name: 'uniq_mission_progress' });
+  await missionProgress.createIndex({ userId: 1, updatedAt: -1 }, { name: 'mission_progress_user_updatedAt' });
+
+  await missionEventDedupe.createIndex(
+    { userId: 1, eventKey: 1, eventId: 1 },
+    { unique: true, name: 'uniq_mission_event_dedupe' }
+  );
+  await missionEventDedupe.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0, name: 'ttl_mission_event_dedupe' });
 }
 
 module.exports = { ensureEconomyIndexes };
-

@@ -40,7 +40,15 @@ async function ensureWallet(input, maybeSession) {
   const now = new Date();
   const filter = { userId: oid };
   const update = {
-    $setOnInsert: { userId: oid, balanceHrum: toLong(0), status: 'active', createdAt: now },
+    $setOnInsert: {
+      userId: oid,
+      balanceHrum: toLong(0),
+      status: 'active',
+      createdAt: now,
+      lastDailyAt: null,
+      dailyStreak: 0,
+      nextDailyAt: new Date(0)
+    },
     $set: { updatedAt: now }
   };
   const opts = { upsert: true, returnDocument: 'after', returnOriginal: false, ...(session ? { session } : {}) };

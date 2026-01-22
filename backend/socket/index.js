@@ -5,6 +5,7 @@ const Message = require('../models/Message');
 const Call = require('../models/Call');
 const config = require('../config.local');
 const { maybeRewardMessage, maybeRewardCallStart } = require('../economy/rewardsService');
+const { recordEvent: recordMissionEvent } = require('../economy/missionsService');
 
 const userSockets = new Map();
 const activeCalls = new Map();
@@ -189,6 +190,11 @@ module.exports = function(io) {
             chatId,
             text: text || ''
           });
+        } catch (_) {}
+
+        // Missions: message_sent (best-effort, does not block chat flow).
+        try {
+          void recordMissionEvent({ userId, eventKey: 'message_sent', amount: 1 });
         } catch (_) {}
       } catch (error) {
         console.error('message:send error:', error);
@@ -513,6 +519,8 @@ module.exports = function(io) {
         });
 
         callback?.({ success: true });
+
+
       } catch (err) {
         console.error('group-call:sfu-stream error:', err);
         callback?.({ error: 'Ошибка' });
@@ -535,6 +543,11 @@ module.exports = function(io) {
           call.endedAt = new Date();
           call.endReason = 'completed';
           activeGroupCalls.delete(chat._id.toString());
+
+          // Missions: call_completed (group call; only when the call actually ended).
+          try {
+            void recordMissionEvent({ userId, eventKey: 'call_completed', amount: 1, eventId: call._id.toString() });
+          } catch (_) {}
         }
         await call.save();
 
@@ -679,6 +692,11 @@ module.exports = function(io) {
           call.endedAt = new Date();
           call.endReason = 'completed';
           activeCalls.delete(call.chat.toString());
+
+          // Missions: call_completed (private call; only when the call actually ended).
+          try {
+            void recordMissionEvent({ userId, eventKey: 'call_completed', amount: 1, eventId: call._id.toString() });
+          } catch (_) {}
         }
 
         await call.save();
