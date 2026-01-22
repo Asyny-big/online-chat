@@ -55,10 +55,12 @@ export default function ShopPanel({ mode = 'full', onOpenAll }) {
   );
 
   return (
-    <div style={styles.card}>
+    <div className="pp-card" style={styles.card}>
       <div style={styles.headerRow}>
         <div style={styles.titleRow}>
-          <div style={styles.iconWrap}>🛒</div>
+          <div style={styles.iconWrap} aria-hidden="true">
+            <span style={styles.iconGlyph}>▦</span>
+          </div>
           <div>
             <div style={styles.kicker}>Store</div>
             <div style={styles.title}>Магазин</div>
@@ -66,11 +68,11 @@ export default function ShopPanel({ mode = 'full', onOpenAll }) {
         </div>
         <div style={styles.headerActions}>
           {mode === 'preview' ? (
-            <button type="button" onClick={onOpenAll} style={styles.ghostBtn}>
+            <button type="button" onClick={onOpenAll} className="pp-btn" style={styles.ghostBtn}>
               Открыть
             </button>
           ) : (
-            <button type="button" onClick={shop.refresh} style={styles.ghostBtn} disabled={shop.loading}>
+            <button type="button" onClick={shop.refresh} className="pp-btn" style={styles.ghostBtn} disabled={shop.loading}>
               Обновить
             </button>
           )}
@@ -107,11 +109,12 @@ export default function ShopPanel({ mode = 'full', onOpenAll }) {
               <div key={sku} style={styles.itemCard}>
                 <div style={{ ...styles.preview, background: previewBgByType(it?.type) }}>
                   <div style={styles.previewBadge}>{String(it?.type || 'item')}</div>
+                  <div style={styles.previewPattern} />
                 </div>
                 <div style={styles.itemTitle}>{it?.title || sku}</div>
                 <div style={styles.itemDesc}>{it?.description || '—'}</div>
                 <div style={styles.priceRow}>
-                  <HrumIcon size={16} />
+                  <HrumIcon size={18} style={{ filter: 'drop-shadow(0 10px 16px rgba(0,0,0,0.35))' }} />
                   <div style={styles.priceText}>
                     {String(it?.priceHrum ?? '—')} <span style={styles.priceUnit}>Хрумов</span>
                   </div>
@@ -119,7 +122,8 @@ export default function ShopPanel({ mode = 'full', onOpenAll }) {
                 <button
                   type="button"
                   onClick={() => buy(sku)}
-                  style={{ ...styles.primaryBtn, ...(disabled ? styles.btnDisabled : null) }}
+                  className="pp-btn"
+                  style={{ ...(canPurchase ? styles.primaryBtn : styles.secondaryBtn), ...(disabled || !canPurchase ? styles.btnDisabled : null) }}
                   disabled={disabled}
                 >
                   {btnText}
@@ -139,11 +143,11 @@ export default function ShopPanel({ mode = 'full', onOpenAll }) {
 
 const styles = {
   card: {
-    borderRadius: 22,
-    border: '1px solid rgba(148,163,184,0.16)',
-    background: 'rgba(15,23,42,0.55)',
-    boxShadow: '0 14px 40px rgba(0,0,0,0.38)',
-    backdropFilter: 'blur(12px)',
+    borderRadius: 26,
+    border: '1px solid var(--pp-border)',
+    background: 'var(--pp-glass)',
+    boxShadow: 'var(--pp-shadow)',
+    backdropFilter: 'blur(14px)',
     padding: 18
   },
   headerRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12, flexWrap: 'wrap' },
@@ -159,6 +163,7 @@ const styles = {
     color: '#e2e8f0',
     fontWeight: 950
   },
+  iconGlyph: { fontSize: 16, filter: 'drop-shadow(0 14px 18px rgba(0,0,0,0.35))' },
   kicker: { color: '#94a3b8', fontWeight: 900, fontSize: 12, letterSpacing: 0.5, textTransform: 'uppercase' },
   title: { color: '#e2e8f0', fontWeight: 950, fontSize: 18, letterSpacing: 0.2 },
   headerActions: { display: 'flex', gap: 10 },
@@ -177,18 +182,28 @@ const styles = {
   itemCard: {
     borderRadius: 18,
     border: '1px solid rgba(148,163,184,0.14)',
-    background: 'rgba(2,6,23,0.28)',
+    background:
+      'radial-gradient(520px 160px at 30% 0%, rgba(99,102,241,0.10), rgba(0,0,0,0) 55%), rgba(2,6,23,0.28)',
     padding: 14,
     display: 'flex',
     flexDirection: 'column',
     gap: 10
   },
   preview: {
-    height: 110,
+    height: 120,
     borderRadius: 16,
     border: '1px solid rgba(148,163,184,0.14)',
     overflow: 'hidden',
     position: 'relative'
+  },
+  previewPattern: {
+    position: 'absolute',
+    inset: 0,
+    background:
+      'radial-gradient(220px 140px at 30% 30%, rgba(255,255,255,0.14), rgba(0,0,0,0) 60%), radial-gradient(260px 160px at 80% 70%, rgba(0,0,0,0.20), rgba(0,0,0,0) 60%)',
+    mixBlendMode: 'overlay',
+    opacity: 0.9,
+    pointerEvents: 'none'
   },
   previewBadge: {
     position: 'absolute',
@@ -213,10 +228,20 @@ const styles = {
     padding: '0 12px',
     borderRadius: 12,
     border: '1px solid rgba(168,85,247,0.35)',
-    background: 'linear-gradient(135deg, rgba(168,85,247,0.95), rgba(99,102,241,0.95))',
+    background: 'var(--pp-grad)',
     color: '#fff',
     fontWeight: 950,
     cursor: 'pointer'
+  },
+  secondaryBtn: {
+    height: 40,
+    padding: '0 12px',
+    borderRadius: 12,
+    border: '1px solid rgba(148,163,184,0.16)',
+    background: 'rgba(2,6,23,0.32)',
+    color: '#cbd5e1',
+    fontWeight: 950,
+    cursor: 'not-allowed'
   },
   btnDisabled: { opacity: 0.55, cursor: 'not-allowed', filter: 'grayscale(0.2)' },
 
@@ -265,4 +290,3 @@ const styles = {
   },
   skelBtn: { height: 40, borderRadius: 12, background: 'rgba(148,163,184,0.14)' }
 };
-

@@ -47,16 +47,18 @@ export default function WalletHistoryPanel() {
   }, [tx]);
 
   return (
-    <div style={styles.card}>
+    <div className="pp-card" style={styles.card}>
       <div style={styles.headerRow}>
         <div style={styles.titleRow}>
-          <div style={styles.iconWrap}>🧾</div>
+          <div style={styles.iconWrap} aria-hidden="true">
+            <span style={styles.iconGlyph}>≋</span>
+          </div>
           <div>
             <div style={styles.kicker}>Ledger</div>
             <div style={styles.title}>История операций</div>
           </div>
         </div>
-        <button type="button" onClick={tx.refresh} style={styles.ghostBtn} disabled={tx.loading}>
+        <button type="button" onClick={tx.refresh} className="pp-btn" style={styles.ghostBtn} disabled={tx.loading}>
           Обновить
         </button>
       </div>
@@ -112,11 +114,11 @@ const shimmer = {
 const styles = {
   card: {
     marginTop: 16,
-    borderRadius: 22,
-    border: '1px solid rgba(148,163,184,0.16)',
-    background: 'rgba(15,23,42,0.55)',
-    boxShadow: '0 14px 40px rgba(0,0,0,0.38)',
-    backdropFilter: 'blur(12px)',
+    borderRadius: 26,
+    border: '1px solid var(--pp-border)',
+    background: 'var(--pp-glass)',
+    boxShadow: 'var(--pp-shadow)',
+    backdropFilter: 'blur(14px)',
     padding: 18
   },
   headerRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12, flexWrap: 'wrap' },
@@ -132,6 +134,7 @@ const styles = {
     color: '#e2e8f0',
     fontWeight: 950
   },
+  iconGlyph: { fontSize: 16, filter: 'drop-shadow(0 14px 18px rgba(0,0,0,0.35))' },
   kicker: { color: '#94a3b8', fontWeight: 900, fontSize: 12, letterSpacing: 0.5, textTransform: 'uppercase' },
   title: { color: '#e2e8f0', fontWeight: 950, fontSize: 18, letterSpacing: 0.2 },
   ghostBtn: {
@@ -198,4 +201,3 @@ const styles = {
   skelAmt: { width: 140, height: 12, borderRadius: 999, ...shimmer },
   skelLine: { width: 210, height: 12, borderRadius: 999, ...shimmer }
 };
-
