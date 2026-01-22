@@ -15,23 +15,6 @@ function ensureProfilePageStyles() {
   style.textContent = `
     @keyframes ppFadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     @keyframes ppShimmer { 0% { background-position: 0% 50%; } 100% { background-position: 140% 50%; } }
-    @keyframes ppFloat { 0% { transform: translateY(0); } 50% { transform: translateY(-6px); } 100% { transform: translateY(0); } }
-
-    .pp-card { transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease; }
-    .pp-card:hover { transform: translateY(-2px); box-shadow: 0 22px 70px rgba(0,0,0,0.44); border-color: rgba(148,163,184,0.22); }
-    .pp-btn { transition: transform 160ms ease, filter 160ms ease, background 160ms ease, border-color 160ms ease; }
-    .pp-btn:hover { transform: translateY(-1px); filter: brightness(1.03); }
-    .pp-btn:active { transform: translateY(0px) scale(0.99); }
-
-    .pp-span-12 { grid-column: span 12; }
-    .pp-span-6 { grid-column: span 6; }
-    @media (max-width: 980px) {
-      .pp-span-6 { grid-column: span 12; }
-    }
-    @media (max-width: 980px) {
-      .pp-hero { grid-template-columns: 1fr !important; }
-      .pp-hero-right { min-height: 180px !important; }
-    }
   `;
   document.head.appendChild(style);
 }
@@ -92,20 +75,7 @@ export default function ProfilePage({ token, onClose, onLogout }) {
 
   return (
     <EconomyStoreProvider token={token}>
-      <div
-        style={{
-          ...styles.overlay,
-          '--pp-glass': 'rgba(15,23,42,0.52)',
-          '--pp-glass-2': 'rgba(2,6,23,0.30)',
-          '--pp-border': 'rgba(148,163,184,0.16)',
-          '--pp-border-2': 'rgba(148,163,184,0.12)',
-          '--pp-text': '#e2e8f0',
-          '--pp-muted': '#94a3b8',
-          '--pp-shadow': '0 14px 40px rgba(0,0,0,0.38)',
-          '--pp-shadow-2': '0 22px 70px rgba(0,0,0,0.44)',
-          '--pp-grad': 'linear-gradient(135deg, rgba(168,85,247,0.95), rgba(99,102,241,0.95))'
-        }}
-      >
+      <div style={styles.overlay}>
         <div style={styles.bg} />
         <div style={styles.content}>
           <div style={styles.topBar}>
@@ -164,13 +134,13 @@ export default function ProfilePage({ token, onClose, onLogout }) {
 
           {view === 'home' && (
             <div style={styles.grid}>
-              <div className="pp-span-12" style={styles.colSpan12}>
+              <div style={styles.colSpan12}>
                 <HrumOverview onOpenHistory={() => setView('history')} onOpenShop={() => setView('shop')} onOpenTasks={() => setView('tasks')} />
               </div>
-              <div className="pp-span-6" style={styles.colSpan6}>
+              <div style={styles.colSpan6}>
                 <TasksPanel mode="preview" onOpenAll={() => setView('tasks')} />
               </div>
-              <div className="pp-span-6" style={styles.colSpan6}>
+              <div style={styles.colSpan6}>
                 <ShopPanel mode="preview" onOpenAll={() => setView('shop')} />
               </div>
             </div>
@@ -197,7 +167,7 @@ const styles = {
     position: 'fixed',
     inset: 0,
     background:
-      'radial-gradient(1200px 800px at 12% 10%, rgba(99,102,241,0.24), rgba(0,0,0,0) 60%), radial-gradient(900px 700px at 74% 22%, rgba(168,85,247,0.22), rgba(0,0,0,0) 55%), radial-gradient(900px 700px at 44% 92%, rgba(34,197,94,0.12), rgba(0,0,0,0) 55%), radial-gradient(900px 700px at 96% 86%, rgba(14,165,233,0.10), rgba(0,0,0,0) 55%)',
+      'radial-gradient(1200px 800px at 10% 10%, rgba(99,102,241,0.22), rgba(0,0,0,0) 60%), radial-gradient(900px 700px at 70% 20%, rgba(168,85,247,0.18), rgba(0,0,0,0) 55%), radial-gradient(900px 700px at 40% 90%, rgba(34,197,94,0.10), rgba(0,0,0,0) 55%)',
     filter: 'saturate(1.05)'
   },
   content: {
@@ -304,3 +274,4 @@ const styles = {
   colSpan12: { gridColumn: 'span 12' },
   colSpan6: { gridColumn: 'span 6' }
 };
+
