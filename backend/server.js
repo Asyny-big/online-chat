@@ -18,6 +18,8 @@ const usersRoutes = require('./routes/users');
 const webrtcRoutes = require('./routes/webrtc');
 const livekitRoutes = require('./routes/livekit');
 const meRoutes = require('./routes/me');
+const economyRoutes = require('./routes/economy');
+const adminEconomyRoutes = require('./routes/adminEconomy');
 
 // Socket.IO
 const setupSocket = require('./socket');
@@ -131,6 +133,8 @@ app.use('/api/users', usersRoutes);
 app.use('/api/me', meRoutes);
 app.use('/api/webrtc', webrtcRoutes);
 app.use('/api/livekit', livekitRoutes);
+app.use('/api/economy', economyRoutes);
+app.use('/api/admin/economy', adminEconomyRoutes);
 
 // Загрузка файлов
 const authMiddleware = require('./middleware/auth');
@@ -209,6 +213,20 @@ mongoose.connect(config.MONGODB_URI)
     console.error('❌ MongoDB connection error:', err);
     process.exit(1);
   });
+
+mongoose.connection.once('open', async () => {
+  try {
+    const { ensureEconomyIndexes } = require('./economy/indexes');
+    await ensureEconomyIndexes(mongoose.connection.db);
+    console.log('Economy indexes ensured');
+
+    const { ensureEconomySeed } = require('./economy/seed');
+    await ensureEconomySeed(mongoose.connection.db);
+    console.log('Economy seed ensured');
+  } catch (e) {
+    console.error('Economy indexes ensure failed:', e);
+  }
+});
 
 // Запуск сервера
 const PORT = config.PORT || 5000;

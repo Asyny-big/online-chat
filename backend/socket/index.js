@@ -4,6 +4,7 @@ const Chat = require('../models/Chat');
 const Message = require('../models/Message');
 const Call = require('../models/Call');
 const config = require('../config.local');
+const { maybeRewardMessage, maybeRewardCallStart } = require('../economy/rewardsService');
 
 const userSockets = new Map();
 const activeCalls = new Map();
@@ -179,6 +180,16 @@ module.exports = function(io) {
         });
 
         callback?.({ success: true, message: message.toObject() });
+
+        // Earn: сообщения (best-effort, не блокируем чат).
+        try {
+          void maybeRewardMessage({
+            userId,
+            messageId: message._id.toString(),
+            chatId,
+            text: text || ''
+          });
+        } catch (_) {}
       } catch (error) {
         console.error('message:send error:', error);
         callback?.({ error: 'Ошибка отправки' });
@@ -299,6 +310,21 @@ module.exports = function(io) {
         });
 
         callback?.({ success: true, callId: call._id });
+
+        // Earn: факт начала звонка (инициатор).
+        try {
+          const r = await maybeRewardCallStart({
+            userId,
+            callId: call._id.toString(),
+            chatId: String(chatId),
+            callType: String(type)
+          });
+          if (r?.ok && r?.granted) {
+            console.log(`[Economy] call_start granted to ${userId}: +${r.amountHrum} HRUM`);
+          }
+        } catch (e) {
+          console.warn('[Economy] call_start reward failed:', e?.message || e);
+        }
       } catch (error) {
         console.error('call:start error:', error);
         callback?.({ error: 'Ошибка начала звонка' });
@@ -360,6 +386,21 @@ module.exports = function(io) {
         });
 
         callback?.({ success: true, callId: call._id.toString() });
+
+        // Earn: факт начала группового звонка (инициатор).
+        try {
+          const r = await maybeRewardCallStart({
+            userId,
+            callId: call._id.toString(),
+            chatId: String(chatId),
+            callType: String(type)
+          });
+          if (r?.ok && r?.granted) {
+            console.log(`[Economy] group call_start granted to ${userId}: +${r.amountHrum} HRUM`);
+          }
+        } catch (e) {
+          console.warn('[Economy] group call_start reward failed:', e?.message || e);
+        }
       } catch (err) {
         console.error('group-call:start error:', err);
         callback?.({ error: 'Ошибка начала группового звонка' });
