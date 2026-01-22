@@ -192,25 +192,29 @@ async function incrementDailyCounter({ session, userId, key, dayKey, limit, ttlD
   const now = new Date();
   const expiresAt = new Date(now.getTime() + ttlDays * 24 * 60 * 60 * 1000);
 
-  const res = await economyLimits.findOneAndUpdate(
-    { scope: 'user', scopeId: new ObjectId(userId), key, bucket: dayKey },
-    [
-      {
-        $setOnInsert: {
-          scope: 'user',
-          scopeId: new ObjectId(userId),
-          key,
-          bucket: dayKey,
-          count: 0,
-          createdAt: now,
-          expiresAt
-        }
-      },
-      { $set: { updatedAt: now } },
-      { $set: { count: { $add: ['$count', 1] } } }
-    ],
-    { upsert: true, returnDocument: 'after', session }
-  );
+  const filter = { scope: 'user', scopeId: new ObjectId(userId), key, bucket: dayKey };
+  // IMPORTANT: update "pipeline" uses aggregation stages; $setOnInsert is NOT a valid pipeline stage on MongoDB,
+  // so we use classic update operators for compatibility across Mongo versions.
+  const update = {
+    $setOnInsert: {
+      scope: 'user',
+      scopeId: new ObjectId(userId),
+      key,
+      bucket: dayKey,
+      count: 0,
+      createdAt: now,
+      expiresAt
+    },
+    $set: { updatedAt: now },
+    $inc: { count: 1 }
+  };
+  const res = await economyLimits.findOneAndUpdate(filter, update, {
+    upsert: true,
+    // Support both mongodb driver v3 (returnOriginal) and v4+ (returnDocument).
+    returnDocument: 'after',
+    returnOriginal: false,
+    session
+  });
 
   const count = res.value?.count ?? 0;
   if (typeof limit === 'number' && count > limit) {
