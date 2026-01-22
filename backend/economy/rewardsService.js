@@ -1,6 +1,6 @@
-const { Long, toLong } = require('./long');
+const { toLong } = require('./long');
 const { withMongoTransaction } = require('./tx');
-const { sha256Base64Url, nowUtcDayKey, ensureWallet, applyWalletDeltaInSession, incrementDailyCounter } = require('./walletService');
+const { sha256Base64Url, nowUtcDayKey, incrementDailyCounter } = require('./walletService');
 const { ObjectId } = require('mongodb');
 const mongoose = require('mongoose');
 
@@ -89,33 +89,40 @@ async function maybeRewardMessage({ userId, messageId, chatId, text }) {
   if (messageText.trim().length < DEFAULTS.message.minLen) return { ok: true, granted: false, reason: 'min_len' };
 
   const dayKey = nowUtcDayKey(new Date());
-  const dedupeKey = `message:${messageId}`;
-  const idempotencyKey = `earn:message:${messageId}`;
+  const dedupeBucket = `message:${messageId}`;
 
   try {
     return await withMongoTransaction(async (session) => {
-      await ensureWallet({ userId, session });
-      await incrementDailyCounter({ session, userId, key: 'earn:message', dayKey, limit: DEFAULTS.message.dailyCap });
+      // IMPORTANT: task rewards are claimed manually; message/call events only update progress counters.
+      const db = mongoose.connection.db;
+      const economyLimits = db.collection('economy_limits');
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
 
-      const res = await applyWalletDeltaInSession({
-        session,
-        userId,
-        deltaHrum: Long.fromNumber(DEFAULTS.message.amountHrum),
-        reasonCode: 'earn:message',
-        dedupeKey,
-        idempotencyKey,
-        meta: { chatId: String(chatId), messageId: String(messageId), dayKey }
-      });
-      if (res?.idempotent) {
-        const err = new Error('DUPLICATE_REWARD');
-        err.code = 'DUPLICATE_REWARD';
-        throw err;
+      try {
+        await economyLimits.insertOne(
+          {
+            scope: 'user',
+            scopeId: new ObjectId(userId),
+            key: 'dedupe:earn:message',
+            bucket: String(dedupeBucket),
+            createdAt: now,
+            updatedAt: now,
+            expiresAt,
+            meta: { chatId: String(chatId), messageId: String(messageId), dayKey }
+          },
+          { session }
+        );
+      } catch (e) {
+        if (e?.code === 11000) return { ok: true, granted: false, reason: 'dup' };
+        throw e;
       }
-      return { ok: true, granted: true, amountHrum: String(DEFAULTS.message.amountHrum), balanceHrum: res.balanceHrum };
+
+      await incrementDailyCounter({ session, userId, key: 'earn:message', dayKey, limit: DEFAULTS.message.dailyCap });
+      return { ok: true, granted: false, reason: 'progress_updated' };
     });
   } catch (err) {
     if (err?.code === 'DAILY_LIMIT_REACHED') return { ok: true, granted: false, reason: 'daily_cap' };
-    if (err?.code === 'DUPLICATE_REWARD') return { ok: true, granted: false, reason: 'dup' };
     if (err?.code === 11000) return { ok: true, granted: false, reason: 'dup' };
     return { ok: false, error: String(err?.message || err) };
   }
@@ -123,33 +130,40 @@ async function maybeRewardMessage({ userId, messageId, chatId, text }) {
 
 async function maybeRewardCallStart({ userId, callId, chatId, callType }) {
   const dayKey = nowUtcDayKey(new Date());
-  const dedupeKey = `call_start:${callId}:${userId}`;
-  const idempotencyKey = `earn:call_start:${callId}:${userId}`;
+  const dedupeBucket = `call_start:${callId}:${userId}`;
 
   try {
     return await withMongoTransaction(async (session) => {
-      await ensureWallet({ userId, session });
-      await incrementDailyCounter({ session, userId, key: 'earn:call_start', dayKey, limit: DEFAULTS.callStart.dailyCap });
+      // IMPORTANT: task rewards are claimed manually; call events only update progress counters.
+      const db = mongoose.connection.db;
+      const economyLimits = db.collection('economy_limits');
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
 
-      const res = await applyWalletDeltaInSession({
-        session,
-        userId,
-        deltaHrum: Long.fromNumber(DEFAULTS.callStart.amountHrum),
-        reasonCode: 'earn:call_start',
-        dedupeKey,
-        idempotencyKey,
-        meta: { chatId: String(chatId), callId: String(callId), callType: String(callType), dayKey }
-      });
-      if (res?.idempotent) {
-        const err = new Error('DUPLICATE_REWARD');
-        err.code = 'DUPLICATE_REWARD';
-        throw err;
+      try {
+        await economyLimits.insertOne(
+          {
+            scope: 'user',
+            scopeId: new ObjectId(userId),
+            key: 'dedupe:earn:call_start',
+            bucket: String(dedupeBucket),
+            createdAt: now,
+            updatedAt: now,
+            expiresAt,
+            meta: { chatId: String(chatId), callId: String(callId), callType: String(callType), dayKey }
+          },
+          { session }
+        );
+      } catch (e) {
+        if (e?.code === 11000) return { ok: true, granted: false, reason: 'dup' };
+        throw e;
       }
-      return { ok: true, granted: true, amountHrum: String(DEFAULTS.callStart.amountHrum), balanceHrum: res.balanceHrum };
+
+      await incrementDailyCounter({ session, userId, key: 'earn:call_start', dayKey, limit: DEFAULTS.callStart.dailyCap });
+      return { ok: true, granted: false, reason: 'progress_updated' };
     });
   } catch (err) {
     if (err?.code === 'DAILY_LIMIT_REACHED') return { ok: true, granted: false, reason: 'daily_cap' };
-    if (err?.code === 'DUPLICATE_REWARD') return { ok: true, granted: false, reason: 'dup' };
     if (err?.code === 11000) return { ok: true, granted: false, reason: 'dup' };
     return { ok: false, error: String(err?.message || err) };
   }

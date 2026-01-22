@@ -33,39 +33,6 @@ function toInt(value, fallback = 0) {
   return fallback;
 }
 
-function utcRangeForDayKey(dayKey) {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dayKey || ''));
-  if (!m) return null;
-  const y = Number.parseInt(m[1], 10);
-  const mo = Number.parseInt(m[2], 10);
-  const d = Number.parseInt(m[3], 10);
-  if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(d)) return null;
-  const start = new Date(Date.UTC(y, mo - 1, d, 0, 0, 0, 0));
-  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
-  return { start, end };
-}
-
-async function countWalletTransactionsByReason({ userId, dayKey, reasonCodes, session }) {
-  const range = utcRangeForDayKey(dayKey);
-  if (!range || !Array.isArray(reasonCodes) || reasonCodes.length === 0) return new Map();
-
-  const db = getDb();
-  const walletTransactions = db.collection('wallet_transactions');
-  const pipeline = [
-    {
-      $match: {
-        userId: new ObjectId(userId),
-        reasonCode: { $in: reasonCodes.map((x) => String(x)) },
-        createdAt: { $gte: range.start, $lt: range.end }
-      }
-    },
-    { $group: { _id: '$reasonCode', count: { $sum: 1 } } }
-  ];
-
-  const rows = await walletTransactions.aggregate(pipeline, session ? { session } : undefined).toArray();
-  return new Map(rows.map((r) => [String(r?._id || ''), toInt(r?.count, 0)]));
-}
-
 function dailyLoginAmountForStreak(streak) {
   const s = Math.max(1, Math.min(DEFAULTS.dailyLogin.maxStreakDays, Number(streak) || 1));
   return toLong(DEFAULTS.dailyLogin.baseHrum + (s - 1) * DEFAULTS.dailyLogin.perStreakBonusHrum);
@@ -118,19 +85,17 @@ async function listTasks({ userId }) {
 
   const defs = TASK_DEFS.filter((t) => t.enabled !== false);
 
-  const reasonCodes = defs.map((t) => t.counterKey).filter(Boolean);
+  const counterKeys = defs.map((t) => t.counterKey).filter(Boolean);
   const claimKeys = defs.filter((t) => t.kind !== 'daily_login').map((t) => `task_claim:${t.id}`);
 
   const docs = await economyLimits
-    .find({ scope: 'user', scopeId, bucket: todayKey, key: { $in: [...new Set([...claimKeys])] } })
+    .find({ scope: 'user', scopeId, bucket: todayKey, key: { $in: [...new Set([...counterKeys, ...claimKeys])] } })
     .toArray();
 
   const byKey = new Map(docs.map((d) => [String(d?.key), d]));
 
   const dailyLoginStateId = { scope: 'user', scopeId, key: 'daily_login_state', bucket: 'singleton' };
   const dailyLoginState = await economyLimits.findOne(dailyLoginStateId);
-
-  const txCounts = await countWalletTransactionsByReason({ userId, dayKey: todayKey, reasonCodes });
 
   const tasks = defs.map((t) => {
     if (t.kind === 'daily_login') {
@@ -161,8 +126,9 @@ async function listTasks({ userId }) {
       };
     }
 
+    const counterDoc = byKey.get(String(t.counterKey));
     const claimDoc = byKey.get(`task_claim:${t.id}`);
-    const rawCount = txCounts.get(String(t.counterKey)) ?? 0;
+    const rawCount = toInt(counterDoc?.count, 0);
     const total = Math.max(1, toInt(t.target, 1));
     const current = Math.max(0, Math.min(rawCount, total));
     const claimed = !!claimDoc?.claimedAt;
@@ -219,13 +185,8 @@ async function claimTask({ userId, taskId, ip, userAgent, deviceId }) {
   return withMongoTransaction(async (session) => {
     await ensureWallet({ userId, session });
 
-    const txCounts = await countWalletTransactionsByReason({
-      userId,
-      dayKey,
-      reasonCodes: [def.counterKey],
-      session
-    });
-    const count = txCounts.get(String(def.counterKey)) ?? 0;
+    const counter = await economyLimits.findOne({ scope: 'user', scopeId, key: def.counterKey, bucket: dayKey }, { session });
+    const count = toInt(counter?.count, 0);
     const target = Math.max(1, toInt(def.target, 1));
     if (count < target) {
       const err = new Error('TASK_NOT_COMPLETED');
