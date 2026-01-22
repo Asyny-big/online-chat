@@ -12,6 +12,17 @@ function isUnknownCommitResult(err) {
   return Array.isArray(labels) && labels.includes('UnknownTransactionCommitResult');
 }
 
+function isTransactionsNotSupported(err) {
+  const msg = String(err?.message || '');
+  return (
+    msg.includes('Transaction numbers are only allowed on a replica set member or mongos') ||
+    msg.includes('transactions are not supported') ||
+    msg.includes('Transaction is not supported') ||
+    msg.includes('IllegalOperation') ||
+    err?.code === 20
+  );
+}
+
 async function withMongoTransaction(fn, { maxRetries = 3 } = {}) {
   const session = await mongoose.startSession();
   try {
@@ -30,6 +41,12 @@ async function withMongoTransaction(fn, { maxRetries = 3 } = {}) {
         );
         return result;
       } catch (err) {
+        // If MongoDB isn't a replica set/mongos, transactions will always fail.
+        // Degrade gracefully instead of breaking economy endpoints entirely.
+        if (isTransactionsNotSupported(err)) {
+          console.warn('[Economy] MongoDB transactions not supported; running without transaction.');
+          return await fn(undefined);
+        }
         if (attempt < maxRetries && (isTransientTxnError(err) || isUnknownCommitResult(err))) continue;
         throw err;
       }
@@ -40,4 +57,3 @@ async function withMongoTransaction(fn, { maxRetries = 3 } = {}) {
 }
 
 module.exports = { withMongoTransaction };
-

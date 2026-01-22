@@ -36,6 +36,12 @@ router.post('/earn/daily-login', async (req, res) => {
     res.json(result);
   } catch (err) {
     if (err?.code === 'COOLDOWN_ACTIVE') return res.status(429).json({ error: 'cooldown_active' });
+    console.error('[Economy] daily-login failed:', {
+      userId: req.userId,
+      code: err?.code,
+      message: err?.message
+    });
+    if (err?.stack) console.error(err.stack);
     res.status(500).json({ error: 'daily_login_failed' });
   }
 });
@@ -62,4 +68,3 @@ router.post('/shop/buy', async (req, res) => {
 });
 
 module.exports = router;
-
