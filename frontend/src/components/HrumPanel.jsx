@@ -146,6 +146,10 @@ export default function HrumPanel({ token }) {
       if (!mountedRef.current) return;
       if (String(e?.message) === 'cooldown_active' || e?.status === 429) {
         showInfo('Ежедневный вход уже получен');
+      } else if (e?.status === 401) {
+        showError('Требуется авторизация');
+      } else if (typeof e?.status === 'number' && e.status >= 500) {
+        showError('Сервис Хрумов временно недоступен');
       } else {
         showError('Не удалось получить награду');
       }
