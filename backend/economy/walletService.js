@@ -22,31 +22,56 @@ function nowUtcDayKey(date = new Date()) {
   return `${y}-${m}-${d}`;
 }
 
-async function ensureWallet({ userId, session }) {
+async function ensureWallet(input, maybeSession) {
+  const userId = typeof input === 'object' && input !== null ? input.userId : input;
+  const session = typeof input === 'object' && input !== null ? input.session : maybeSession;
   const db = getDb();
   const wallets = db.collection('wallets');
+  let oid;
+  try {
+    oid = new ObjectId(userId);
+  } catch (e) {
+    const err = new Error('INVALID_USER_ID');
+    err.code = 'INVALID_USER_ID';
+    console.error('[Economy] ensureWallet invalid userId:', { userId: String(userId) });
+    throw err;
+  }
+
   const now = new Date();
-  const res = await wallets.findOneAndUpdate(
-    { userId: new ObjectId(userId) },
-    {
-      $setOnInsert: {
-        userId: new ObjectId(userId),
-        balanceHrum: toLong(0),
-        status: 'active',
-        createdAt: now
-      },
-      $set: { updatedAt: now }
-    },
-    // Support both mongodb driver v3 (returnOriginal) and v4+ (returnDocument).
-    { upsert: true, returnDocument: 'after', returnOriginal: false, session }
-  );
+  const filter = { userId: oid };
+  const update = {
+    $setOnInsert: { userId: oid, balanceHrum: toLong(0), status: 'active', createdAt: now },
+    $set: { updatedAt: now }
+  };
+  const opts = { upsert: true, returnDocument: 'after', returnOriginal: false, ...(session ? { session } : {}) };
 
-  // Driver compatibility: some versions may return the document directly, or not return the upserted doc.
-  const value = res?.value ?? res;
-  if (value && value._id) return value;
+  let res;
+  try {
+    res = await wallets.findOneAndUpdate(filter, update, opts);
+  } catch (e) {
+    // High-concurrency: if the unique index triggers, read the winner doc and return it.
+    if (e?.code === 11000) {
+      console.warn('[Economy] ensureWallet duplicate key; falling back to findOne:', { userId: String(userId) });
+    } else {
+      console.error('[Economy] ensureWallet findOneAndUpdate failed:', { userId: String(userId), code: e?.code, message: e?.message });
+      throw e;
+    }
+  }
 
-  // Fallback: read the wallet we just ensured.
-  return wallets.findOne({ userId: new ObjectId(userId) }, { session });
+  const doc = res?.value ?? res;
+  if (doc && doc._id) return doc;
+
+  // Fallback: driver/version can return null even on successful upsert/update.
+  const fallback = await wallets.findOne(filter, session ? { session } : undefined);
+  if (fallback && fallback._id) {
+    console.warn('[Economy] ensureWallet missing return document; recovered via findOne:', { userId: String(userId) });
+    return fallback;
+  }
+
+  const err = new Error('WALLET_ENSURE_FAILED');
+  err.code = 'WALLET_ENSURE_FAILED';
+  console.error('[Economy] ensureWallet failed to ensure wallet:', { userId: String(userId), hasSession: !!session });
+  throw err;
 }
 
 async function getWallet({ userId }) {
