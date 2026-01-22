@@ -183,12 +183,22 @@ module.exports = function(io) {
 
         // Earn: сообщения (best-effort, не блокируем чат).
         try {
-          void maybeRewardMessage({
-            userId,
-            messageId: message._id.toString(),
-            chatId,
-            text: text || ''
-          });
+          Promise.resolve(
+            maybeRewardMessage({
+              userId,
+              messageId: message._id.toString(),
+              chatId,
+              text: text || ''
+            })
+          )
+            .then((r) => {
+              if (r?.ok === false) {
+                console.warn('[Economy] message reward failed:', { userId, chatId: String(chatId), error: r?.error });
+              }
+            })
+            .catch((e) => {
+              console.warn('[Economy] message reward rejected:', { userId, chatId: String(chatId), error: e?.message || e });
+            });
         } catch (_) {}
       } catch (error) {
         console.error('message:send error:', error);
@@ -321,6 +331,8 @@ module.exports = function(io) {
           });
           if (r?.ok && r?.granted) {
             console.log(`[Economy] call_start granted to ${userId}: +${r.amountHrum} HRUM`);
+          } else if (r?.ok === false) {
+            console.warn('[Economy] call_start reward failed:', { userId, chatId: String(chatId), error: r?.error });
           }
         } catch (e) {
           console.warn('[Economy] call_start reward failed:', e?.message || e);
@@ -397,6 +409,8 @@ module.exports = function(io) {
           });
           if (r?.ok && r?.granted) {
             console.log(`[Economy] group call_start granted to ${userId}: +${r.amountHrum} HRUM`);
+          } else if (r?.ok === false) {
+            console.warn('[Economy] group call_start reward failed:', { userId, chatId: String(chatId), error: r?.error });
           }
         } catch (e) {
           console.warn('[Economy] group call_start reward failed:', e?.message || e);
