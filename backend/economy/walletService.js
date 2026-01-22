@@ -37,9 +37,16 @@ async function ensureWallet({ userId, session }) {
       },
       $set: { updatedAt: now }
     },
-    { upsert: true, returnDocument: 'after', session }
+    // Support both mongodb driver v3 (returnOriginal) and v4+ (returnDocument).
+    { upsert: true, returnDocument: 'after', returnOriginal: false, session }
   );
-  return res.value;
+
+  // Driver compatibility: some versions may return the document directly, or not return the upserted doc.
+  const value = res?.value ?? res;
+  if (value && value._id) return value;
+
+  // Fallback: read the wallet we just ensured.
+  return wallets.findOne({ userId: new ObjectId(userId) }, { session });
 }
 
 async function getWallet({ userId }) {
@@ -86,6 +93,7 @@ async function applyWalletDeltaInSession({ session, userId, deltaHrum, reasonCod
   const walletTransactions = db.collection('wallet_transactions');
 
   const wallet = await ensureWallet({ userId, session });
+  if (!wallet || !wallet._id) throw new Error('WALLET_ENSURE_FAILED');
   const now = new Date();
 
   const txId = new ObjectId();
@@ -128,8 +136,14 @@ async function applyWalletDeltaInSession({ session, userId, deltaHrum, reasonCod
     filter.balanceHrum = { $gte: delta.negate() };
   }
 
-  const updated = await wallets.findOneAndUpdate(filter, update, { returnDocument: 'after', session });
-  if (!updated.value) {
+  const updatedRes = await wallets.findOneAndUpdate(filter, update, {
+    // Support both mongodb driver v3 (returnOriginal) and v4+ (returnDocument).
+    returnDocument: 'after',
+    returnOriginal: false,
+    session
+  });
+  const updatedWallet = updatedRes?.value ?? updatedRes;
+  if (!updatedWallet) {
     const err = new Error('INSUFFICIENT_HRUM');
     err.code = 'INSUFFICIENT_HRUM';
     throw err;
@@ -137,7 +151,7 @@ async function applyWalletDeltaInSession({ session, userId, deltaHrum, reasonCod
 
   return {
     walletId: String(wallet._id),
-    balanceHrum: longToString(updated.value.balanceHrum),
+    balanceHrum: longToString(updatedWallet.balanceHrum),
     txId: String(txId),
     idempotent: false
   };
