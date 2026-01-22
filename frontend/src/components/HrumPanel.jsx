@@ -49,6 +49,7 @@ export default function HrumPanel({ token }) {
 
   const [dailyLoading, setDailyLoading] = useState(false);
   const [dailyMeta, setDailyMeta] = useState(null); // { claimed, streak }
+  const lastDailyAttemptAtRef = useRef(0);
 
   const [buyingSku, setBuyingSku] = useState('');
   const [ownedSkus, setOwnedSkus] = useState(() => new Set());
@@ -126,6 +127,12 @@ export default function HrumPanel({ token }) {
 
   const claimDaily = useCallback(async () => {
     if (!token || dailyLoading) return;
+    const now = Date.now();
+    if (now - lastDailyAttemptAtRef.current < 15000) {
+      showInfo('Попробуйте чуть позже');
+      return;
+    }
+    lastDailyAttemptAtRef.current = now;
     setDailyLoading(true);
     try {
       const res = await claimDailyLogin({ token });
@@ -567,4 +574,3 @@ const styles = {
   },
   skeletonAmount: { width: 110, height: 12, borderRadius: 999, background: 'rgba(148,163,184,0.14)' }
 };
-

@@ -7,7 +7,7 @@ import ChatWindow from '../components/ChatWindow';
 import CallModal from '../components/CallModal';
 import GroupCallModalLiveKit from '../components/GroupCallModalLiveKit';
 import { HrumToastProvider, useHrumToast } from '../components/HrumToast';
-import { claimDailyLogin, getTransactions } from '../economy/api';
+import { getTransactions } from '../economy/api';
 
 function ChatPageInner({ token, onLogout }) {
   const { showEarn } = useHrumToast();
@@ -71,18 +71,8 @@ function ChatPageInner({ token, onLogout }) {
     setTimeout(() => economyProbe('earn:call_start'), 2200);
   }, [economyProbe]);
 
-  // Daily login: best-effort on entering chat (backend decides claimed vs cooldown).
-  const didDailyRef = useRef(false);
-  useEffect(() => {
-    if (!token || didDailyRef.current) return;
-    didDailyRef.current = true;
-    (async () => {
-      try {
-        const res = await claimDailyLogin({ token });
-        if (res?.claimed && res?.amountHrum) showEarn({ amountHrum: res.amountHrum });
-      } catch (_) {}
-    })();
-  }, [token, showEarn]);
+  // Daily login intentionally остается только по явному действию пользователя в профиле (HrumPanel),
+  // чтобы не спамить сеть/консоль при нестабильном backend.
 
   // Получение текущего пользователя
   useEffect(() => {
