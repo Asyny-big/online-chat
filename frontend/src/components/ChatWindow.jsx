@@ -334,7 +334,19 @@ function ChatWindow({
 function MessageBubble({ message, isMine, onDelete }) {
   const [showMenu, setShowMenu] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const { type = 'text', text, attachment, createdAt, sender } = message;
+  const { type: rawType = 'text', text, attachment, createdAt, sender } = message;
+
+  // Интеллектуальное определение типа: если type='file', но mimeType указывает на медиа - используем правильный тип
+  const type = (() => {
+    if (rawType !== 'file' && rawType !== 'text') return rawType; // image/video/audio - оставляем как есть
+    if (!attachment?.mimeType) return rawType;
+
+    const mime = attachment.mimeType.toLowerCase();
+    if (mime.startsWith('image/')) return 'image';
+    if (mime.startsWith('video/')) return 'video';
+    if (mime.startsWith('audio/')) return 'audio';
+    return rawType;
+  })();
 
   const time = createdAt
     ? new Date(createdAt).toLocaleTimeString('ru-RU', {
