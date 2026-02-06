@@ -69,20 +69,20 @@ const mimeTypes = {
 app.get('/uploads/:filename', (req, res) => {
   const filename = req.params.filename;
   const filePath = path.join(uploadsDir, filename);
-  
+
   // Проверка существования файла
   if (!fs.existsSync(filePath)) {
     return res.status(404).json({ error: 'Файл не найден' });
   }
-  
+
   // Получение расширения и MIME-типа
   const ext = path.extname(filename).toLowerCase();
   const mimeType = mimeTypes[ext] || 'application/octet-stream';
-  
+
   // Установка заголовков
   res.setHeader('Content-Type', mimeType);
   res.setHeader('Accept-Ranges', 'bytes');
-  
+
   // Для аудио/видео - inline, для остальных - attachment
   const isMedia = mimeType.startsWith('audio/') || mimeType.startsWith('video/') || mimeType.startsWith('image/');
   if (isMedia) {
@@ -90,22 +90,22 @@ app.get('/uploads/:filename', (req, res) => {
   } else {
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
   }
-  
+
   // Поддержка Range requests для аудио/видео
   const stat = fs.statSync(filePath);
   const fileSize = stat.size;
   const range = req.headers.range;
-  
+
   if (range && (mimeType.startsWith('audio/') || mimeType.startsWith('video/'))) {
     const parts = range.replace(/bytes=/, '').split('-');
     const start = parseInt(parts[0], 10);
     const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
     const chunkSize = end - start + 1;
-    
+
     res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
     res.setHeader('Content-Length', chunkSize);
     res.status(206);
-    
+
     const stream = fs.createReadStream(filePath, { start, end });
     stream.pipe(res);
   } else {
@@ -114,26 +114,29 @@ app.get('/uploads/:filename', (req, res) => {
   }
 });
 
+// Middleware для авторизации (нужен для download endpoint)
+const authMiddleware = require('./middleware/auth');
+
 // Endpoint для скачивания файлов с оригинальным именем
 app.get('/api/download/:filename', authMiddleware, (req, res) => {
   const { filename } = req.params;
   const originalName = req.query.name || filename;
-  
+
   const filePath = path.join(uploadsDir, filename);
-  
+
   if (!fs.existsSync(filePath)) {
     return res.status(404).json({ error: 'Файл не найден' });
   }
-  
+
   const ext = path.extname(filename).toLowerCase();
   const mimeType = mimeTypes[ext] || 'application/octet-stream';
   const stat = fs.statSync(filePath);
-  
+
   res.setHeader('Content-Type', mimeType);
   res.setHeader('Content-Length', stat.size);
   // RFC 5987: filename*=UTF-8'' для поддержки Unicode в именах файлов
   res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(originalName).replace(/%20/g, ' ')}"; filename*=UTF-8''${encodeURIComponent(originalName)}`);
-  
+
   fs.createReadStream(filePath).pipe(res);
 });
 
@@ -160,7 +163,6 @@ app.use('/api/economy', economyRoutes);
 app.use('/api/admin/economy', adminEconomyRoutes);
 
 // Загрузка файлов
-const authMiddleware = require('./middleware/auth');
 app.post('/api/upload', authMiddleware, upload.single('file'), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'Файл не загружен' });
