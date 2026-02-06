@@ -151,9 +151,35 @@ export default function AdminPage({ token, onBack }) {
     }, [token]);
 
     useEffect(() => {
-        fetchData();
-        const id = setInterval(fetchData, 4000);
-        return () => clearInterval(id);
+        let id = null;
+
+        const startPolling = () => {
+            if (id) clearInterval(id);
+            fetchData();
+            id = setInterval(fetchData, 4000);
+        };
+
+        const stopPolling = () => {
+            if (id) clearInterval(id);
+            id = null;
+        };
+
+        const handleVisibility = () => {
+            if (document.hidden) {
+                stopPolling();
+            } else {
+                startPolling();
+            }
+        };
+
+        // Start if visible
+        if (!document.hidden) startPolling();
+
+        document.addEventListener('visibilitychange', handleVisibility);
+        return () => {
+            stopPolling();
+            document.removeEventListener('visibilitychange', handleVisibility);
+        };
     }, [fetchData]);
 
     const handleCleanup = async () => {
@@ -301,7 +327,7 @@ export default function AdminPage({ token, onBack }) {
             </div>
 
             <div style={styles.refreshInfo}>
-                Обновление каждые 4 сек • {lastUpdate ? `Последнее: ${lastUpdate.toLocaleTimeString()}` : ''}
+                Обновление каждые 15 сек • {lastUpdate ? `Последнее: ${lastUpdate.toLocaleTimeString()}` : ''}
             </div>
         </div>
     );
