@@ -284,6 +284,7 @@ function ChatWindow({
                 key={msg._id || idx}
                 message={msg}
                 isMine={isMine}
+                token={token}
                 onDelete={isMine ? () => onDeleteMessage?.(msg._id) : null}
               />
             );
@@ -332,7 +333,7 @@ function ChatWindow({
 }
 
 // Компонент сообщения
-function MessageBubble({ message, isMine, onDelete }) {
+function MessageBubble({ message, isMine, onDelete, token }) {
   const [showMenu, setShowMenu] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const { type: rawType = 'text', text, attachment, createdAt, sender } = message;
@@ -385,6 +386,23 @@ function MessageBubble({ message, isMine, onDelete }) {
     return `${baseUrl}${normalizedUrl}`;
   };
 
+  const normalizeFilename = (name) => {
+    if (!name) return '';
+    const hasCyrillic = /[\u0400-\u04FF]/.test(name);
+    const looksLikeMojibake = /[ÐÑÃ]/.test(name) && !hasCyrillic;
+    if (!looksLikeMojibake) return name;
+    try {
+      const bytes = Uint8Array.from(name, (ch) => ch.charCodeAt(0) & 0xff);
+      const decoded = new TextDecoder('utf-8').decode(bytes);
+      if (/[\u0400-\u04FF]/.test(decoded)) return decoded;
+      return name;
+    } catch (_) {
+      return name;
+    }
+  };
+
+  const displayOriginalName = normalizeFilename(attachment?.originalName) || 'Файл';
+
   const downloadAttachment = async () => {
     try {
       const url = attachment?.url;
@@ -398,15 +416,29 @@ function MessageBubble({ message, isMine, onDelete }) {
       const res = await axios.get(downloadUrl, {
         responseType: 'blob',
         headers: {
-          Authorization: `Bearer ${localStorage.getItem('token') || ''}`
+          Authorization: `Bearer ${token || ''}`
         }
       });
+
+      const contentType = String(res.headers?.['content-type'] || '');
+      if (contentType.includes('application/json')) {
+        const text = await res.data.text();
+        let msg = 'Не удалось скачать файл';
+        try {
+          const json = JSON.parse(text);
+          msg = json?.error || json?.message || msg;
+        } catch (_) {
+          // ignore
+        }
+        alert(msg);
+        return;
+      }
 
       const blob = res.data;
       const blobUrl = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = blobUrl;
-      a.download = attachment?.originalName || 'file';
+      a.download = displayOriginalName || 'file';
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -472,7 +504,7 @@ function MessageBubble({ message, isMine, onDelete }) {
           >
             <span style={styles.fileIcon}>📄</span>
             <div style={styles.fileInfo}>
-              <div style={styles.fileName}>{attachment?.originalName || 'Файл'}</div>
+              <div style={styles.fileName}>{displayOriginalName}</div>
               <div style={styles.fileSize}>
                 {attachment?.size ? formatFileSize(attachment.size) : ''}
               </div>
