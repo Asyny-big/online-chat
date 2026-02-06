@@ -75,7 +75,7 @@ async function forceLeaveUserFromCall({ io, userId, call }) {
   }
 }
 
-module.exports = function(io) {
+module.exports = function (io) {
   // Авторизация сокетов
   io.use(async (socket, next) => {
     try {
@@ -86,7 +86,7 @@ module.exports = function(io) {
 
       const decoded = jwt.verify(token, config.JWT_SECRET);
       const user = await User.findById(decoded.userId);
-      
+
       if (!user) {
         return next(new Error('USER_NOT_FOUND'));
       }
@@ -98,7 +98,7 @@ module.exports = function(io) {
         if (iatMs !== null && iatMs < validAfter) {
           return next(new Error('TOKEN_REVOKED'));
         }
-      } catch (_) {}
+      } catch (_) { }
 
       socket.userId = user._id.toString();
       socket.user = user;
@@ -117,13 +117,13 @@ module.exports = function(io) {
       userSockets.set(userId, new Set());
     }
     userSockets.get(userId).add(socket.id);
-    
+
     // Логирование всех подключённых пользователей
     console.log(`[Socket] Total connected users: ${userSockets.size}, users:`, Array.from(userSockets.keys()));
 
     // Обновление статуса
     await User.findByIdAndUpdate(userId, { status: 'online' });
-    
+
     // Присоединение к чатам
     const userChats = await Chat.find({ 'participants.user': userId }).select('_id');
     userChats.forEach(chat => {
@@ -148,7 +148,7 @@ module.exports = function(io) {
     socket.on('message:send', async (data, callback) => {
       try {
         const { chatId, text, type = 'text', attachment } = data;
-        
+
         const chat = await verifyAccess(chatId);
         if (!chat) {
           return callback?.({ error: 'Нет доступа к чату' });
@@ -199,7 +199,7 @@ module.exports = function(io) {
             .catch((e) => {
               console.warn('[Economy] message reward rejected:', { userId, chatId: String(chatId), error: e?.message || e });
             });
-        } catch (_) {}
+        } catch (_) { }
       } catch (error) {
         console.error('message:send error:', error);
         callback?.({ error: 'Ошибка отправки' });
@@ -247,17 +247,17 @@ module.exports = function(io) {
     socket.on('call:start', async ({ chatId, type = 'video' }, callback) => {
       try {
         console.log(`[Socket] call:start from ${userId}, chatId: ${chatId}, type: ${type}`);
-        
+
         const chat = await Chat.findById(chatId).populate('participants.user', 'name');
-        
+
         if (!chat) {
           console.log(`[Socket] call:start - chat not found: ${chatId}`);
           return callback?.({ error: 'Чат не найден' });
         }
-        
+
         const isParticipant = chat.isParticipant(userId);
         console.log(`[Socket] call:start - isParticipant: ${isParticipant}, userId: ${userId}`);
-        
+
         if (!isParticipant) {
           console.log(`[Socket] call:start - user not in chat, participants:`, chat.participants.map(p => p.user?._id?.toString?.() || p.user?.toString?.()));
           return callback?.({ error: 'Нет доступа к чату' });
@@ -295,12 +295,12 @@ module.exports = function(io) {
 
         console.log(`[Socket] call:start - notifying ${otherParticipants.length} other participants`);
         console.log(`[Socket] call:start - all participants:`, chat.participants.map(p => p.user?._id?.toString?.() || p.user?.toString?.()));
-        
+
         otherParticipants.forEach(({ user: participant }) => {
           const participantId = participant?._id?.toString?.() || participant?.toString?.();
           const participantSockets = userSockets.get(participantId);
           console.log(`[Socket] call:start - participant ${participantId} has ${participantSockets?.size || 0} sockets, userSockets keys:`, Array.from(userSockets.keys()));
-          
+
           if (participantSockets && participantSockets.size > 0) {
             participantSockets.forEach(socketId => {
               console.log(`[Socket] call:start - sending call:incoming to socket ${socketId}`);
@@ -580,7 +580,7 @@ module.exports = function(io) {
             map.delete(userId);
             if (map.size === 0) activeGroupCallStreams.delete(callId);
           }
-        } catch (e) {}
+        } catch (e) { }
 
         callback?.({ success: true });
       } catch (err) {
@@ -592,7 +592,7 @@ module.exports = function(io) {
     socket.on('call:accept', async ({ callId }, callback) => {
       try {
         console.log(`[Socket] call:accept from ${userId}, callId: ${callId}`);
-        
+
         const call = await Call.findById(callId);
         if (!call) {
           console.log('[Socket] call:accept - call not found');
@@ -608,7 +608,7 @@ module.exports = function(io) {
         if (!call.isInCall(userId)) {
           call.participants.push({ user: userId });
         }
-        
+
         if (call.status === 'ringing') {
           call.status = 'active';
         }
@@ -622,9 +622,9 @@ module.exports = function(io) {
         // Уведомляем ТОЛЬКО инициатора что звонок принят (не в комнату чата!)
         const initiatorId = call.initiator.toString();
         const initiatorSockets = userSockets.get(initiatorId);
-        
+
         console.log(`[Socket] Notifying initiator ${initiatorId} about accepted call, accepter: ${userId}`);
-        
+
         if (initiatorSockets) {
           initiatorSockets.forEach(socketId => {
             io.to(socketId).emit('call:participant_joined', {
@@ -645,13 +645,13 @@ module.exports = function(io) {
     // WebRTC signaling - НЕ сохраняем в БД!
     socket.on('call:signal', async ({ callId, targetUserId, signal }) => {
       console.log(`[Socket] call:signal from ${userId} to ${targetUserId}, type: ${signal?.type}`);
-      
+
       const call = await Call.findById(callId);
       if (!call) {
         console.log('[Socket] call:signal - call not found:', callId);
         return;
       }
-      
+
       // Проверяем что отправитель участник звонка
       const chat = await Chat.findById(call.chat);
       if (!chat || !chat.isParticipant(userId)) {
@@ -687,7 +687,7 @@ module.exports = function(io) {
         }
 
         const activeParticipants = call.participants.filter(p => !p.leftAt);
-        
+
         if (activeParticipants.length <= 1) {
           call.status = 'ended';
           call.endedAt = new Date();
@@ -765,12 +765,12 @@ module.exports = function(io) {
           } catch (err) {
             console.error('[Socket] disconnect cleanup error:', err);
           }
-          
+
           await User.findByIdAndUpdate(userId, {
             status: 'offline',
             lastSeen: new Date()
           });
-          
+
           broadcastUserStatus(io, userId, 'offline');
         }
       }
@@ -809,5 +809,5 @@ module.exports = function(io) {
     }
   }
 
-  return { userSockets, activeCalls };
+  return { userSockets, activeCalls, activeGroupCalls };
 };

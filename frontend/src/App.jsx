@@ -2,6 +2,7 @@
 import axios from 'axios';
 import { API_URL } from './config';
 import ChatPage from './pages/ChatPage';
+import AdminPage from './pages/AdminPage';
 import { authStyles as styles } from './styles/authStyles';
 
 function App() {
@@ -12,10 +13,17 @@ function App() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [route, setRoute] = useState(window.location.hash);
 
   useEffect(() => {
     if (token) localStorage.setItem('token', token);
   }, [token]);
+
+  useEffect(() => {
+    const handleHash = () => setRoute(window.location.hash);
+    window.addEventListener('hashchange', handleHash);
+    return () => window.removeEventListener('hashchange', handleHash);
+  }, []);
 
   const handleAuth = async (e) => {
     e.preventDefault();
@@ -41,7 +49,12 @@ function App() {
     setName('');
   };
 
-  if (token) return <ChatPage token={token} onLogout={handleLogout} />;
+  if (token) {
+    if (route === '#/admin') {
+      return <AdminPage token={token} onBack={() => { window.location.hash = ''; }} />;
+    }
+    return <ChatPage token={token} onLogout={handleLogout} />;
+  }
 
   return (
     <div style={styles.authContainer}>
@@ -51,7 +64,7 @@ function App() {
           GovChat
         </h1>
         <p style={styles.subtitle}>Современный мессенджер</p>
-        
+
         <div style={styles.tabs}>
           <button
             onClick={() => setAuthMode('login')}
@@ -78,7 +91,7 @@ function App() {
               required
             />
           )}
-          
+
           <input
             type="tel"
             placeholder="Номер телефона"
@@ -87,7 +100,7 @@ function App() {
             style={styles.input}
             required
           />
-          
+
           <input
             type="password"
             placeholder="Пароль"
@@ -98,9 +111,9 @@ function App() {
           />
 
           {error && <div style={styles.error}>{error}</div>}
-          
-          <button 
-            type="submit" 
+
+          <button
+            type="submit"
             style={{
               ...styles.button,
               opacity: loading ? 0.7 : 1,
