@@ -66,7 +66,7 @@ const mimeTypes = {
 };
 
 // Роут для скачивания файлов с правильными заголовками
-app.get('/uploads/:filename', (req, res) => {
+function streamUploadedFile(req, res) {
   const filename = req.params.filename;
   const filePath = path.join(uploadsDir, filename);
 
@@ -83,7 +83,7 @@ app.get('/uploads/:filename', (req, res) => {
   res.setHeader('Content-Type', mimeType);
   res.setHeader('Accept-Ranges', 'bytes');
 
-  // Для аудио/видео - inline, для остальных - attachment
+  // Для аудио/видео/картинок - inline, для остальных - attachment
   const isMedia = mimeType.startsWith('audio/') || mimeType.startsWith('video/') || mimeType.startsWith('image/');
   if (isMedia) {
     res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
@@ -112,7 +112,12 @@ app.get('/uploads/:filename', (req, res) => {
     res.setHeader('Content-Length', fileSize);
     fs.createReadStream(filePath).pipe(res);
   }
-});
+}
+
+// Публичная раздача загруженных файлов.
+// ВАЖНО: /api/uploads нужен для конфигов прокси, которые прокидывают только /api.
+app.get('/uploads/:filename', streamUploadedFile);
+app.get('/api/uploads/:filename', streamUploadedFile);
 
 // Middleware для авторизации (нужен для download endpoint)
 const authMiddleware = require('./middleware/auth');
@@ -168,7 +173,8 @@ app.post('/api/upload', authMiddleware, upload.single('file'), (req, res) => {
     return res.status(400).json({ error: 'Файл не загружен' });
   }
   res.json({
-    url: `/uploads/${req.file.filename}`,
+    // Отдаём URL через /api/uploads, чтобы работало за прокси, где наружу торчит только /api.
+    url: `/api/uploads/${req.file.filename}`,
     originalName: req.file.originalname,
     mimeType: req.file.mimetype,
     size: req.file.size

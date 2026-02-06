@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import axios from 'axios';
 import MessageInput from './MessageInput';
 import { API_URL } from '../config';
 
@@ -364,9 +365,56 @@ function MessageBubble({ message, isMine, onDelete }) {
     if (url.startsWith('http://') || url.startsWith('https://')) {
       return url;
     }
+
+    const normalizedUrl = url.startsWith('/') ? url : `/${url}`;
+
+    // Совместимость со старыми сообщениями, где сохранялось /uploads/...
+    // За прокси часто наружу прокидывают только /api, поэтому используем /api/uploads.
+    if (normalizedUrl.startsWith('/uploads/')) {
+      return `${API_URL}${normalizedUrl}`; // /api + /uploads/... => /api/uploads/...
+    }
+
+    // Уже новый формат
+    if (normalizedUrl.startsWith('/api/uploads/')) {
+      const baseUrl = API_URL.replace(/\/api\/?$/, '');
+      return `${baseUrl}${normalizedUrl}`;
+    }
+
     // Получаем базовый URL без /api
-    const baseUrl = API_URL.replace('/api', '');
-    return `${baseUrl}${url}`;
+    const baseUrl = API_URL.replace(/\/api\/?$/, '');
+    return `${baseUrl}${normalizedUrl}`;
+  };
+
+  const downloadAttachment = async () => {
+    try {
+      const url = attachment?.url;
+      if (!url) return;
+
+      const filename = url.split('/').pop();
+      if (!filename) return;
+
+      const downloadUrl = `${API_URL}/download/${filename}?name=${encodeURIComponent(attachment?.originalName || 'file')}`;
+
+      const res = await axios.get(downloadUrl, {
+        responseType: 'blob',
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('token') || ''}`
+        }
+      });
+
+      const blob = res.data;
+      const blobUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = attachment?.originalName || 'file';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (e) {
+      console.error('Download error:', e);
+      alert('Не удалось скачать файл');
+    }
   };
 
   const renderContent = () => {
@@ -416,14 +464,11 @@ function MessageBubble({ message, isMine, onDelete }) {
         );
 
       case 'file':
-        // Формируем URL для скачивания с оригинальным именем
-        const filename = attachment?.url?.split('/').pop();
-        const downloadUrl = `${API_URL}/download/${filename}?name=${encodeURIComponent(attachment?.originalName || 'file')}`;
         return (
-          <a
-            href={downloadUrl}
+          <button
+            type="button"
+            onClick={downloadAttachment}
             style={styles.fileLink}
-            download
           >
             <span style={styles.fileIcon}>📄</span>
             <div style={styles.fileInfo}>
@@ -433,7 +478,7 @@ function MessageBubble({ message, isMine, onDelete }) {
               </div>
             </div>
             <span style={styles.downloadIcon}>⬇️</span>
-          </a>
+          </button>
         );
 
       default:
@@ -845,9 +890,11 @@ const styles = {
     gap: '10px',
     padding: '8px 12px',
     background: 'rgba(0,0,0,0.2)',
+    border: 'none',
     borderRadius: '8px',
     textDecoration: 'none',
     color: 'inherit',
+    cursor: 'pointer',
   },
   fileIcon: {
     fontSize: '28px',
