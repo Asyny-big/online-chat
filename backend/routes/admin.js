@@ -75,7 +75,7 @@ router.post('/cleanup-calls', async (req, res) => {
         for (const call of toClean) {
             call.status = 'ended';
             call.endedAt = now;
-            call.endReason = 'cleanup';
+            call.endReason = 'completed';
             await call.save();
             cleaned++;
         }
