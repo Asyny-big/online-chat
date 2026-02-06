@@ -2,24 +2,24 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import MessageInput from './MessageInput';
 import { API_URL } from '../config';
 
-function ChatWindow({ 
-  token, 
-  chat, 
-  messages, 
-  socket, 
-  currentUserId, 
-  onStartCall, 
+function ChatWindow({
+  token,
+  chat,
+  messages,
+  socket,
+  currentUserId,
+  onStartCall,
   onStartGroupCall,  // Новый пропс для групповых звонков
-  typingUsers, 
+  typingUsers,
   incomingCall,
   incomingGroupCall,  // Новый пропс для входящего группового звонка 
-  onAcceptCall, 
-  onDeclineCall, 
+  onAcceptCall,
+  onDeclineCall,
   onAcceptGroupCall,  // Новый пропс
   onDeclineGroupCall, // Новый пропс
-  onBack, 
-  onDeleteMessage, 
-  onDeleteChat 
+  onBack,
+  onDeleteMessage,
+  onDeleteChat
 }) {
   const messagesEndRef = useRef(null);
   const containerRef = useRef(null);
@@ -79,14 +79,14 @@ function ChatWindow({
 
   const displayName = chat.displayName || chat.name || 'Чат';
   const typingList = typingUsers?.filter(u => u.chatId === chat._id && u.userId !== currentUserId) || [];
-  
+
   // Проверяем, групповой ли это чат
   const isGroupChat = chat.type === 'group' || chat.isGroup === true;
   const participantCount = chat.participants?.length || 0;
-  
+
   // Проверяем есть ли входящий звонок для этого чата
   const hasIncomingCall = incomingCall && incomingCall.chatId === chat._id;
-  
+
   // Проверяем есть ли входящий групповой звонок для этого чата
   const hasIncomingGroupCall = incomingGroupCall && incomingGroupCall.chatId === chat._id;
 
@@ -107,14 +107,14 @@ function ChatWindow({
             </div>
           </div>
           <div style={styles.callBannerActions}>
-            <button 
+            <button
               onClick={() => onDeclineCall?.(incomingCall.callId)}
               style={styles.callBannerDecline}
               title="Отклонить"
             >
               ✕
             </button>
-            <button 
+            <button
               onClick={() => onAcceptCall?.(incomingCall.callId, incomingCall.type)}
               style={styles.callBannerAccept}
               title="Принять"
@@ -136,21 +136,21 @@ function ChatWindow({
               <div style={styles.callBannerTitle}>Групповой звонок</div>
               <div style={styles.callBannerSubtitle}>
                 {incomingGroupCall.initiator?.name || 'Участник'} начал звонок
-                {incomingGroupCall.participants?.length > 1 && 
+                {incomingGroupCall.participants?.length > 1 &&
                   ` • ${incomingGroupCall.participants.length} участников`
                 }
               </div>
             </div>
           </div>
           <div style={styles.callBannerActions}>
-            <button 
+            <button
               onClick={() => onDeclineGroupCall?.(incomingGroupCall.callId)}
               style={styles.callBannerDecline}
               title="Отклонить"
             >
               ✕
             </button>
-            <button 
+            <button
               onClick={() => onAcceptGroupCall?.(incomingGroupCall.callId, incomingGroupCall.type)}
               style={styles.callBannerAccept}
               title="Присоединиться"
@@ -160,7 +160,7 @@ function ChatWindow({
           </div>
         </div>
       )}
-      
+
       {/* Шапка с кнопками звонков */}
       <div style={styles.header}>
         <div style={styles.headerInfo}>
@@ -335,16 +335,16 @@ function MessageBubble({ message, isMine, onDelete }) {
   const [showMenu, setShowMenu] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const { type = 'text', text, attachment, createdAt, sender } = message;
-  
+
   const time = createdAt
     ? new Date(createdAt).toLocaleTimeString('ru-RU', {
-        hour: '2-digit',
-        minute: '2-digit',
-      })
+      hour: '2-digit',
+      minute: '2-digit',
+    })
     : '';
 
   const senderName = sender?.name || '';
-  
+
   // Формирование URL для медиа-файлов
   const getMediaUrl = (url) => {
     if (!url) return '';
@@ -388,30 +388,30 @@ function MessageBubble({ message, isMine, onDelete }) {
       case 'audio':
         // CRITICAL: Правильное воспроизведение голосовых сообщений
         const audioUrl = getMediaUrl(attachment?.url);
+        const audioMimeType = attachment?.mimeType || 'audio/webm';
         return (
           <div style={styles.audioWrapper}>
             <span style={styles.audioIcon}>🎤</span>
             <audio
               controls
-              preload="metadata"
+              preload="auto"
               style={styles.audioPlayer}
             >
-              <source src={audioUrl} type="audio/webm" />
-              <source src={audioUrl} type="audio/ogg" />
-              <source src={audioUrl} type="audio/mpeg" />
+              <source src={audioUrl} type={audioMimeType} />
               Ваш браузер не поддерживает аудио
             </audio>
           </div>
         );
 
       case 'file':
+        // Формируем URL для скачивания с оригинальным именем
+        const filename = attachment?.url?.split('/').pop();
+        const downloadUrl = `${API_URL}/download/${filename}?name=${encodeURIComponent(attachment?.originalName || 'file')}`;
         return (
           <a
-            href={getMediaUrl(attachment?.url)}
-            target="_blank"
-            rel="noopener noreferrer"
+            href={downloadUrl}
             style={styles.fileLink}
-            download={attachment?.originalName || 'file'}
+            download
           >
             <span style={styles.fileIcon}>📄</span>
             <div style={styles.fileInfo}>
@@ -434,7 +434,7 @@ function MessageBubble({ message, isMine, onDelete }) {
       ...styles.messageRow,
       justifyContent: isMine ? 'flex-end' : 'flex-start',
     }}>
-      <div 
+      <div
         style={{
           ...styles.bubble,
           ...(isMine ? styles.bubbleMine : styles.bubbleTheirs),

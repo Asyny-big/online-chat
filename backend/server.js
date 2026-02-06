@@ -114,6 +114,29 @@ app.get('/uploads/:filename', (req, res) => {
   }
 });
 
+// Endpoint для скачивания файлов с оригинальным именем
+app.get('/api/download/:filename', authMiddleware, (req, res) => {
+  const { filename } = req.params;
+  const originalName = req.query.name || filename;
+  
+  const filePath = path.join(uploadsDir, filename);
+  
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'Файл не найден' });
+  }
+  
+  const ext = path.extname(filename).toLowerCase();
+  const mimeType = mimeTypes[ext] || 'application/octet-stream';
+  const stat = fs.statSync(filePath);
+  
+  res.setHeader('Content-Type', mimeType);
+  res.setHeader('Content-Length', stat.size);
+  // RFC 5987: filename*=UTF-8'' для поддержки Unicode в именах файлов
+  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(originalName).replace(/%20/g, ' ')}"; filename*=UTF-8''${encodeURIComponent(originalName)}`);
+  
+  fs.createReadStream(filePath).pipe(res);
+});
+
 // Загрузка файлов
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadsDir),

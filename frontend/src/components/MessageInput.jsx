@@ -11,7 +11,7 @@ function MessageInput({ chatId, socket, token, onTyping }) {
   const [recordingTime, setRecordingTime] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
-  
+
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const fileInputRef = useRef(null);
@@ -30,10 +30,10 @@ function MessageInput({ chatId, socket, token, onTyping }) {
   // Индикатор «печатает»
   const handleInputChange = (e) => {
     setInput(e.target.value);
-    
+
     if (socket && chatId) {
       socket.emit('typing:start', { chatId });
-      
+
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       typingTimeoutRef.current = setTimeout(() => {
         socket.emit('typing:stop', { chatId });
@@ -69,7 +69,7 @@ function MessageInput({ chatId, socket, token, onTyping }) {
           const abs = raw.startsWith('-') ? raw.slice(1) : raw.startsWith('+') ? raw.slice(1) : raw;
           if (!abs) return;
           showEarn({ amountHrum: abs, txId: t.id });
-        } catch (_) {}
+        } catch (_) { }
       }, 650);
     });
 
@@ -82,7 +82,7 @@ function MessageInput({ chatId, socket, token, onTyping }) {
 
   const uploadFile = async (file) => {
     if (!file || !chatId) return;
-    
+
     // Лимит 20 МБ
     if (file.size > 20 * 1024 * 1024) {
       alert('Максимальный размер файла: 20 МБ');
@@ -103,7 +103,17 @@ function MessageInput({ chatId, socket, token, onTyping }) {
 
       const isImage = file.type.startsWith('image/');
       const isVideo = file.type.startsWith('video/');
-      const type = isImage ? 'image' : isVideo ? 'video' : 'file';
+      const type = (() => {
+        if (file.type.startsWith('image/')) return 'image';
+        if (file.type.startsWith('video/')) return 'video';
+        // Fallback по расширению если браузер не определил MIME-тип
+        const ext = (file.name.split('.').pop() || '').toLowerCase();
+        const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'];
+        const videoExts = ['mp4', 'webm', 'mov', 'avi', 'mkv', 'm4v'];
+        if (imageExts.includes(ext)) return 'image';
+        if (videoExts.includes(ext)) return 'video';
+        return 'file';
+      })();
 
       socket.emit('message:send', {
         chatId,
@@ -149,7 +159,7 @@ function MessageInput({ chatId, socket, token, onTyping }) {
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      
+
       // Определяем поддерживаемый MIME-тип
       let mimeType = 'audio/webm';
       if (!MediaRecorder.isTypeSupported('audio/webm')) {
@@ -161,12 +171,12 @@ function MessageInput({ chatId, socket, token, onTyping }) {
           mimeType = ''; // Использовать дефолтный
         }
       }
-      
+
       console.log('[MessageInput] Recording with mimeType:', mimeType);
-      
+
       const options = mimeType ? { mimeType } : {};
       const mediaRecorder = new MediaRecorder(stream, options);
-      
+
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
 
@@ -178,12 +188,12 @@ function MessageInput({ chatId, socket, token, onTyping }) {
 
       mediaRecorder.onstop = async () => {
         stream.getTracks().forEach(track => track.stop());
-        
+
         const actualMimeType = mediaRecorder.mimeType || mimeType || 'audio/webm';
         const audioBlob = new Blob(audioChunksRef.current, { type: actualMimeType });
-        
+
         console.log('[MessageInput] Recording stopped, blob size:', audioBlob.size, 'type:', actualMimeType);
-        
+
         if (audioBlob.size > 0) {
           await uploadVoiceMessage(audioBlob, actualMimeType);
         }
@@ -192,7 +202,7 @@ function MessageInput({ chatId, socket, token, onTyping }) {
       mediaRecorder.start();
       setIsRecording(true);
       setRecordingTime(0);
-      
+
       timerRef.current = setInterval(() => {
         setRecordingTime(t => t + 1);
       }, 1000);
@@ -237,7 +247,7 @@ function MessageInput({ chatId, socket, token, onTyping }) {
       if (mimeType.includes('ogg')) extension = '.ogg';
       else if (mimeType.includes('mp4') || mimeType.includes('m4a')) extension = '.m4a';
       else if (mimeType.includes('mpeg') || mimeType.includes('mp3')) extension = '.mp3';
-      
+
       const formData = new FormData();
       formData.append('file', blob, `voice_${Date.now()}${extension}`);
 
