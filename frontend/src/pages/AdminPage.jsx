@@ -130,6 +130,8 @@ export default function AdminPage({ token, onBack }) {
     const [data, setData] = useState(null);
     const [error, setError] = useState('');
     const [lastUpdate, setLastUpdate] = useState(null);
+    const [cleaning, setCleaning] = useState(false);
+    const [cleanResult, setCleanResult] = useState(null);
 
     const fetchData = useCallback(async () => {
         try {
@@ -153,6 +155,24 @@ export default function AdminPage({ token, onBack }) {
         const id = setInterval(fetchData, 4000);
         return () => clearInterval(id);
     }, [fetchData]);
+
+    const handleCleanup = async () => {
+        setCleaning(true);
+        setCleanResult(null);
+        try {
+            const res = await fetch(`${API_URL}/admin/cleanup-calls`, {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            const json = await res.json();
+            setCleanResult(json);
+            fetchData();
+        } catch (e) {
+            setCleanResult({ error: e.message });
+        } finally {
+            setCleaning(false);
+        }
+    };
 
     if (error) {
         return (
@@ -226,6 +246,31 @@ export default function AdminPage({ token, onBack }) {
                     )}
                     {(!activeCalls || activeCalls.length === 0) && (
                         <p style={{ color: '#666', marginTop: '12px', fontSize: '14px' }}>Нет активных звонков</p>
+                    )}
+                    {activeCalls?.some(c => c.participants?.length === 0) && (
+                        <button
+                            onClick={handleCleanup}
+                            disabled={cleaning}
+                            style={{
+                                marginTop: '12px',
+                                width: '100%',
+                                padding: '10px',
+                                background: cleaning ? '#555' : '#f44336',
+                                border: 'none',
+                                borderRadius: '8px',
+                                color: '#fff',
+                                cursor: cleaning ? 'not-allowed' : 'pointer',
+                                fontSize: '14px',
+                                fontWeight: '500',
+                            }}
+                        >
+                            {cleaning ? 'Очистка...' : '🧹 Очистить зависшие звонки'}
+                        </button>
+                    )}
+                    {cleanResult && (
+                        <div style={{ marginTop: '8px', fontSize: '12px', color: cleanResult.error ? '#ff6b6b' : '#4caf50' }}>
+                            {cleanResult.error ? `Ошибка: ${cleanResult.error}` : `✓ Очищено: ${cleanResult.cleaned}`}
+                        </div>
                     )}
                 </div>
 

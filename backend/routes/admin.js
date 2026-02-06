@@ -56,4 +56,36 @@ router.get('/overview', async (req, res) => {
     }
 });
 
+// Очистка зависших звонков (0 активных участников)
+router.post('/cleanup-calls', async (req, res) => {
+    try {
+        const now = new Date();
+
+        // Находим звонки в статусе ringing/active, где все участники вышли
+        const staleCalls = await Call.find({
+            status: { $in: ['ringing', 'active'] }
+        });
+
+        const toClean = staleCalls.filter(call => {
+            const activeParticipants = call.participants.filter(p => !p.leftAt);
+            return activeParticipants.length === 0;
+        });
+
+        let cleaned = 0;
+        for (const call of toClean) {
+            call.status = 'ended';
+            call.endedAt = now;
+            call.endReason = 'cleanup';
+            await call.save();
+            cleaned++;
+        }
+
+        console.log(`[Admin] Cleaned ${cleaned} stale calls`);
+        res.json({ ok: true, cleaned, total: staleCalls.length });
+    } catch (err) {
+        console.error('[Admin] cleanup-calls error:', err);
+        res.status(500).json({ error: 'cleanup_failed' });
+    }
+});
+
 module.exports = router;
