@@ -19,6 +19,7 @@ function MessageInput({ chatId, socket, token, onTyping }) {
   const typingTimeoutRef = useRef(null);
   const lastEconomyProbeAtRef = useRef(0);
 
+  // Очистка при размонтировании
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
@@ -26,6 +27,7 @@ function MessageInput({ chatId, socket, token, onTyping }) {
     };
   }, []);
 
+  // Индикатор «печатает»
   const handleInputChange = (e) => {
     setInput(e.target.value);
 
@@ -75,11 +77,13 @@ function MessageInput({ chatId, socket, token, onTyping }) {
     socket.emit('typing:stop', { chatId });
   };
 
+  // === ФАЙЛЫ ===
   const handleFileSelect = () => fileInputRef.current?.click();
 
   const uploadFile = async (file) => {
     if (!file || !chatId) return;
 
+    // Лимит 20 МБ
     if (file.size > 20 * 1024 * 1024) {
       alert('Максимальный размер файла: 20 МБ');
       return;
@@ -97,9 +101,12 @@ function MessageInput({ chatId, socket, token, onTyping }) {
         }
       });
 
+      const isImage = file.type.startsWith('image/');
+      const isVideo = file.type.startsWith('video/');
       const type = (() => {
         if (file.type.startsWith('image/')) return 'image';
         if (file.type.startsWith('video/')) return 'video';
+        // Fallback по расширению если браузер не определил MIME-тип
         const ext = (file.name.split('.').pop() || '').toLowerCase();
         const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'];
         const videoExts = ['mp4', 'webm', 'mov', 'avi', 'mkv', 'm4v'];
@@ -133,6 +140,7 @@ function MessageInput({ chatId, socket, token, onTyping }) {
     e.target.value = '';
   };
 
+  // Drag & Drop
   const handleDragOver = (e) => {
     e.preventDefault();
     setIsDragging(true);
@@ -147,15 +155,24 @@ function MessageInput({ chatId, socket, token, onTyping }) {
     if (file) uploadFile(file);
   };
 
+  // === ГОЛОСОВЫЕ СООБЩЕНИЯ ===
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      // Определяем поддерживаемый MIME-тип
       let mimeType = 'audio/webm';
       if (!MediaRecorder.isTypeSupported('audio/webm')) {
-        if (MediaRecorder.isTypeSupported('audio/ogg')) mimeType = 'audio/ogg';
-        else if (MediaRecorder.isTypeSupported('audio/mp4')) mimeType = 'audio/mp4';
-        else mimeType = '';
+        if (MediaRecorder.isTypeSupported('audio/ogg')) {
+          mimeType = 'audio/ogg';
+        } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+          mimeType = 'audio/mp4';
+        } else {
+          mimeType = ''; // Использовать дефолтный
+        }
       }
+
+      console.log('[MessageInput] Recording with mimeType:', mimeType);
 
       const options = mimeType ? { mimeType } : {};
       const mediaRecorder = new MediaRecorder(stream, options);
@@ -164,13 +181,19 @@ function MessageInput({ chatId, socket, token, onTyping }) {
       audioChunksRef.current = [];
 
       mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+        if (e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
       };
 
       mediaRecorder.onstop = async () => {
         stream.getTracks().forEach(track => track.stop());
+
         const actualMimeType = mediaRecorder.mimeType || mimeType || 'audio/webm';
         const audioBlob = new Blob(audioChunksRef.current, { type: actualMimeType });
+
+        console.log('[MessageInput] Recording stopped, blob size:', audioBlob.size, 'type:', actualMimeType);
+
         if (audioBlob.size > 0) {
           await uploadVoiceMessage(audioBlob, actualMimeType);
         }
@@ -179,10 +202,12 @@ function MessageInput({ chatId, socket, token, onTyping }) {
       mediaRecorder.start();
       setIsRecording(true);
       setRecordingTime(0);
+
       timerRef.current = setInterval(() => {
         setRecordingTime(t => t + 1);
       }, 1000);
     } catch (err) {
+      console.error('Microphone access denied:', err);
       alert('Нет доступа к микрофону');
     }
   };
@@ -217,6 +242,7 @@ function MessageInput({ chatId, socket, token, onTyping }) {
   const uploadVoiceMessage = async (blob, mimeType) => {
     setUploading(true);
     try {
+      // Определяем расширение файла на основе MIME-типа
       let extension = '.webm';
       if (mimeType.includes('ogg')) extension = '.ogg';
       else if (mimeType.includes('mp4') || mimeType.includes('m4a')) extension = '.m4a';
@@ -232,6 +258,8 @@ function MessageInput({ chatId, socket, token, onTyping }) {
         }
       });
 
+      console.log('[MessageInput] Voice uploaded:', res.data);
+
       socket.emit('message:send', {
         chatId,
         type: 'audio',
@@ -244,6 +272,7 @@ function MessageInput({ chatId, socket, token, onTyping }) {
         }
       });
     } catch (err) {
+      console.error('Voice upload error:', err);
       alert('Ошибка отправки голосового');
     } finally {
       setUploading(false);
@@ -260,14 +289,17 @@ function MessageInput({ chatId, socket, token, onTyping }) {
 
   return (
     <div
-      className={`message-input-container ${isDragging ? 'dragging-over' : ''}`}
+      style={{
+        ...styles.container,
+        ...(isDragging ? styles.dragging : {})
+      }}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
       {isDragging && (
-        <div className="drop-overlay">
-          <span style={{ color: 'white', fontWeight: 600, fontSize: '1.2rem' }}>📎 Отпустите для загрузки</span>
+        <div style={styles.dropOverlay}>
+          <span style={styles.dropText}>📎 Отпустите для загрузки</span>
         </div>
       )}
 
@@ -280,22 +312,26 @@ function MessageInput({ chatId, socket, token, onTyping }) {
       />
 
       {isRecording ? (
-        <div className="recording-ui">
-          <div className="recording-indicator">
-            <span className="recording-dot" />
-            <span className="recording-time">{formatTime(recordingTime)}</span>
+        // Режим записи
+        <div style={styles.recordingRow}>
+          <div style={styles.recordingIndicator}>
+            <span style={styles.recordingDot} />
+            <span style={styles.recordingTime}>{formatTime(recordingTime)}</span>
           </div>
-          <div className="recording-actions">
-            <button onClick={cancelRecording} className="cancel-record-btn" title="Отмена">✕</button>
-            <button onClick={stopRecording} className="send-btn" title="Отправить">➤</button>
-          </div>
+          <button onClick={cancelRecording} style={styles.cancelBtn} title="Отмена">
+            ✕
+          </button>
+          <button onClick={stopRecording} style={styles.sendVoiceBtn} title="Отправить">
+            ➤
+          </button>
         </div>
       ) : (
-        <form onSubmit={handleSend} className="message-form">
+        // Обычный режим
+        <form onSubmit={handleSend} style={styles.form}>
           <button
             type="button"
             onClick={handleFileSelect}
-            className="input-action-btn"
+            style={styles.iconBtn}
             disabled={uploading}
             title="Прикрепить файл"
           >
@@ -304,10 +340,10 @@ function MessageInput({ chatId, socket, token, onTyping }) {
 
           <input
             type="text"
-            className="chat-input"
             value={input}
             onChange={handleInputChange}
-            placeholder={uploading ? 'Загрузка...' : 'Напишите сообщение...'}
+            placeholder={uploading ? 'Загрузка...' : 'Введите сообщение...'}
+            style={styles.input}
             disabled={uploading}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
@@ -318,14 +354,21 @@ function MessageInput({ chatId, socket, token, onTyping }) {
           />
 
           {input.trim() ? (
-            <button type="submit" className="send-btn" disabled={!canSend}>
+            <button
+              type="submit"
+              style={{
+                ...styles.sendBtn,
+                ...(canSend ? {} : styles.sendBtnDisabled)
+              }}
+              disabled={!canSend}
+            >
               ➤
             </button>
           ) : (
             <button
               type="button"
               onClick={startRecording}
-              className="input-action-btn"
+              style={styles.micBtn}
               disabled={uploading}
               title="Голосовое сообщение"
             >
@@ -337,5 +380,148 @@ function MessageInput({ chatId, socket, token, onTyping }) {
     </div>
   );
 }
+
+const styles = {
+  container: {
+    padding: '12px 16px',
+    borderTop: '1px solid #334155',
+    background: '#1e293b',
+    position: 'relative',
+  },
+  dragging: {
+    background: '#1e40af',
+  },
+  dropOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'rgba(30, 64, 175, 0.9)',
+    borderRadius: '8px',
+    zIndex: 10,
+  },
+  dropText: {
+    color: '#fff',
+    fontSize: '16px',
+    fontWeight: '600',
+  },
+  form: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  },
+  input: {
+    flex: 1,
+    padding: '12px 16px',
+    background: '#0f172a',
+    border: '1px solid #334155',
+    borderRadius: '24px',
+    color: '#fff',
+    fontSize: '14px',
+    outline: 'none',
+    transition: 'border-color 0.2s',
+  },
+  iconBtn: {
+    width: '40px',
+    height: '40px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'transparent',
+    border: 'none',
+    borderRadius: '50%',
+    fontSize: '20px',
+    cursor: 'pointer',
+    transition: 'background 0.2s',
+  },
+  sendBtn: {
+    width: '40px',
+    height: '40px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: '#3b82f6',
+    border: 'none',
+    borderRadius: '50%',
+    fontSize: '16px',
+    color: '#fff',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+  },
+  sendBtnDisabled: {
+    background: '#334155',
+    cursor: 'not-allowed',
+  },
+  micBtn: {
+    width: '40px',
+    height: '40px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: '#3b82f6',
+    border: 'none',
+    borderRadius: '50%',
+    fontSize: '18px',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+  },
+  // Запись
+  recordingRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+  },
+  recordingIndicator: {
+    flex: 1,
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    padding: '12px 16px',
+    background: '#0f172a',
+    borderRadius: '24px',
+  },
+  recordingDot: {
+    width: '10px',
+    height: '10px',
+    background: '#ef4444',
+    borderRadius: '50%',
+    animation: 'pulse 1s infinite',
+  },
+  recordingTime: {
+    color: '#fff',
+    fontSize: '14px',
+    fontWeight: '500',
+  },
+  cancelBtn: {
+    width: '40px',
+    height: '40px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: '#ef4444',
+    border: 'none',
+    borderRadius: '50%',
+    fontSize: '16px',
+    color: '#fff',
+    cursor: 'pointer',
+  },
+  sendVoiceBtn: {
+    width: '40px',
+    height: '40px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: '#22c55e',
+    border: 'none',
+    borderRadius: '50%',
+    fontSize: '16px',
+    color: '#fff',
+    cursor: 'pointer',
+  },
+};
 
 export default MessageInput;
