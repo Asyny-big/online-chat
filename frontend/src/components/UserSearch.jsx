@@ -1,5 +1,6 @@
 import React from 'react';
 import { usePhoneUserLookup } from '../hooks/usePhoneUserLookup';
+import { resolveAssetUrl } from '../utils/resolveAssetUrl';
 
 function UserSearch({ token, onCreateChat }) {
   const { phone, setPhone, status, user, error } = usePhoneUserLookup({ token, minLen: 9, debounceMs: 400 });
@@ -30,7 +31,13 @@ function UserSearch({ token, onCreateChat }) {
 
           {status === 'found' && user && (
             <button onClick={() => handleSelectUser(user.id)} style={styles.userItem}>
-              <div style={styles.userAvatar}>{user.name?.charAt(0)?.toUpperCase() || '?'}</div>
+              <div style={styles.userAvatar}>
+                {user.avatar ? (
+                  <img alt="" src={resolveAssetUrl(user.avatar)} style={styles.userAvatarImg} onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+                ) : (
+                  user.name?.charAt(0)?.toUpperCase() || '?'
+                )}
+              </div>
               <div style={styles.userInfo}>
                 <div style={styles.userName}>{user.name}</div>
                 <div style={styles.userPhone}>{phone}</div>
@@ -97,7 +104,9 @@ const styles = {
     fontWeight: '600',
     fontSize: '16px',
     flexShrink: 0,
+    overflow: 'hidden',
   },
+  userAvatarImg: { width: '100%', height: '100%', objectFit: 'cover' },
   userInfo: {
     flex: 1,
     minWidth: 0,

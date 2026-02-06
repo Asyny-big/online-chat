@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { API_URL } from '../config';
 import { CLIENT_VERSION } from '../version';
+import { resolveAssetUrl } from '../utils/resolveAssetUrl';
 import HrumPanel from './HrumPanel';
 
 function formatDate(value) {
@@ -29,6 +30,14 @@ function ProfileDrawer({ token, onClose, onLogout }) {
   const [isEditingName, setIsEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
   const [savingName, setSavingName] = useState(false);
+
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const avatarInputRef = useRef(null);
+  const [avatarBroken, setAvatarBroken] = useState(false);
+
+  useEffect(() => {
+    setAvatarBroken(false);
+  }, [profile?.avatar]);
 
   const [showPasswordForm, setShowPasswordForm] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
@@ -78,6 +87,49 @@ function ProfileDrawer({ token, onClose, onLogout }) {
       localStorage.setItem('themePreference', themeMode);
     } catch (_) {}
   }, [themeMode]);
+
+  const pickAvatar = useCallback(() => {
+    if (avatarUploading) return;
+    avatarInputRef.current?.click();
+  }, [avatarUploading]);
+
+  const onAvatarSelected = useCallback(
+    async (e) => {
+      try {
+        const file = e.target.files?.[0];
+        if (!file || !token) return;
+
+        if (!file.type?.startsWith('image/')) {
+          alert('Можно загрузить только изображение');
+          return;
+        }
+        if (file.size > 5 * 1024 * 1024) {
+          alert('Максимальный размер аватара: 5 МБ');
+          return;
+        }
+
+        setAvatarUploading(true);
+        const formData = new FormData();
+        formData.append('avatar', file);
+
+        const res = await fetch(`${API_URL}/users/me/avatar`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData,
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+
+        await fetchProfile();
+      } catch (err) {
+        alert(err?.message || 'Ошибка загрузки аватара');
+      } finally {
+        setAvatarUploading(false);
+        if (e?.target) e.target.value = '';
+      }
+    },
+    [fetchProfile, token]
+  );
 
   const saveName = useCallback(async () => {
     const next = String(nameDraft || '').trim();
@@ -186,12 +238,25 @@ function ProfileDrawer({ token, onClose, onLogout }) {
             <div style={styles.card}>
               <div style={styles.heroRow}>
                 <div style={styles.avatar}>
-                  {profile.avatar ? (
-                    <img alt="avatar" src={profile.avatar} style={styles.avatarImg} />
+                  {profile.avatar && !avatarBroken ? (
+                    <img
+                      alt="avatar"
+                      src={resolveAssetUrl(profile.avatar)}
+                      style={styles.avatarImg}
+                      onError={() => setAvatarBroken(true)}
+                    />
                   ) : (
                     heroLetter
                   )}
                 </div>
+
+                <input
+                  ref={avatarInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={onAvatarSelected}
+                  style={{ display: 'none' }}
+                />
 
                 <div style={styles.heroMain}>
                   <div style={styles.heroNameRow}>
@@ -207,6 +272,13 @@ function ProfileDrawer({ token, onClose, onLogout }) {
                       <div style={styles.heroName}>{profile.name}</div>
                     )}
                     <div style={styles.heroActions}>
+                      <button
+                        style={{ ...styles.secondaryBtn, ...(avatarUploading ? styles.btnDisabled : {}) }}
+                        onClick={pickAvatar}
+                        disabled={avatarUploading}
+                      >
+                        {avatarUploading ? 'Загрузка…' : 'Аватар'}
+                      </button>
                       {!isEditingName ? (
                         <button style={styles.secondaryBtn} onClick={() => setIsEditingName(true)}>
                           Изменить имя

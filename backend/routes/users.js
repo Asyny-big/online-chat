@@ -5,8 +5,50 @@ const Chat = require('../models/Chat');
 const authMiddleware = require('../middleware/auth');
 const HttpRateLimiter = require('../utils/httpRateLimiter');
 const { isValidPhoneExact, findUserByExactPhone } = require('../utils/userLookup');
+const multer = require('multer');
+const fs = require('fs');
+const path = require('path');
 
 router.use(authMiddleware);
+
+// uploads (для аватаров)
+const uploadsDir = path.join(__dirname, '..', 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+const AVATAR_MAX_BYTES = 5 * 1024 * 1024; // 5MB
+
+function extractUploadedFilename(url) {
+  if (!url || typeof url !== 'string') return null;
+  const clean = url.split('?')[0];
+  const filename = clean.split('/').pop();
+  return filename || null;
+}
+
+function isUserUploadAvatarUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  return url.startsWith('/uploads/') || url.startsWith('/api/uploads/');
+}
+
+const avatarStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadsDir),
+  filename: (req, file, cb) => {
+    const ext = (path.extname(file.originalname) || '').toLowerCase();
+    const safeExt = ext && ext.length <= 10 ? ext : '';
+    cb(null, `avatar_${req.userId}_${Date.now()}${safeExt}`);
+  }
+});
+
+const avatarUpload = multer({
+  storage: avatarStorage,
+  limits: { fileSize: AVATAR_MAX_BYTES },
+  fileFilter: (req, file, cb) => {
+    const ok = typeof file.mimetype === 'string' && file.mimetype.startsWith('image/');
+    if (!ok) return cb(new Error('ONLY_IMAGES_ALLOWED'));
+    cb(null, true);
+  }
+});
 
 const searchLimiter = new HttpRateLimiter({ windowMs: 60_000, maxRequests: 20 });
 
@@ -132,6 +174,47 @@ router.patch('/me', async (req, res) => {
   } catch (error) {
     console.error('Update profile error:', error);
     res.status(500).json({ error: 'Ошибка обновления профиля' });
+  }
+});
+
+// Загрузка аватара
+router.post('/me/avatar', avatarUpload.single('avatar'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'Файл не загружен' });
+    }
+
+    const user = await User.findById(req.userId);
+    if (!user) {
+      return res.status(404).json({ error: 'Пользователь не найден' });
+    }
+
+    // Удаляем предыдущий аватар (если это наш uploads и не дефолт)
+    try {
+      const prev = user.avatarUrl;
+      const prevFilename = extractUploadedFilename(prev);
+      const isDefault = prevFilename === 'avatar-default.png';
+      if (!isDefault && isUserUploadAvatarUrl(prev) && prevFilename) {
+        const prevPath = path.join(uploadsDir, prevFilename);
+        if (fs.existsSync(prevPath)) {
+          fs.unlinkSync(prevPath);
+        }
+      }
+    } catch (_) {}
+
+    user.avatarUrl = `/api/uploads/${req.file.filename}`;
+    await user.save();
+
+    res.json(user.toPublicJSON());
+  } catch (error) {
+    if (error && error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ error: 'Максимальный размер аватара: 5 МБ' });
+    }
+    if (String(error?.message || '') === 'ONLY_IMAGES_ALLOWED') {
+      return res.status(400).json({ error: 'Можно загрузить только изображение' });
+    }
+    console.error('Upload avatar error:', error);
+    res.status(500).json({ error: 'Ошибка загрузки аватара' });
   }
 });
 

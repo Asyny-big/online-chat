@@ -37,6 +37,11 @@ function SkeletonLine({ w = 160 }) {
 export default function ProfilePage({ token, onClose, onLogout }) {
   const [view, setView] = useState('home'); // home | tasks | shop | history
   const [profile, setProfile] = useState(null);
+  const [avatarBroken, setAvatarBroken] = useState(false);
+
+  useEffect(() => {
+    setAvatarBroken(false);
+  }, [profile?.avatar]);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState('');
 
@@ -106,8 +111,13 @@ export default function ProfilePage({ token, onClose, onLogout }) {
           <div style={styles.headerCard}>
             <div style={styles.headerInner}>
               <div style={styles.avatar}>
-                {profile?.avatar ? (
-                  <img alt="" src={profile.avatar} style={styles.avatarImg} />
+                  {profile?.avatar && !avatarBroken ? (
+                    <img
+                      alt=""
+                      src={resolveAssetUrl(profile.avatar)}
+                      style={styles.avatarImg}
+                      onError={() => setAvatarBroken(true)}
+                    />
                 ) : (
                   <div style={styles.avatarFallback}>
                     {String(profile?.name || 'U')
@@ -249,6 +259,7 @@ const styles = {
     letterSpacing: 0.3
   },
   headerText: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 },
+  avatarActions: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 6 },
   nameRow: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
   name: { color: '#e2e8f0', fontWeight: 950, fontSize: 26, letterSpacing: 0.2 },
   badge: {

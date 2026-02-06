@@ -1,4 +1,5 @@
 import React from 'react';
+import { resolveAssetUrl } from '../utils/resolveAssetUrl';
 
 function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
   // Защита от неправильного типа данных
@@ -49,12 +50,19 @@ function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
               ...(hasActiveGroupCall ? styles.chatItemActiveCall : {}),
             }}
           >
+        const avatarUrl = chat.displayAvatar; // private: аватар собеседника, group: аватар группы
+        const isDefaultAvatar = typeof avatarUrl === 'string' && /avatar-default\.(png|jpg|jpeg|webp|svg)$/i.test(avatarUrl);
+        const showAvatarImg = !!avatarUrl && typeof avatarUrl === 'string' && !isDefaultAvatar;
             <div style={styles.avatarWrapper}>
               <div style={{
                 ...styles.avatar,
                 ...(isGroupChat ? styles.groupAvatar : {})
               }}>
-                {initial}
+                {showAvatarImg ? (
+                  <img alt="" src={resolveAssetUrl(avatarUrl)} style={styles.avatarImg} />
+                ) : (
+                  initial
+                )}
               </div>
               {(hasIncomingCall || hasActiveGroupCall) && (
                 <div style={styles.callIndicator}>
@@ -164,7 +172,9 @@ const styles = {
     fontWeight: '600',
     fontSize: '16px',
     flexShrink: 0,
+    overflow: 'hidden',
   },
+  avatarImg: { width: '100%', height: '100%', objectFit: 'cover' },
   groupAvatar: {
     background: 'linear-gradient(135deg, #a855f7, #7e22ce)',
     fontSize: '18px',
