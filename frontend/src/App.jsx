@@ -2,7 +2,6 @@
 import axios from 'axios';
 import { API_URL } from './config';
 import ChatPage from './pages/ChatPage';
-import { authStyles as styles } from './styles/authStyles';
 
 function App() {
   const [token, setToken] = useState(localStorage.getItem('token'));
@@ -41,76 +40,94 @@ function App() {
     setName('');
   };
 
-  if (token) return <ChatPage token={token} onLogout={handleLogout} />;
+  if (token) {
+    return (
+      <div className="app-container">
+        <div className="ambient-mesh">
+          <div className="orb orb-1"></div>
+          <div className="orb orb-2"></div>
+        </div>
+        <ChatPage token={token} onLogout={handleLogout} />
+      </div>
+    );
+  }
 
   return (
-    <div style={styles.authContainer}>
-      <div style={styles.authBox}>
-        <h1 style={styles.title}>
-          <span>🦆</span>
-          GovChat
-        </h1>
-        <p style={styles.subtitle}>Современный мессенджер</p>
-        
-        <div style={styles.tabs}>
-          <button
-            onClick={() => setAuthMode('login')}
-            style={{ ...styles.tab, ...(authMode === 'login' ? styles.tabActive : {}) }}
-          >
-            Вход
-          </button>
-          <button
-            onClick={() => setAuthMode('register')}
-            style={{ ...styles.tab, ...(authMode === 'register' ? styles.tabActive : {}) }}
-          >
-            Регистрация
-          </button>
+    <div className="app-container">
+      <div className="ambient-mesh">
+        <div className="orb orb-1"></div>
+        <div className="orb orb-2"></div>
+      </div>
+
+      <div className="auth-page">
+        <div className="auth-card">
+          <h1 className="auth-title">
+            GovChat
+          </h1>
+          <p className="auth-subtitle">С возвращением! Мы скучали.</p>
+
+          <form onSubmit={handleAuth}>
+            {authMode === 'register' && (
+              <div className="auth-input-group">
+                <input
+                  type="text"
+                  placeholder="Ваше имя"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="modern-input"
+                  required
+                />
+              </div>
+            )}
+
+            <div className="auth-input-group">
+              <input
+                type="tel"
+                placeholder="Номер телефона"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                className="modern-input"
+                required
+              />
+            </div>
+
+            <div className="auth-input-group">
+              <input
+                type="password"
+                placeholder="Пароль"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="modern-input"
+                required
+              />
+            </div>
+
+            {error && <div style={{ color: '#ef4444', marginBottom: '1rem', textAlign: 'center' }}>{error}</div>}
+
+            <button
+              type="submit"
+              className="primary-btn"
+              disabled={loading}
+              style={{ opacity: loading ? 0.7 : 1 }}
+            >
+              {loading ? 'Загрузка...' : (authMode === 'login' ? 'Войти' : 'Создать аккаунт')}
+            </button>
+
+            <div style={{ marginTop: '1.5rem', textAlign: 'center' }}>
+              <span style={{ color: 'var(--text-secondary)' }}>
+                {authMode === 'login' ? 'Нет аккаунта?' : 'Уже есть аккаунт?'}
+              </span>
+              <button
+                type="button"
+                className="text-btn"
+                onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}
+                style={{ display: 'inline', marginLeft: '0.5rem', marginTop: 0 }}
+              >
+                {authMode === 'login' ? 'Регистрация' : 'Войти'}
+              </button>
+            </div>
+          </form>
         </div>
-
-        <form onSubmit={handleAuth} style={styles.form}>
-          {authMode === 'register' && (
-            <input
-              type="text"
-              placeholder="Ваше имя"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              style={styles.input}
-              required
-            />
-          )}
-          
-          <input
-            type="tel"
-            placeholder="Номер телефона"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            style={styles.input}
-            required
-          />
-          
-          <input
-            type="password"
-            placeholder="Пароль"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            style={styles.input}
-            required
-          />
-
-          {error && <div style={styles.error}>{error}</div>}
-          
-          <button 
-            type="submit" 
-            style={{
-              ...styles.button,
-              opacity: loading ? 0.7 : 1,
-              cursor: loading ? 'not-allowed' : 'pointer'
-            }}
-            disabled={loading}
-          >
-            {loading ? 'Загрузка...' : (authMode === 'login' ? 'Войти' : 'Зарегистрироваться')}
-          </button>
-        </form>
       </div>
     </div>
   );

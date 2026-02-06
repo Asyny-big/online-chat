@@ -10,14 +10,14 @@ function ChatWindow({
   socket,
   currentUserId,
   onStartCall,
-  onStartGroupCall,  // Новый пропс для групповых звонков
+  onStartGroupCall,
   typingUsers,
   incomingCall,
-  incomingGroupCall,  // Новый пропс для входящего группового звонка 
+  incomingGroupCall,
   onAcceptCall,
   onDeclineCall,
-  onAcceptGroupCall,  // Новый пропс
-  onDeclineGroupCall, // Новый пропс
+  onAcceptGroupCall,
+  onDeclineGroupCall,
   onBack,
   onDeleteMessage,
   onDeleteChat
@@ -29,14 +29,12 @@ function ChatWindow({
   const [showDeleteChatModal, setShowDeleteChatModal] = useState(false);
   const [showChatMenu, setShowChatMenu] = useState(false);
 
-  // Отслеживание размера экрана
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth <= 768);
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Закрытие меню при клике вне его
   useEffect(() => {
     const handleClickOutside = () => setShowChatMenu(false);
     if (showChatMenu) {
@@ -45,14 +43,12 @@ function ChatWindow({
     }
   }, [showChatMenu]);
 
-  // Auto-scroll при новых сообщениях
   useEffect(() => {
     if (autoScroll) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages, autoScroll]);
 
-  // Определение необходимости auto-scroll
   const handleScroll = () => {
     if (!containerRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
@@ -60,7 +56,6 @@ function ChatWindow({
     setAutoScroll(isNearBottom);
   };
 
-  // Подтверждение удаления чата
   const handleConfirmDeleteChat = useCallback(() => {
     onDeleteChat?.();
     setShowDeleteChatModal(false);
@@ -68,194 +63,113 @@ function ChatWindow({
 
   if (!chat) {
     return (
-      <div style={styles.empty}>
-        <div style={styles.emptyIcon}>💬</div>
-        <div style={styles.emptyText}>Выберите чат</div>
-        <div style={styles.emptyHint}>
-          Или найдите пользователя по номеру телефона
-        </div>
+      <div className="chat-window empty-chat-state">
+        <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>💬</div>
+        <div style={{ fontSize: '1.2rem', fontWeight: 600 }}>Выберите чат</div>
+        <div style={{ fontSize: '0.9rem' }}>Или найдите пользователя по номеру телефона</div>
       </div>
     );
   }
 
   const displayName = chat.displayName || chat.name || 'Чат';
   const typingList = typingUsers?.filter(u => u.chatId === chat._id && u.userId !== currentUserId) || [];
-
-  // Проверяем, групповой ли это чат
   const isGroupChat = chat.type === 'group' || chat.isGroup === true;
   const participantCount = chat.participants?.length || 0;
-
-  // Проверяем есть ли входящий звонок для этого чата
   const hasIncomingCall = incomingCall && incomingCall.chatId === chat._id;
-
-  // Проверяем есть ли входящий групповой звонок для этого чата
   const hasIncomingGroupCall = incomingGroupCall && incomingGroupCall.chatId === chat._id;
 
   return (
-    <div style={styles.container}>
-      {/* Всплывающее уведомление о входящем звонке */}
+    <div className="chat-window">
+      {/* Incoming Call Banner */}
       {hasIncomingCall && (
-        <div style={styles.incomingCallBanner}>
-          <div style={styles.callBannerContent}>
-            <div style={styles.callBannerIcon}>
-              {incomingCall.type === 'video' ? '📹' : '📞'}
-            </div>
-            <div style={styles.callBannerInfo}>
-              <div style={styles.callBannerTitle}>Входящий звонок</div>
-              <div style={styles.callBannerSubtitle}>
-                {incomingCall.initiator?.name || 'Пользователь'} звонит вам
-              </div>
+        <div className="call-banner incoming">
+          <div className="call-banner-content" style={{ display: 'flex', alignItems: 'center', gap: '1rem', color: 'white' }}>
+            <div style={{ fontSize: '1.5rem' }}>{incomingCall.type === 'video' ? '📹' : '📞'}</div>
+            <div>
+              <div style={{ fontWeight: 700 }}>Входящий звонок</div>
+              <div style={{ fontSize: '0.9rem', opacity: 0.9 }}>{incomingCall.initiator?.name || 'Пользователь'}</div>
             </div>
           </div>
-          <div style={styles.callBannerActions}>
-            <button
-              onClick={() => onDeclineCall?.(incomingCall.callId)}
-              style={styles.callBannerDecline}
-              title="Отклонить"
-            >
-              ✕
-            </button>
-            <button
-              onClick={() => onAcceptCall?.(incomingCall.callId, incomingCall.type)}
-              style={styles.callBannerAccept}
-              title="Принять"
-            >
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button onClick={() => onDeclineCall?.(incomingCall.callId)} className="icon-btn" style={{ background: '#ef4444', color: 'white' }}>✕</button>
+            <button onClick={() => onAcceptCall?.(incomingCall.callId, incomingCall.type)} className="icon-btn pulsing-btn" style={{ background: 'white', color: '#16a34a' }}>
               {incomingCall.type === 'video' ? '🎥' : '📞'}
             </button>
           </div>
         </div>
       )}
 
-      {/* Всплывающее уведомление о входящем групповом звонке */}
+      {/* Incoming Group Call Banner */}
       {hasIncomingGroupCall && (
-        <div style={styles.incomingGroupCallBanner}>
-          <div style={styles.callBannerContent}>
-            <div style={styles.callBannerIcon}>
-              {incomingGroupCall.type === 'video' ? '📹' : '📞'}
-            </div>
-            <div style={styles.callBannerInfo}>
-              <div style={styles.callBannerTitle}>Групповой звонок</div>
-              <div style={styles.callBannerSubtitle}>
-                {incomingGroupCall.initiator?.name || 'Участник'} начал звонок
-                {incomingGroupCall.participants?.length > 1 &&
-                  ` • ${incomingGroupCall.participants.length} участников`
-                }
+        <div className="call-banner group-incoming">
+          <div className="call-banner-content" style={{ display: 'flex', alignItems: 'center', gap: '1rem', color: 'white' }}>
+            <div style={{ fontSize: '1.5rem' }}>{incomingGroupCall.type === 'video' ? '📹' : '📞'}</div>
+            <div>
+              <div style={{ fontWeight: 700 }}>Групповой звонок</div>
+              <div style={{ fontSize: '0.9rem', opacity: 0.9 }}>
+                {incomingGroupCall.initiator?.name || 'Участник'}
+                {incomingGroupCall.participants?.length > 1 && ` • ${incomingGroupCall.participants.length} участников`}
               </div>
             </div>
           </div>
-          <div style={styles.callBannerActions}>
-            <button
-              onClick={() => onDeclineGroupCall?.(incomingGroupCall.callId)}
-              style={styles.callBannerDecline}
-              title="Отклонить"
-            >
-              ✕
-            </button>
-            <button
-              onClick={() => onAcceptGroupCall?.(incomingGroupCall.callId, incomingGroupCall.type)}
-              style={styles.callBannerAccept}
-              title="Присоединиться"
-            >
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button onClick={() => onDeclineGroupCall?.(incomingGroupCall.callId)} className="icon-btn" style={{ background: '#ef4444', color: 'white' }}>✕</button>
+            <button onClick={() => onAcceptGroupCall?.(incomingGroupCall.callId, incomingGroupCall.type)} className="icon-btn pulsing-btn" style={{ background: 'white', color: '#7e22ce' }}>
               {incomingGroupCall.type === 'video' ? '🎥' : '📞'}
             </button>
           </div>
         </div>
       )}
 
-      {/* Шапка с кнопками звонков */}
-      <div style={styles.header}>
-        <div style={styles.headerInfo}>
-          {/* Кнопка назад для мобильных */}
-          {isMobile && (
-            <button
-              onClick={onBack}
-              style={styles.backBtn}
-              title="Назад к чатам"
-            >
-              ←
-            </button>
-          )}
-          <div style={{
-            ...styles.avatar,
-            ...(isGroupChat ? styles.groupAvatar : {})
-          }}>
+      {/* Header */}
+      <div className="chat-window-header">
+        <div className="header-user-info">
+          {isMobile && <button onClick={onBack} className="icon-btn">←</button>}
+
+          <div className="header-avatar" style={isGroupChat ? { background: 'linear-gradient(135deg, #a855f7, #7e22ce)' } : {}}>
             {isGroupChat ? '👥' : displayName.charAt(0).toUpperCase()}
           </div>
-          <div>
-            <h3 style={styles.chatName}>{displayName}</h3>
-            {isGroupChat && (
-              <div style={styles.participantCount}>
-                {participantCount} участников
-              </div>
-            )}
-            {typingList.length > 0 && (
-              <div style={styles.typingIndicator}>
-                печатает<span style={styles.typingDots}>...</span>
-              </div>
-            )}
+
+          <div className="header-details">
+            <h3>{displayName}</h3>
+            <div className="header-status">
+              {isGroupChat ? (
+                <span>{participantCount} участников</span>
+              ) : (
+                <span style={{ color: 'var(--status-online)' }}>В сети</span>
+              )}
+              {typingList.length > 0 && <span className="typing-indicator"> • печатает...</span>}
+            </div>
           </div>
         </div>
-        <div style={styles.headerActions}>
-          {/* Кнопки для личных чатов */}
-          {!isGroupChat && (
+
+        <div className="header-actions">
+          {!isGroupChat ? (
             <>
-              <button
-                onClick={() => onStartCall?.('audio')}
-                style={styles.callBtn}
-                title="Аудиозвонок"
-              >
-                📞
-              </button>
-              <button
-                onClick={() => onStartCall?.('video')}
-                style={styles.callBtn}
-                title="Видеозвонок"
-              >
-                🎥
-              </button>
+              <button onClick={() => onStartCall?.('audio')} className="icon-btn" title="Аудио">📞</button>
+              <button onClick={() => onStartCall?.('video')} className="icon-btn" title="Видео">🎥</button>
+            </>
+          ) : (
+            <>
+              <button onClick={() => onStartGroupCall?.('audio')} className="icon-btn" title="Групповой аудио" style={{ color: '#a855f7' }}>📞</button>
+              <button onClick={() => onStartGroupCall?.('video')} className="icon-btn" title="Групповой видео" style={{ color: '#a855f7' }}>🎥</button>
             </>
           )}
-          {/* Кнопки для групповых чатов */}
-          {isGroupChat && (
-            <>
-              <button
-                onClick={() => onStartGroupCall?.('audio')}
-                style={styles.groupCallBtn}
-                title="Групповой аудиозвонок"
-              >
-                📞
-                <span style={styles.groupCallBadge}>👥</span>
-              </button>
-              <button
-                onClick={() => onStartGroupCall?.('video')}
-                style={styles.groupCallBtn}
-                title="Групповой видеозвонок"
-              >
-                🎥
-                <span style={styles.groupCallBadge}>👥</span>
-              </button>
-            </>
-          )}
-          {/* Меню чата */}
-          <div style={styles.menuContainer}>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowChatMenu(!showChatMenu);
-              }}
-              style={styles.callBtn}
-              title="Меню"
-            >
-              ⋮
-            </button>
+
+          <div style={{ position: 'relative' }}>
+            <button onClick={() => setShowChatMenu(!showChatMenu)} className="icon-btn">⋮</button>
             {showChatMenu && (
-              <div style={styles.chatMenu}>
+              <div className="chat-menu" style={{
+                position: 'absolute', top: '120%', right: 0,
+                background: '#1e293b', borderRadius: '12px', padding: '0.5rem',
+                boxShadow: '0 4px 15px rgba(0,0,0,0.3)', width: '180px', zIndex: 100
+              }}>
                 <button
-                  onClick={() => {
-                    setShowChatMenu(false);
-                    setShowDeleteChatModal(true);
+                  onClick={() => { setShowChatMenu(false); setShowDeleteChatModal(true); }}
+                  style={{
+                    width: '100%', padding: '0.75rem', textAlign: 'left',
+                    color: '#ef4444', background: 'transparent', display: 'flex', alignItems: 'center', gap: '8px'
                   }}
-                  style={styles.menuItem}
                 >
                   🗑️ Удалить чат
                 </button>
@@ -265,62 +179,52 @@ function ChatWindow({
         </div>
       </div>
 
-      {/* Список сообщений */}
-      <div
-        ref={containerRef}
-        style={styles.messagesContainer}
-        onScroll={handleScroll}
-      >
+      {/* Messages */}
+      <div ref={containerRef} className="messages-container" onScroll={handleScroll}>
         {messages.length === 0 ? (
-          <div style={styles.noMessages}>
-            <span style={styles.noMessagesIcon}>👋</span>
-            <span>Начните общение</span>
+          <div className="empty-chat-state">
+            <div style={{ fontSize: '2rem' }}>👋</div>
+            <div style={{ marginTop: '1rem' }}>Начните общение</div>
           </div>
         ) : (
-          messages.map((msg, idx) => {
-            const isMine = msg.sender?._id === currentUserId || msg.sender === currentUserId;
-            return (
-              <MessageBubble
-                key={msg._id || idx}
-                message={msg}
-                isMine={isMine}
-                token={token}
-                onDelete={isMine ? () => onDeleteMessage?.(msg._id) : null}
-              />
-            );
-          })
+          messages.map((msg, idx) => (
+            <MessageBubble
+              key={msg._id || idx}
+              message={msg}
+              isMine={msg.sender?._id === currentUserId || msg.sender === currentUserId}
+              token={token}
+              onDelete={onDeleteMessage}
+            />
+          ))
         )}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Поле ввода */}
-      <MessageInput
-        chatId={chat._id}
-        socket={socket}
-        token={token}
-      />
+      {/* Input */}
+      <MessageInput chatId={chat._id} socket={socket} token={token} />
 
-      {/* Модальное окно подтверждения удаления чата */}
+      {/* Delete Modal */}
       {showDeleteChatModal && (
-        <div style={styles.modalOverlay}>
-          <div style={styles.modal}>
-            <div style={styles.modalIcon}>⚠️</div>
-            <h3 style={styles.modalTitle}>Удалить чат?</h3>
-            <p style={styles.modalText}>
-              Вы уверены, что хотите удалить этот чат?
-              <br /><br />
-              <strong>Внимание:</strong> Все сообщения, изображения, видео и файлы будут удалены безвозвратно у всех участников.
-            </p>
-            <div style={styles.modalActions}>
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
+          zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center'
+        }}>
+          <div style={{
+            background: '#1e293b', padding: '2rem', borderRadius: '16px',
+            maxWidth: '400px', width: '90%', textAlign: 'center'
+          }}>
+            <h3>Удалить переписку?</h3>
+            <p style={{ margin: '1rem 0', color: '#94a3b8' }}>Это действие нельзя отменить.</p>
+            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
               <button
                 onClick={() => setShowDeleteChatModal(false)}
-                style={styles.modalCancelBtn}
+                style={{ padding: '0.75rem 1.5rem', background: '#334155', color: 'white', borderRadius: '8px' }}
               >
                 Отмена
               </button>
               <button
                 onClick={handleConfirmDeleteChat}
-                style={styles.modalDeleteBtn}
+                style={{ padding: '0.75rem 1.5rem', background: '#ef4444', color: 'white', borderRadius: '8px' }}
               >
                 Удалить
               </button>
@@ -332,17 +236,13 @@ function ChatWindow({
   );
 }
 
-// Компонент сообщения
 function MessageBubble({ message, isMine, onDelete, token }) {
   const [showMenu, setShowMenu] = useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const { type: rawType = 'text', text, attachment, createdAt, sender } = message;
 
-  // Интеллектуальное определение типа: если type='file', но mimeType указывает на медиа - используем правильный тип
   const type = (() => {
-    if (rawType !== 'file' && rawType !== 'text') return rawType; // image/video/audio - оставляем как есть
+    if (rawType !== 'file' && rawType !== 'text') return rawType;
     if (!attachment?.mimeType) return rawType;
-
     const mime = attachment.mimeType.toLowerCase();
     if (mime.startsWith('image/')) return 'image';
     if (mime.startsWith('video/')) return 'video';
@@ -350,808 +250,91 @@ function MessageBubble({ message, isMine, onDelete, token }) {
     return rawType;
   })();
 
-  const time = createdAt
-    ? new Date(createdAt).toLocaleTimeString('ru-RU', {
-      hour: '2-digit',
-      minute: '2-digit',
-    })
-    : '';
-
+  const time = createdAt ? new Date(createdAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '';
   const senderName = sender?.name || '';
 
-  // Формирование URL для медиа-файлов
   const getMediaUrl = (url) => {
     if (!url) return '';
-    // Если URL уже абсолютный - возвращаем как есть
-    if (url.startsWith('http://') || url.startsWith('https://')) {
-      return url;
-    }
-
+    if (url.startsWith('http')) return url;
     const normalizedUrl = url.startsWith('/') ? url : `/${url}`;
-
-    // Совместимость со старыми сообщениями, где сохранялось /uploads/...
-    // За прокси часто наружу прокидывают только /api, поэтому используем /api/uploads.
-    if (normalizedUrl.startsWith('/uploads/')) {
-      return `${API_URL}${normalizedUrl}`; // /api + /uploads/... => /api/uploads/...
-    }
-
-    // Уже новый формат
+    if (normalizedUrl.startsWith('/uploads/')) return `${API_URL}${normalizedUrl}`;
     if (normalizedUrl.startsWith('/api/uploads/')) {
       const baseUrl = API_URL.replace(/\/api\/?$/, '');
       return `${baseUrl}${normalizedUrl}`;
     }
-
-    // Получаем базовый URL без /api
     const baseUrl = API_URL.replace(/\/api\/?$/, '');
     return `${baseUrl}${normalizedUrl}`;
   };
 
-  const normalizeFilename = (name) => {
-    if (!name) return '';
-    const hasCyrillic = /[\u0400-\u04FF]/.test(name);
-    const looksLikeMojibake = /[ÐÑÃ]/.test(name) && !hasCyrillic;
-    if (!looksLikeMojibake) return name;
-    try {
-      const bytes = Uint8Array.from(name, (ch) => ch.charCodeAt(0) & 0xff);
-      const decoded = new TextDecoder('utf-8').decode(bytes);
-      if (/[\u0400-\u04FF]/.test(decoded)) return decoded;
-      return name;
-    } catch (_) {
-      return name;
-    }
-  };
-
-  const displayOriginalName = normalizeFilename(attachment?.originalName) || 'Файл';
-
-  const downloadAttachment = async () => {
-    try {
-      const url = attachment?.url;
-      if (!url) return;
-
-      const filename = url.split('/').pop();
-      if (!filename) return;
-
-      const downloadUrl = `${API_URL}/download/${filename}?name=${encodeURIComponent(attachment?.originalName || 'file')}`;
-
-      const res = await axios.get(downloadUrl, {
-        responseType: 'blob',
-        headers: {
-          Authorization: `Bearer ${token || ''}`
-        }
-      });
-
-      const contentType = String(res.headers?.['content-type'] || '');
-      if (contentType.includes('application/json')) {
-        const text = await res.data.text();
-        let msg = 'Не удалось скачать файл';
-        try {
-          const json = JSON.parse(text);
-          msg = json?.error || json?.message || msg;
-        } catch (_) {
-          // ignore
-        }
-        alert(msg);
-        return;
-      }
-
-      const blob = res.data;
-      const blobUrl = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = blobUrl;
-      a.download = displayOriginalName || 'file';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(blobUrl);
-    } catch (e) {
-      console.error('Download error:', e);
-      alert('Не удалось скачать файл');
-    }
-  };
-
   const renderContent = () => {
+    const url = getMediaUrl(attachment?.url);
     switch (type) {
       case 'image':
         return (
-          <div style={styles.mediaWrapper}>
-            <img
-              src={getMediaUrl(attachment?.url)}
-              alt={attachment?.originalName || 'Изображение'}
-              style={styles.imagePreview}
-              onClick={() => window.open(getMediaUrl(attachment?.url), '_blank')}
-            />
-            {text && <div style={styles.mediaCaption}>{text}</div>}
+          <div className="media-attachment">
+            <img src={url} alt="attachment" onClick={() => window.open(url, '_blank')} />
+            {text && <div style={{ marginTop: '0.5rem' }}>{text}</div>}
           </div>
         );
-
       case 'video':
         return (
-          <div style={styles.mediaWrapper}>
-            <video
-              src={getMediaUrl(attachment?.url)}
-              controls
-              preload="metadata"
-              style={styles.videoPreview}
-            />
-            {text && <div style={styles.mediaCaption}>{text}</div>}
+          <div className="media-attachment">
+            <video src={url} controls />
+            {text && <div style={{ marginTop: '0.5rem' }}>{text}</div>}
           </div>
         );
-
       case 'audio':
-        // CRITICAL: Правильное воспроизведение голосовых сообщений
-        const audioUrl = getMediaUrl(attachment?.url);
-        const audioMimeType = attachment?.mimeType || 'audio/webm';
         return (
-          <div style={styles.audioWrapper}>
-            <span style={styles.audioIcon}>🎤</span>
-            <audio
-              controls
-              preload="auto"
-              style={styles.audioPlayer}
-            >
-              <source src={audioUrl} type={audioMimeType} />
-              Ваш браузер не поддерживает аудио
-            </audio>
+          <div className="file-attachment">
+            <span>🎤</span>
+            <audio src={url} controls style={{ height: '32px', maxWidth: '200px' }} />
           </div>
         );
-
       case 'file':
         return (
-          <button
-            type="button"
-            onClick={downloadAttachment}
-            style={styles.fileLink}
-          >
-            <span style={styles.fileIcon}>📄</span>
-            <div style={styles.fileInfo}>
-              <div style={styles.fileName}>{displayOriginalName}</div>
-              <div style={styles.fileSize}>
-                {attachment?.size ? formatFileSize(attachment.size) : ''}
+          <a href={url} target="_blank" rel="noopener noreferrer" className="file-attachment">
+            <span className="file-icon">📄</span>
+            <div style={{ overflow: 'hidden' }}>
+              <div style={{ fontWeight: 500, whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
+                {attachment?.originalName || 'Файл'}
               </div>
             </div>
-            <span style={styles.downloadIcon}>⬇️</span>
-          </button>
+          </a>
         );
-
       default:
-        return <div style={styles.textContent}>{text}</div>;
+        return <div>{text}</div>;
     }
   };
 
   return (
-    <div style={{
-      ...styles.messageRow,
-      justifyContent: isMine ? 'flex-end' : 'flex-start',
-    }}>
-      <div
-        style={{
-          ...styles.bubble,
-          ...(isMine ? styles.bubbleMine : styles.bubbleTheirs),
-          position: 'relative',
-        }}
-        onContextMenu={(e) => {
-          if (onDelete) {
-            e.preventDefault();
-            setShowMenu(true);
-          }
-        }}
-        onClick={() => setShowMenu(false)}
-      >
-        {!isMine && senderName && (
-          <div style={styles.senderName}>{senderName}</div>
-        )}
-        {renderContent()}
-        <div style={{
-          ...styles.messageTime,
-          textAlign: isMine ? 'right' : 'left',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: isMine ? 'flex-end' : 'flex-start',
-          gap: '8px',
-        }}>
-          {time}
-          {/* Кнопка удаления для своих сообщений */}
-          {isMine && onDelete && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowDeleteConfirm(true);
-              }}
-              style={styles.deleteMessageBtn}
-              title="Удалить сообщение"
-            >
-              🗑️
-            </button>
-          )}
+    <div className={`message-row ${isMine ? 'mine' : 'theirs'}`} onMouseLeave={() => setShowMenu(false)}>
+      {!isMine && (
+        <div className="message-actions">
+          {/* Actions for other user (reply etc) could go here */}
         </div>
+      )}
 
-        {/* Контекстное меню для удаления (по правому клику) */}
-        {showMenu && onDelete && (
-          <div style={styles.messageContextMenu}>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowMenu(false);
-                setShowDeleteConfirm(true);
-              }}
-              style={styles.contextMenuItem}
-            >
-              🗑️ Удалить
-            </button>
-          </div>
-        )}
-
-        {/* Подтверждение удаления сообщения */}
-        {showDeleteConfirm && (
-          <div style={styles.deleteConfirmPopup}>
-            <div style={styles.deleteConfirmText}>Удалить сообщение?</div>
-            <div style={styles.deleteConfirmActions}>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setShowDeleteConfirm(false);
-                }}
-                style={styles.deleteConfirmCancel}
-              >
-                Отмена
-              </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDelete();
-                  setShowDeleteConfirm(false);
-                }}
-                style={styles.deleteConfirmYes}
-              >
-                Удалить
-              </button>
-            </div>
-          </div>
-        )}
+      <div className={`message-bubble ${isMine ? 'mine' : 'theirs'}`}>
+        {!isMine && senderName && <span className="message-sender">{senderName}</span>}
+        {renderContent()}
+        <div className="message-time">
+          {time}
+        </div>
       </div>
+
+      {isMine && (
+        <div className="message-actions">
+          <button
+            onClick={() => onDelete && onDelete(message._id)}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1rem' }}
+            title="Удалить"
+          >
+            🗑️
+          </button>
+        </div>
+      )}
     </div>
   );
-}
-
-function formatFileSize(bytes) {
-  if (bytes < 1024) return bytes + ' Б';
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' КБ';
-  return (bytes / (1024 * 1024)).toFixed(1) + ' МБ';
-}
-
-const styles = {
-  container: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-    background: '#0f172a',
-    height: '100%',
-    minHeight: 0,
-  },
-  empty: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: '#0f172a',
-  },
-  emptyIcon: {
-    fontSize: '48px',
-    marginBottom: '16px',
-  },
-  emptyText: {
-    fontSize: '20px',
-    fontWeight: '600',
-    color: '#94a3b8',
-    marginBottom: '8px',
-  },
-  emptyHint: {
-    fontSize: '14px',
-    color: '#64748b',
-  },
-  // Incoming call banner
-  incomingCallBanner: {
-    background: 'linear-gradient(135deg, #22c55e, #16a34a)',
-    padding: '12px 16px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: '12px',
-    animation: 'slideDown 0.3s ease, pulse-banner 1.5s infinite',
-  },
-  incomingGroupCallBanner: {
-    background: 'linear-gradient(135deg, #a855f7, #7e22ce)',
-    padding: '12px 16px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: '12px',
-    animation: 'slideDown 0.3s ease, pulse-banner 1.5s infinite',
-  },
-  callBannerContent: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-  },
-  callBannerIcon: {
-    fontSize: '24px',
-    animation: 'shake 0.5s infinite',
-  },
-  callBannerInfo: {
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  callBannerTitle: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: '14px',
-  },
-  callBannerSubtitle: {
-    color: 'rgba(255,255,255,0.9)',
-    fontSize: '12px',
-  },
-  callBannerActions: {
-    display: 'flex',
-    gap: '8px',
-  },
-  callBannerDecline: {
-    width: '40px',
-    height: '40px',
-    borderRadius: '50%',
-    border: 'none',
-    background: '#ef4444',
-    color: '#fff',
-    fontSize: '16px',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    transition: 'transform 0.2s',
-  },
-  callBannerAccept: {
-    width: '40px',
-    height: '40px',
-    borderRadius: '50%',
-    border: 'none',
-    background: '#fff',
-    fontSize: '18px',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    animation: 'pulse-btn 1s infinite',
-  },
-  // Header
-  header: {
-    padding: '12px 16px',
-    borderBottom: '1px solid #334155',
-    background: '#1e293b',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  headerInfo: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-  },
-  avatar: {
-    width: '40px',
-    height: '40px',
-    borderRadius: '50%',
-    background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: '16px',
-  },
-  groupAvatar: {
-    background: 'linear-gradient(135deg, #a855f7, #7e22ce)',
-  },
-  chatName: {
-    margin: 0,
-    fontSize: '16px',
-    fontWeight: '600',
-    color: '#fff',
-  },
-  participantCount: {
-    fontSize: '12px',
-    color: '#64748b',
-    marginTop: '2px',
-  },
-  typingIndicator: {
-    fontSize: '12px',
-    color: '#3b82f6',
-    marginTop: '2px',
-  },
-  typingDots: {
-    animation: 'blink 1s infinite',
-  },
-  headerActions: {
-    display: 'flex',
-    gap: '8px',
-  },
-  backBtn: {
-    width: '36px',
-    height: '36px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: 'transparent',
-    border: 'none',
-    borderRadius: '50%',
-    fontSize: '20px',
-    color: '#fff',
-    cursor: 'pointer',
-    marginRight: '8px',
-    transition: 'background 0.2s',
-  },
-  callBtn: {
-    width: '40px',
-    height: '40px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: 'transparent',
-    border: '1px solid #334155',
-    borderRadius: '50%',
-    fontSize: '18px',
-    cursor: 'pointer',
-    transition: 'all 0.2s',
-  },
-  groupCallBtn: {
-    width: '40px',
-    height: '40px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: 'transparent',
-    border: '1px solid #a855f7',
-    borderRadius: '50%',
-    fontSize: '16px',
-    cursor: 'pointer',
-    transition: 'all 0.2s',
-    position: 'relative',
-    color: '#a855f7',
-  },
-  groupCallBadge: {
-    position: 'absolute',
-    fontSize: '10px',
-    bottom: '-2px',
-    right: '-2px',
-  },
-  // Messages
-  messagesContainer: {
-    flex: 1,
-    overflowY: 'auto',
-    padding: '16px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px',
-  },
-  noMessages: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    color: '#64748b',
-    fontSize: '14px',
-    gap: '8px',
-  },
-  noMessagesIcon: {
-    fontSize: '32px',
-  },
-  // Message bubble
-  messageRow: {
-    display: 'flex',
-    width: '100%',
-  },
-  bubble: {
-    maxWidth: '75%',
-    padding: '10px 14px',
-    borderRadius: '18px',
-    wordWrap: 'break-word',
-  },
-  bubbleMine: {
-    background: 'linear-gradient(135deg, #3b82f6, #2563eb)',
-    color: '#fff',
-    borderBottomRightRadius: '4px',
-  },
-  bubbleTheirs: {
-    background: '#334155',
-    color: '#e2e8f0',
-    borderBottomLeftRadius: '4px',
-  },
-  senderName: {
-    fontSize: '12px',
-    fontWeight: '600',
-    color: '#60a5fa',
-    marginBottom: '4px',
-  },
-  textContent: {
-    fontSize: '14px',
-    lineHeight: '1.4',
-  },
-  messageTime: {
-    fontSize: '10px',
-    color: 'rgba(255,255,255,0.6)',
-    marginTop: '4px',
-  },
-  // Media
-  mediaWrapper: {
-    maxWidth: '280px',
-  },
-  imagePreview: {
-    maxWidth: '100%',
-    maxHeight: '300px',
-    borderRadius: '12px',
-    cursor: 'pointer',
-    display: 'block',
-  },
-  videoPreview: {
-    maxWidth: '100%',
-    maxHeight: '300px',
-    borderRadius: '12px',
-  },
-  mediaCaption: {
-    marginTop: '6px',
-    fontSize: '14px',
-  },
-  // Audio
-  audioWrapper: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    minWidth: '200px',
-  },
-  audioIcon: {
-    fontSize: '20px',
-  },
-  audioPlayer: {
-    height: '36px',
-    flex: 1,
-  },
-  // File
-  fileLink: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-    padding: '8px 12px',
-    background: 'rgba(0,0,0,0.2)',
-    border: 'none',
-    borderRadius: '8px',
-    textDecoration: 'none',
-    color: 'inherit',
-    cursor: 'pointer',
-  },
-  fileIcon: {
-    fontSize: '28px',
-  },
-  fileInfo: {
-    overflow: 'hidden',
-    flex: 1,
-  },
-  fileName: {
-    fontSize: '13px',
-    fontWeight: '500',
-    whiteSpace: 'nowrap',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    maxWidth: '180px',
-  },
-  fileSize: {
-    fontSize: '11px',
-    opacity: 0.7,
-  },
-  downloadIcon: {
-    fontSize: '16px',
-    opacity: 0.8,
-  },
-  // Меню чата
-  menuContainer: {
-    position: 'relative',
-  },
-  chatMenu: {
-    position: 'absolute',
-    top: '100%',
-    right: 0,
-    marginTop: '8px',
-    background: '#1e293b',
-    borderRadius: '12px',
-    boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
-    overflow: 'hidden',
-    zIndex: 100,
-    minWidth: '160px',
-  },
-  menuItem: {
-    width: '100%',
-    padding: '12px 16px',
-    background: 'transparent',
-    border: 'none',
-    color: '#ef4444',
-    fontSize: '14px',
-    textAlign: 'left',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    transition: 'background 0.2s',
-  },
-  // Модальное окно удаления чата
-  modalOverlay: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    background: 'rgba(0,0,0,0.7)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 10000,
-  },
-  modal: {
-    background: '#1e293b',
-    borderRadius: '16px',
-    padding: '24px',
-    maxWidth: '360px',
-    width: '90%',
-    textAlign: 'center',
-  },
-  modalIcon: {
-    fontSize: '48px',
-    marginBottom: '16px',
-  },
-  modalTitle: {
-    color: '#fff',
-    fontSize: '20px',
-    fontWeight: '600',
-    marginBottom: '12px',
-  },
-  modalText: {
-    color: '#94a3b8',
-    fontSize: '14px',
-    lineHeight: '1.5',
-    marginBottom: '24px',
-  },
-  modalActions: {
-    display: 'flex',
-    gap: '12px',
-    justifyContent: 'center',
-  },
-  modalCancelBtn: {
-    padding: '12px 24px',
-    background: '#334155',
-    border: 'none',
-    borderRadius: '8px',
-    color: '#fff',
-    fontSize: '14px',
-    fontWeight: '500',
-    cursor: 'pointer',
-  },
-  modalDeleteBtn: {
-    padding: '12px 24px',
-    background: '#ef4444',
-    border: 'none',
-    borderRadius: '8px',
-    color: '#fff',
-    fontSize: '14px',
-    fontWeight: '500',
-    cursor: 'pointer',
-  },
-  // Удаление сообщения
-  deleteMessageBtn: {
-    background: 'transparent',
-    border: 'none',
-    fontSize: '12px',
-    cursor: 'pointer',
-    opacity: 0.5,
-    transition: 'opacity 0.2s',
-    padding: '0',
-  },
-  messageContextMenu: {
-    position: 'absolute',
-    top: '100%',
-    right: 0,
-    marginTop: '4px',
-    background: '#1e293b',
-    borderRadius: '8px',
-    boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-    overflow: 'hidden',
-    zIndex: 100,
-  },
-  contextMenuItem: {
-    padding: '10px 16px',
-    background: 'transparent',
-    border: 'none',
-    color: '#ef4444',
-    fontSize: '13px',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    whiteSpace: 'nowrap',
-  },
-  deleteConfirmPopup: {
-    position: 'absolute',
-    bottom: '100%',
-    right: 0,
-    marginBottom: '8px',
-    background: '#1e293b',
-    borderRadius: '12px',
-    padding: '12px',
-    boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
-    zIndex: 100,
-    minWidth: '180px',
-  },
-  deleteConfirmText: {
-    color: '#fff',
-    fontSize: '13px',
-    marginBottom: '12px',
-    textAlign: 'center',
-  },
-  deleteConfirmActions: {
-    display: 'flex',
-    gap: '8px',
-    justifyContent: 'center',
-  },
-  deleteConfirmCancel: {
-    padding: '6px 12px',
-    background: '#334155',
-    border: 'none',
-    borderRadius: '6px',
-    color: '#fff',
-    fontSize: '12px',
-    cursor: 'pointer',
-  },
-  deleteConfirmYes: {
-    padding: '6px 12px',
-    background: '#ef4444',
-    border: 'none',
-    borderRadius: '6px',
-    color: '#fff',
-    fontSize: '12px',
-    cursor: 'pointer',
-  },
-};
-
-// Добавляем анимации для баннера звонка
-if (typeof document !== 'undefined') {
-  const styleSheet = document.createElement('style');
-  styleSheet.textContent = `
-    @keyframes slideDown {
-      from {
-        transform: translateY(-100%);
-        opacity: 0;
-      }
-      to {
-        transform: translateY(0);
-        opacity: 1;
-      }
-    }
-    @keyframes pulse-banner {
-      0%, 100% {
-        box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4);
-      }
-      50% {
-        box-shadow: 0 0 0 8px rgba(34, 197, 94, 0);
-      }
-    }
-    @keyframes pulse-btn {
-      0%, 100% { transform: scale(1); }
-      50% { transform: scale(1.1); }
-    }
-    @keyframes shake {
-      0%, 100% { transform: rotate(0deg); }
-      25% { transform: rotate(-15deg); }
-      75% { transform: rotate(15deg); }
-    }
-  `;
-  document.head.appendChild(styleSheet);
 }
 
 export default ChatWindow;
