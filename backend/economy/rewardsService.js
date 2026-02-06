@@ -1,6 +1,6 @@
 const { toLong } = require('./long');
 const { withMongoTransaction } = require('./tx');
-const { sha256Base64Url, nowUtcDayKey, incrementDailyCounter } = require('./walletService');
+const { sha256Base64Url, nowUtcDayKey, incrementDailyCounter, ensureWallet, applyWalletDeltaInSession } = require('./walletService');
 const { ObjectId } = require('mongodb');
 const mongoose = require('mongoose');
 
