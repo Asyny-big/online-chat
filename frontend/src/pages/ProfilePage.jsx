@@ -43,6 +43,8 @@ export default function ProfilePage({ token, onClose, onLogout }) {
   useEffect(() => {
     setAvatarBroken(false);
   }, [profile?.avatar]);
+
+  const resolvedAvatarUrl = useMemo(() => resolveAssetUrl(profile?.avatar || ''), [profile?.avatar]);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState('');
 
@@ -112,10 +114,10 @@ export default function ProfilePage({ token, onClose, onLogout }) {
           <div style={styles.headerCard}>
             <div style={styles.headerInner}>
               <div style={styles.avatar}>
-                  {profile?.avatar && !avatarBroken ? (
+                  {resolvedAvatarUrl && !avatarBroken ? (
                     <img
                       alt=""
-                      src={resolveAssetUrl(profile.avatar)}
+                      src={resolvedAvatarUrl}
                       style={styles.avatarImg}
                       onError={() => setAvatarBroken(true)}
                     />

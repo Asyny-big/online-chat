@@ -39,6 +39,8 @@ function ProfileDrawer({ token, onClose, onLogout }) {
     setAvatarBroken(false);
   }, [profile?.avatar]);
 
+  const resolvedAvatarUrl = useMemo(() => resolveAssetUrl(profile?.avatar || ''), [profile?.avatar]);
+
   const [showPasswordForm, setShowPasswordForm] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -238,10 +240,10 @@ function ProfileDrawer({ token, onClose, onLogout }) {
             <div style={styles.card}>
               <div style={styles.heroRow}>
                 <div style={styles.avatar}>
-                  {profile.avatar && !avatarBroken ? (
+                  {resolvedAvatarUrl && !avatarBroken ? (
                     <img
                       alt="avatar"
-                      src={resolveAssetUrl(profile.avatar)}
+                      src={resolvedAvatarUrl}
                       style={styles.avatarImg}
                       onError={() => setAvatarBroken(true)}
                     />

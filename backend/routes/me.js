@@ -11,11 +11,14 @@ router.get('/', async (req, res) => {
     const user = await User.findById(req.userId).lean();
     if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
 
+    const avatarUrl = user.avatarUrl || null;
+    const hasDefaultAvatar = typeof avatarUrl === 'string' && /\/avatar-default\.(png|jpg|jpeg|webp|svg)$/i.test(avatarUrl);
+
     res.json({
       id: user._id,
       name: user.name,
       phone: user.phone,
-      avatar: user.avatarUrl || null,
+      avatar: hasDefaultAvatar ? null : avatarUrl,
       theme: user.theme ?? null,
       createdAt: user.createdAt,
     });
@@ -46,11 +49,14 @@ router.patch('/', async (req, res) => {
     }
 
     await user.save();
+
+    const avatarUrl = user.avatarUrl || null;
+    const hasDefaultAvatar = typeof avatarUrl === 'string' && /\/avatar-default\.(png|jpg|jpeg|webp|svg)$/i.test(avatarUrl);
     res.json({
       id: user._id,
       name: user.name,
       phone: user.phone,
-      avatar: user.avatarUrl || null,
+      avatar: hasDefaultAvatar ? null : avatarUrl,
       theme: user.theme ?? null,
       createdAt: user.createdAt,
     });

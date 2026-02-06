@@ -32,7 +32,7 @@ function UserSearch({ token, onCreateChat }) {
           {status === 'found' && user && (
             <button onClick={() => handleSelectUser(user.id)} style={styles.userItem}>
               <div style={styles.userAvatar}>
-                {user.avatar ? (
+                {resolveAssetUrl(user.avatar) ? (
                   <img alt="" src={resolveAssetUrl(user.avatar)} style={styles.userAvatarImg} onError={(e) => { e.currentTarget.style.display = 'none'; }} />
                 ) : (
                   user.name?.charAt(0)?.toUpperCase() || '?'
