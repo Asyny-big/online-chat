@@ -39,6 +39,10 @@ function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
 
         const initial = isGroupChat ? '👥' : displayName.charAt(0).toUpperCase();
 
+        const avatarUrl = chat.displayAvatar; // private: аватар собеседника, group: аватар группы
+        const isDefaultAvatar = typeof avatarUrl === 'string' && /avatar-default\.(png|jpg|jpeg|webp|svg)$/i.test(avatarUrl);
+        const showAvatarImg = !!avatarUrl && typeof avatarUrl === 'string' && !isDefaultAvatar;
+
         return (
           <button
             key={chat._id}
@@ -50,9 +54,6 @@ function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
               ...(hasActiveGroupCall ? styles.chatItemActiveCall : {}),
             }}
           >
-        const avatarUrl = chat.displayAvatar; // private: аватар собеседника, group: аватар группы
-        const isDefaultAvatar = typeof avatarUrl === 'string' && /avatar-default\.(png|jpg|jpeg|webp|svg)$/i.test(avatarUrl);
-        const showAvatarImg = !!avatarUrl && typeof avatarUrl === 'string' && !isDefaultAvatar;
             <div style={styles.avatarWrapper}>
               <div style={{
                 ...styles.avatar,
