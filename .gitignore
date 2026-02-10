@@ -4,6 +4,9 @@ node_modules/
 # build
 frontend/build/
 
+.idea/
+*.log
+
 # env
 .env
 config.local.js

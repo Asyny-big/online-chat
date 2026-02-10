@@ -1310,7 +1310,7 @@ function CallModal({
   };
 
   return (
-    <div style={styles.overlay}>
+    <div className="govchat-call-modal" style={styles.overlay}>
       <div style={{
           ...styles.modal,
           ...modalStyle
@@ -1680,9 +1680,10 @@ const styles = {
   },
 };
 
-// Add keyframes for animations & hover styles
-if (typeof document !== 'undefined') {
+// Add keyframes for animations & scoped hover styles
+if (typeof document !== 'undefined' && !document.getElementById('govchat-call-modal-style')) {
   const styleSheet = document.createElement('style');
+  styleSheet.id = 'govchat-call-modal-style';
   styleSheet.textContent = `
     @keyframes pulse-ring {
       0% { transform: scale(1); opacity: 0.6; }
@@ -1699,12 +1700,12 @@ if (typeof document !== 'undefined') {
         to { transform: scale(1); opacity: 1; }
     }
 
-    button:hover {
+    .govchat-call-modal button:hover {
         transform: translateY(-2px); 
         filter: brightness(1.1);
     }
     
-    button:active {
+    .govchat-call-modal button:active {
         transform: translateY(0) scale(0.95);
     }
   `;

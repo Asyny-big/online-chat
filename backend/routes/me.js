@@ -125,4 +125,25 @@ router.post('/logout-all', async (req, res) => {
   }
 });
 
+// POST /api/me/device-token - upsert FCM token for current device
+router.post('/device-token', async (req, res) => {
+  try {
+    const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+    if (!token) {
+      return res.status(400).json({ error: 'token is required' });
+    }
+
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    user.fcmToken = token;
+    await user.save();
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error('POST /api/me/device-token error:', e);
+    res.status(500).json({ error: 'Failed to save device token' });
+  }
+});
+
 module.exports = router;
