@@ -1,5 +1,6 @@
 package ru.govchat.app.push
 
+import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.content.Intent
 import androidx.core.app.NotificationCompat
@@ -13,6 +14,7 @@ import kotlinx.coroutines.launch
 import ru.govchat.app.GovChatApp
 import ru.govchat.app.MainActivity
 import ru.govchat.app.R
+import ru.govchat.app.core.notification.IncomingCallNotifications
 import ru.govchat.app.core.notification.NotificationChannels
 
 class GovChatFirebaseMessagingService : FirebaseMessagingService() {
@@ -35,38 +37,64 @@ class GovChatFirebaseMessagingService : FirebaseMessagingService() {
         when (eventType) {
             "incoming_call" -> showNotification(
                 notificationId = 2001,
+                channelId = NotificationChannels.CALLS_CHANNEL_ID,
                 title = title.ifBlank { getString(R.string.push_call_title) },
-                body = body.ifBlank { getString(R.string.push_call_body) }
+                body = body.ifBlank { getString(R.string.push_call_body) },
+                callStyle = true
+            )
+
+            "incoming_group_call" -> showNotification(
+                notificationId = 2003,
+                channelId = NotificationChannels.CALLS_CHANNEL_ID,
+                title = title.ifBlank { getString(R.string.push_group_call_title) },
+                body = body.ifBlank { getString(R.string.push_call_body) },
+                callStyle = true
             )
 
             else -> showNotification(
                 notificationId = 2002,
+                channelId = NotificationChannels.MESSAGES_CHANNEL_ID,
                 title = title.ifBlank { getString(R.string.push_message_title) },
-                body = body.ifBlank { getString(R.string.push_message_body) }
+                body = body.ifBlank { getString(R.string.push_message_body) },
+                callStyle = false
             )
         }
     }
 
-    private fun showNotification(notificationId: Int, title: String, body: String) {
+    @SuppressLint("MissingPermission")
+    private fun showNotification(
+        notificationId: Int,
+        channelId: String,
+        title: String,
+        body: String,
+        callStyle: Boolean
+    ) {
         val openAppIntent = PendingIntent.getActivity(
             this,
             notificationId,
             Intent(this, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra(IncomingCallNotifications.EXTRA_CALL_ID, notificationId.toString())
             },
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        val notification = NotificationCompat.Builder(this, NotificationChannels.MESSAGES_CHANNEL_ID)
+        val notification = NotificationCompat.Builder(this, channelId)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(title)
             .setContentText(body)
             .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setContentIntent(openAppIntent)
-            .build()
+            .setPriority(if (callStyle) NotificationCompat.PRIORITY_MAX else NotificationCompat.PRIORITY_HIGH)
+            .setCategory(if (callStyle) NotificationCompat.CATEGORY_CALL else NotificationCompat.CATEGORY_MESSAGE)
+            .setContentIntent(openAppIntent).apply {
+                if (callStyle) {
+                    setFullScreenIntent(openAppIntent, true)
+                }
+            }.build()
 
-        NotificationManagerCompat.from(this).notify(notificationId, notification)
+        val manager = NotificationManagerCompat.from(this)
+        if (!manager.areNotificationsEnabled()) return
+        manager.notify(notificationId, notification)
     }
 }
 

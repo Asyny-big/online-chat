@@ -1,8 +1,10 @@
 package ru.govchat.app.data.repository
 
 import retrofit2.HttpException
+import ru.govchat.app.core.network.extractMessageField
 import ru.govchat.app.core.network.GovChatApi
 import ru.govchat.app.core.network.LoginRequest
+import ru.govchat.app.core.network.RegisterRequest
 import ru.govchat.app.core.storage.SessionStorage
 import ru.govchat.app.data.mapper.toDomain
 import ru.govchat.app.domain.model.UserProfile
@@ -25,7 +27,34 @@ class AuthRepositoryImpl(
             )
 
             sessionStorage.saveToken(response.token)
-            response.user.toDomain()
+            val user = response.user.toDomain()
+            if (user.id.isNotBlank()) {
+                sessionStorage.saveUserId(user.id)
+            }
+            user
+        }.recoverCatching { throwable ->
+            throw toWebAuthError(throwable)
+        }
+    }
+
+    override suspend fun register(phone: String, name: String, password: String): Result<UserProfile> {
+        return runCatching {
+            val response = api.register(
+                request = RegisterRequest(
+                    phone = phone.trim(),
+                    name = name.trim(),
+                    password = password
+                )
+            )
+
+            sessionStorage.saveToken(response.token)
+            val user = response.user.toDomain()
+            if (user.id.isNotBlank()) {
+                sessionStorage.saveUserId(user.id)
+            }
+            user
+        }.recoverCatching { throwable ->
+            throw toWebAuthError(throwable)
         }
     }
 
@@ -36,7 +65,11 @@ class AuthRepositoryImpl(
         }
 
         return runCatching {
-            api.getMe().toDomain()
+            val me = api.getMe().toDomain()
+            if (me.id.isNotBlank()) {
+                sessionStorage.saveUserId(me.id)
+            }
+            me
         }.onFailure { error ->
             if (error is HttpException && error.code() == 401) {
                 sessionStorage.clearToken()
@@ -46,6 +79,14 @@ class AuthRepositoryImpl(
 
     override suspend fun logout() {
         sessionStorage.clearToken()
+    }
+
+    private fun toWebAuthError(error: Throwable): Throwable {
+        if (error is HttpException) {
+            val messageFromField = error.extractMessageField()
+            return IllegalStateException(messageFromField ?: "Ошибка авторизации")
+        }
+        return IllegalStateException("Ошибка авторизации")
     }
 }
 

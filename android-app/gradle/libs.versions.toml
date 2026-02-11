@@ -18,6 +18,7 @@ datastore = "1.1.1"
 splashscreen = "1.0.1"
 workRuntime = "2.9.1"
 firebaseMessaging = "24.1.0"
+webrtcSdk = "137.7151.05"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -37,6 +38,7 @@ androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "u
 androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
 androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
+androidx-compose-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
 androidx-core-splashscreen = { group = "androidx.core", name = "core-splashscreen", version.ref = "splashscreen" }
@@ -50,6 +52,7 @@ moshi-core = { group = "com.squareup.moshi", name = "moshi", version.ref = "mosh
 moshi-kotlin = { group = "com.squareup.moshi", name = "moshi-kotlin", version.ref = "moshi" }
 socket-io-client = { group = "io.socket", name = "socket.io-client", version.ref = "socketIo" }
 firebase-messaging = { group = "com.google.firebase", name = "firebase-messaging", version.ref = "firebaseMessaging" }
+google-webrtc = { group = "io.github.webrtc-sdk", name = "android", version.ref = "webrtcSdk" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

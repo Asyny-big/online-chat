@@ -22,10 +22,27 @@ import ru.govchat.app.domain.repository.AuthRepository
 import ru.govchat.app.domain.repository.ChatRepository
 import ru.govchat.app.domain.repository.DeviceRepository
 import ru.govchat.app.domain.usecase.CheckSessionUseCase
+import ru.govchat.app.domain.usecase.LoadMessagesUseCase
 import ru.govchat.app.domain.usecase.LoadChatsUseCase
+import ru.govchat.app.domain.usecase.LoadWebRtcConfigUseCase
 import ru.govchat.app.domain.usecase.LoginUseCase
+import ru.govchat.app.domain.usecase.LogoutUseCase
+import ru.govchat.app.domain.usecase.RegisterUseCase
+import ru.govchat.app.domain.usecase.AcceptCallUseCase
+import ru.govchat.app.domain.usecase.DeclineCallUseCase
+import ru.govchat.app.domain.usecase.JoinGroupCallUseCase
+import ru.govchat.app.domain.usecase.LeaveCallUseCase
+import ru.govchat.app.domain.usecase.LeaveGroupCallUseCase
+import ru.govchat.app.domain.usecase.SendAttachmentMessageUseCase
+import ru.govchat.app.domain.usecase.SendCallSignalUseCase
+import ru.govchat.app.domain.usecase.SendTextMessageUseCase
+import ru.govchat.app.domain.usecase.StartCallUseCase
+import ru.govchat.app.domain.usecase.StartGroupCallUseCase
+import ru.govchat.app.domain.usecase.SearchUserByPhoneUseCase
+import ru.govchat.app.domain.usecase.CreateChatUseCase
 
 class AppContainer(application: Application) {
+    val appContext = application.applicationContext
 
     val applicationScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -66,11 +83,32 @@ class AppContainer(application: Application) {
     )
 
     val authRepository: AuthRepository = AuthRepositoryImpl(api, sessionStorage)
-    val chatRepository: ChatRepository = ChatRepositoryImpl(api, socketGateway, sessionStorage)
+    val chatRepository: ChatRepository = ChatRepositoryImpl(
+        appContext = application.applicationContext,
+        api = api,
+        socketGateway = socketGateway,
+        sessionStorage = sessionStorage
+    )
     val deviceRepository: DeviceRepository = DeviceRepositoryImpl(api, sessionStorage)
 
     val checkSessionUseCase = CheckSessionUseCase(authRepository)
     val loginUseCase = LoginUseCase(authRepository)
+    val registerUseCase = RegisterUseCase(authRepository)
+    val logoutUseCase = LogoutUseCase(authRepository)
     val loadChatsUseCase = LoadChatsUseCase(chatRepository)
+    val loadMessagesUseCase = LoadMessagesUseCase(chatRepository)
+    val sendTextMessageUseCase = SendTextMessageUseCase(chatRepository)
+    val sendAttachmentMessageUseCase = SendAttachmentMessageUseCase(chatRepository)
+    val loadWebRtcConfigUseCase = LoadWebRtcConfigUseCase(chatRepository)
+    val sendCallSignalUseCase = SendCallSignalUseCase(chatRepository)
+    val startCallUseCase = StartCallUseCase(chatRepository)
+    val acceptCallUseCase = AcceptCallUseCase(chatRepository)
+    val declineCallUseCase = DeclineCallUseCase(chatRepository)
+    val leaveCallUseCase = LeaveCallUseCase(chatRepository)
+    val startGroupCallUseCase = StartGroupCallUseCase(chatRepository)
+    val joinGroupCallUseCase = JoinGroupCallUseCase(chatRepository)
+    val leaveGroupCallUseCase = LeaveGroupCallUseCase(chatRepository)
+    val searchUserByPhoneUseCase = SearchUserByPhoneUseCase(chatRepository)
+    val createChatUseCase = CreateChatUseCase(chatRepository)
 }
 

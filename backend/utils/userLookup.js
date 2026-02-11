@@ -1,5 +1,10 @@
 const User = require('../models/User');
 
+function normalizePhone(phone) {
+  if (typeof phone !== 'string') return '';
+  return phone.replace(/[\s\-()]/g, '');
+}
+
 function isValidPhoneExact(phone) {
   if (typeof phone !== 'string') return false;
   // Без нормализации: разрешаем только + и цифры, без пробелов/скобок/дефисов.
@@ -8,16 +13,25 @@ function isValidPhoneExact(phone) {
 }
 
 async function findUserByExactPhone({ phone, excludeUserId }) {
-  const query = { phone };
+  const normalized = normalizePhone(phone);
+  const query = {
+    $or: [
+      { phone },
+      // Поддержка legacy/разных форматов хранения.
+      ...(normalized ? [{ phoneNormalized: normalized }] : [])
+    ]
+  };
   if (excludeUserId) query._id = { $ne: excludeUserId };
 
-  const user = await User.findOne(query).select('_id name avatarUrl').lean();
+  const user = await User.findOne(query).select('_id name phone avatarUrl').lean();
   if (!user) return null;
 
   return {
-    id: user._id,
+    // Совместимость с Android DTO (UserDto)
+    _id: user._id,
     name: user.name,
-    avatar: user.avatarUrl || null,
+    phone: user.phone,
+    avatarUrl: user.avatarUrl || null,
   };
 }
 

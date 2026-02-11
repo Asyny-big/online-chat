@@ -6,6 +6,7 @@
     <string name="notifications_channel_messages_desc">New GovChat messages and events</string>
     <string name="call_service_notification_title">GovChat call is active</string>
     <string name="push_call_title">Incoming call</string>
+    <string name="push_group_call_title">Incoming group call</string>
     <string name="push_call_body">Open GovChat to answer</string>
     <string name="push_message_title">New message</string>
     <string name="push_message_body">Open GovChat to read it</string>

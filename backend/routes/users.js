@@ -90,7 +90,7 @@ router.get('/contacts', async (req, res) => {
 // Контракт:
 // - phone: строка в едином формате (без нормализации на backend)
 // - длина < 9 -> 400
-// - ответ: { id, name, avatar } | null
+// - ответ: { _id, name, phone, avatarUrl } | null
 router.get('/search', async (req, res) => {
   try {
     const { phone } = req.query;
@@ -114,7 +114,21 @@ router.get('/search', async (req, res) => {
       return res.status(429).json({ error: 'too many requests' });
     }
 
-    const result = await findUserByExactPhone({ phone, excludeUserId: req.userId });
+    // Точное совпадение по строке. На практике в базе могут быть номера как с '+', так и без него.
+    // Поддерживаем оба варианта без дополнительных запросов от клиента.
+    const candidates = new Set([phone]);
+    if (phone.startsWith('+')) {
+      candidates.add(phone.slice(1));
+    } else {
+      candidates.add('+' + phone);
+    }
+
+    let result = null;
+    for (const candidate of candidates) {
+      result = await findUserByExactPhone({ phone: candidate, excludeUserId: req.userId });
+      if (result) break;
+    }
+
     return res.json(result);
   } catch (error) {
     console.error('Search users error:', error);

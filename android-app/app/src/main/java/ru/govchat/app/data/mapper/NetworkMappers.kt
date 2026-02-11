@@ -1,10 +1,23 @@
 package ru.govchat.app.data.mapper
 
+import org.json.JSONObject
+import ru.govchat.app.core.network.AttachmentDto
 import ru.govchat.app.core.network.ChatDto
+import ru.govchat.app.core.network.IceServerDto
 import ru.govchat.app.core.network.MeDto
+import ru.govchat.app.core.network.MessageDto
+import ru.govchat.app.core.network.ReadByDto
 import ru.govchat.app.core.network.UserDto
+import ru.govchat.app.core.network.WebRtcIceConfigDto
+import ru.govchat.app.domain.model.ChatMessage
 import ru.govchat.app.domain.model.ChatPreview
+import ru.govchat.app.domain.model.ChatType
+import ru.govchat.app.domain.model.MessageAttachment
+import ru.govchat.app.domain.model.MessageType
 import ru.govchat.app.domain.model.UserProfile
+import ru.govchat.app.domain.model.WebRtcConfig
+import ru.govchat.app.domain.model.WebRtcIceServer
+import java.time.Instant
 
 fun UserDto.toDomain(): UserProfile {
     return UserProfile(
@@ -25,11 +38,110 @@ fun MeDto.toDomain(): UserProfile {
 }
 
 fun ChatDto.toDomain(): ChatPreview {
+    val type = when (type.lowercase()) {
+        "private" -> ChatType.PRIVATE
+        "group" -> ChatType.GROUP
+        else -> ChatType.UNKNOWN
+    }
+
+    val lastMessageText = lastMessage.toDisplayText()
+    val participantSize = participantCount ?: participants.size
+
     return ChatPreview(
         id = id,
-        title = displayName ?: name ?: "Untitled chat",
-        subtitle = lastMessage?.text?.takeIf { it.isNotBlank() } ?: "No messages yet",
+        type = type,
+        title = displayName ?: name ?: "Чат",
+        subtitle = lastMessageText,
         avatarUrl = displayAvatar,
-        isOnline = displayStatus == "online"
+        isOnline = displayStatus == "online",
+        unreadCount = 0,
+        participantCount = participantSize,
+        updatedAtMillis = updatedAt.toEpochMillisOrZero()
     )
+}
+
+fun MessageDto.toDomain(chatIdFallback: String): ChatMessage {
+    val senderId = sender?.id.orEmpty()
+    val senderName = sender?.name.orEmpty()
+    val readBy = readBy.extractReadByIds()
+
+    return ChatMessage(
+        id = id,
+        chatId = chat.takeUnless { it.isNullOrBlank() } ?: chatIdFallback,
+        senderId = senderId,
+        senderName = senderName,
+        type = type.toMessageType(),
+        text = text,
+        attachment = attachment.toDomain(),
+        readByUserIds = readBy,
+        createdAtMillis = createdAt.toEpochMillisOrZero()
+    )
+}
+
+fun WebRtcIceConfigDto.toDomain(): WebRtcConfig {
+    return WebRtcConfig(
+        iceServers = iceServers.map { it.toDomain() }.filter { it.urls.isNotEmpty() },
+        iceCandidatePoolSize = iceCandidatePoolSize
+    )
+}
+
+private fun ru.govchat.app.core.network.LastMessageDto?.toDisplayText(): String {
+    if (this == null) return "Нет сообщений"
+    return when (type.orEmpty()) {
+        "audio" -> "🎤 Голосовое сообщение"
+        "image" -> "📷 Изображение"
+        "video" -> "🎥 Видео"
+        "file" -> "📎 Файл"
+        else -> text?.takeIf { it.isNotBlank() } ?: "Сообщение"
+    }
+}
+
+private fun String?.toEpochMillisOrZero(): Long {
+    return runCatching { Instant.parse(this).toEpochMilli() }.getOrDefault(0L)
+}
+
+private fun IceServerDto.toDomain(): WebRtcIceServer {
+    val normalizedUrls = when (val raw = urls) {
+        is String -> listOf(raw)
+        is List<*> -> raw.mapNotNull { it as? String }
+        else -> emptyList()
+    }.map { it.trim() }.filter { it.isNotBlank() }
+
+    return WebRtcIceServer(
+        urls = normalizedUrls,
+        username = username?.takeIf { it.isNotBlank() },
+        credential = credential?.takeIf { it.isNotBlank() }
+    )
+}
+
+private fun AttachmentDto?.toDomain(): MessageAttachment? {
+    if (this?.url.isNullOrBlank()) return null
+    return MessageAttachment(
+        url = this!!.url.orEmpty(),
+        originalName = originalName.orEmpty(),
+        mimeType = mimeType,
+        sizeBytes = size
+    )
+}
+
+fun String.toMessageType(): MessageType {
+    return when (lowercase()) {
+        "image" -> MessageType.Image
+        "video" -> MessageType.Video
+        "audio" -> MessageType.Audio
+        "file" -> MessageType.File
+        "system" -> MessageType.System
+        else -> MessageType.Text
+    }
+}
+
+private fun List<ReadByDto>.extractReadByIds(): Set<String> {
+    return mapNotNull { item ->
+        when (val rawUser = item.user) {
+            is String -> rawUser
+            is Map<*, *> -> rawUser["_id"] as? String ?: rawUser["id"] as? String
+            is JSONObject -> rawUser.optString("_id").takeIf { it.isNotBlank() }
+            else -> null
+        }
+    }.toSet()
 }

@@ -11,9 +11,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import ru.govchat.app.core.ui.viewModelFactory
 import ru.govchat.app.domain.usecase.LoginUseCase
+import ru.govchat.app.domain.usecase.RegisterUseCase
 
 class LoginViewModel(
-    private val loginUseCase: LoginUseCase
+    private val loginUseCase: LoginUseCase,
+    private val registerUseCase: RegisterUseCase
 ) : ViewModel() {
 
     private val mutableState = MutableStateFlow(LoginUiState())
@@ -29,6 +31,13 @@ class LoginViewModel(
         )
     }
 
+    fun updateName(value: String) {
+        mutableState.value = mutableState.value.copy(
+            name = value,
+            errorMessage = null
+        )
+    }
+
     fun updatePassword(value: String) {
         mutableState.value = mutableState.value.copy(
             password = value,
@@ -36,17 +45,35 @@ class LoginViewModel(
         )
     }
 
+    fun switchMode(mode: AuthMode) {
+        if (mutableState.value.mode == mode) return
+        mutableState.value = mutableState.value.copy(
+            mode = mode,
+            errorMessage = null
+        )
+    }
+
     fun submit() {
         val snapshot = mutableState.value
-        if (snapshot.phone.isBlank() || snapshot.password.isBlank()) {
-            mutableState.value = snapshot.copy(errorMessage = "Enter phone and password")
+        val hasRequiredFields = if (snapshot.mode == AuthMode.Login) {
+            snapshot.phone.isNotBlank() && snapshot.password.isNotBlank()
+        } else {
+            snapshot.phone.isNotBlank() && snapshot.password.isNotBlank() && snapshot.name.isNotBlank()
+        }
+
+        if (!hasRequiredFields) {
             return
         }
 
         viewModelScope.launch {
             mutableState.value = snapshot.copy(isSubmitting = true, errorMessage = null)
 
-            loginUseCase(snapshot.phone, snapshot.password)
+            val authResult = when (snapshot.mode) {
+                AuthMode.Login -> loginUseCase(snapshot.phone, snapshot.password)
+                AuthMode.Register -> registerUseCase(snapshot.phone, snapshot.name, snapshot.password)
+            }
+
+            authResult
                 .onSuccess {
                     mutableState.value = mutableState.value.copy(isSubmitting = false)
                     mutableEffect.emit(LoginEffect.NavigateMain)
@@ -54,15 +81,18 @@ class LoginViewModel(
                 .onFailure { error ->
                     mutableState.value = mutableState.value.copy(
                         isSubmitting = false,
-                        errorMessage = error.message ?: "Login failed"
+                        errorMessage = error.message ?: "Ошибка авторизации"
                     )
                 }
         }
     }
 
     companion object {
-        fun factory(loginUseCase: LoginUseCase) = viewModelFactory {
-            LoginViewModel(loginUseCase)
+        fun factory(
+            loginUseCase: LoginUseCase,
+            registerUseCase: RegisterUseCase
+        ) = viewModelFactory {
+            LoginViewModel(loginUseCase, registerUseCase)
         }
     }
 }

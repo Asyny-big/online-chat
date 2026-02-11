@@ -27,6 +27,7 @@ class SessionStorage(
 ) {
     private object Keys {
         val jwtToken = stringPreferencesKey("jwt_token")
+        val userId = stringPreferencesKey("user_id")
         val pendingFcmToken = stringPreferencesKey("pending_fcm_token")
     }
 
@@ -59,9 +60,22 @@ class SessionStorage(
         }
     }
 
+    suspend fun saveUserId(userId: String) {
+        appContext.sessionDataStore.edit { preferences ->
+            preferences[Keys.userId] = userId
+        }
+    }
+
+    suspend fun getUserId(): String? {
+        return appContext.sessionDataStore.data
+            .map { it[Keys.userId] }
+            .first()
+    }
+
     suspend fun clearToken() {
         appContext.sessionDataStore.edit { preferences ->
             preferences.remove(Keys.jwtToken)
+            preferences.remove(Keys.userId)
         }
     }
 

@@ -5,7 +5,10 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import ru.govchat.app.MainActivity
@@ -28,14 +31,27 @@ class CallForegroundService : Service() {
         val remoteName = intent.getStringExtra(EXTRA_REMOTE_NAME).orEmpty().ifBlank { "Contact" }
         val callType = intent.getStringExtra(EXTRA_CALL_TYPE).orEmpty().ifBlank { "audio" }
         val typeLabel = if (callType == "video") "Video call" else "Audio call"
-
-        startForeground(
-            NOTIFICATION_ID,
-            buildNotification(
-                title = getString(R.string.call_service_notification_title),
-                text = "$typeLabel with $remoteName"
-            )
+        val notification = buildNotification(
+            title = getString(R.string.call_service_notification_title),
+            text = "$typeLabel with $remoteName"
         )
+
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val foregroundType = if (callType == "video") {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+                } else {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                }
+                startForeground(NOTIFICATION_ID, notification, foregroundType)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        }.onFailure { error ->
+            Log.e(TAG, "Failed to start call foreground service", error)
+            stopSelf()
+        }
     }
 
     private fun stopCallForeground() {
@@ -66,6 +82,7 @@ class CallForegroundService : Service() {
     companion object {
         private const val REQUEST_CODE_OPEN_APP = 10
         private const val NOTIFICATION_ID = 1001
+        private const val TAG = "CallForegroundService"
 
         const val ACTION_START = "ru.govchat.app.call.START"
         const val ACTION_STOP = "ru.govchat.app.call.STOP"
@@ -78,14 +95,22 @@ class CallForegroundService : Service() {
                 putExtra(EXTRA_REMOTE_NAME, remoteName)
                 putExtra(EXTRA_CALL_TYPE, callType)
             }
-            ContextCompat.startForegroundService(context, intent)
+            runCatching {
+                ContextCompat.startForegroundService(context, intent)
+            }.onFailure { error ->
+                Log.e(TAG, "Unable to request call foreground service start", error)
+            }
         }
 
         fun stop(context: Context) {
             val intent = Intent(context, CallForegroundService::class.java).apply {
                 action = ACTION_STOP
             }
-            context.startService(intent)
+            runCatching {
+                context.startService(intent)
+            }.onFailure { error ->
+                Log.e(TAG, "Unable to request call foreground service stop", error)
+            }
         }
     }
 }
