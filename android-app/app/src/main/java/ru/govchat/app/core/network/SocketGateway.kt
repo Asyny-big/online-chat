@@ -32,6 +32,7 @@ class SocketGateway(
     private var connectedToken: String? = null
     private val joinedChats = LinkedHashSet<String>()
 
+    @Synchronized
     fun connect(token: String) {
         val currentSocket = socket
         if (currentSocket?.connected() == true && connectedToken == token) return
@@ -53,6 +54,7 @@ class SocketGateway(
         joinedChats.clear()
     }
 
+    @Synchronized
     fun disconnect() {
         socket?.off()
         socket?.disconnect()

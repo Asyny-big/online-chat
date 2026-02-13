@@ -9,8 +9,9 @@ const MESSAGE_TYPE = {
 };
 
 class NotificationService {
-  constructor({ userSockets }) {
+  constructor({ userSockets, io }) {
     this.userSockets = userSockets;
+    this.io = io;
   }
 
   async sendMessageNotification({ chat, message, senderId, senderName, text }) {
@@ -129,8 +130,26 @@ class NotificationService {
   }
 
   isUserOnline(userId) {
-    const sockets = this.userSockets?.get?.(String(userId));
-    return !!(sockets && sockets.size > 0);
+    const userKey = String(userId);
+    const sockets = this.userSockets?.get?.(userKey);
+    if (!sockets || sockets.size === 0) return false;
+
+    // Remove stale socket IDs that are no longer present in Socket.IO server.
+    const aliveSocketIds = [];
+    sockets.forEach((socketId) => {
+      const isAlive = !!this.io?.sockets?.sockets?.get?.(socketId);
+      if (isAlive) {
+        aliveSocketIds.push(socketId);
+      } else {
+        sockets.delete(socketId);
+      }
+    });
+
+    if (sockets.size === 0) {
+      this.userSockets.delete(userKey);
+    }
+
+    return aliveSocketIds.length > 0;
   }
 
   async sendToRecipients({ userIds, payloadType, title, body, data, forceWakeup = false }) {
@@ -143,7 +162,13 @@ class NotificationService {
     if (!normalizedIds.length) return { sent: 0, skipped: 'empty_recipients' };
 
     const offlineUserIds = normalizedIds.filter((userId) => !this.isUserOnline(userId));
-    if (!offlineUserIds.length) return { sent: 0, skipped: 'all_recipients_online' };
+    if (!offlineUserIds.length) {
+      return {
+        sent: 0,
+        skipped: 'all_recipients_online',
+        recipients: normalizedIds.length
+      };
+    }
 
     const devices = await UserDevice.find(
       { userId: { $in: offlineUserIds } },

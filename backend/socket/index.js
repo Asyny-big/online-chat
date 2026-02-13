@@ -77,7 +77,7 @@ async function forceLeaveUserFromCall({ io, userId, call }) {
 }
 
 module.exports = function (io) {
-  const notificationService = new NotificationService({ userSockets });
+  const notificationService = new NotificationService({ userSockets, io });
   // Авторизация сокетов
   io.use(async (socket, next) => {
     try {
@@ -188,34 +188,43 @@ module.exports = function (io) {
           const isAttachment = !!attachment || ['audio', 'image', 'video', 'file'].includes(messageType);
 
           if (isAttachment) {
-            await notificationService.sendAttachmentNotification({
+            const pushResult = await notificationService.sendAttachmentNotification({
               chat,
               message,
               senderId: userId,
               senderName: socket.user.name,
               attachmentName: attachment?.originalName || attachment?.name || ''
             });
+            if (pushResult?.skipped) {
+              console.log('[Push] attachment skipped:', pushResult);
+            }
             return;
           }
 
           if (chat.type === 'group') {
-            await notificationService.sendGroupNotification({
+            const pushResult = await notificationService.sendGroupNotification({
               chat,
               message,
               senderId: userId,
               senderName: socket.user.name,
               text: text || ''
             });
+            if (pushResult?.skipped) {
+              console.log('[Push] group message skipped:', pushResult);
+            }
             return;
           }
 
-          await notificationService.sendMessageNotification({
+          const pushResult = await notificationService.sendMessageNotification({
             chat,
             message,
             senderId: userId,
             senderName: socket.user.name,
             text: text || ''
           });
+          if (pushResult?.skipped) {
+            console.log('[Push] message skipped:', pushResult);
+          }
         }).catch((error) => {
           console.warn('[Push] message notification failed:', error?.message || error);
         });
@@ -369,7 +378,11 @@ module.exports = function (io) {
             callType: type,
             isGroup: false
           })
-        ).catch((error) => {
+        ).then((pushResult) => {
+          if (pushResult?.skipped) {
+            console.log('[Push] incoming_call skipped:', pushResult);
+          }
+        }).catch((error) => {
           console.warn('[Push] incoming_call notification failed:', error?.message || error);
         });
 
@@ -460,7 +473,11 @@ module.exports = function (io) {
             callType: type,
             isGroup: true
           })
-        ).catch((error) => {
+        ).then((pushResult) => {
+          if (pushResult?.skipped) {
+            console.log('[Push] incoming_group_call skipped:', pushResult);
+          }
+        }).catch((error) => {
           console.warn('[Push] incoming_group_call notification failed:', error?.message || error);
         });
 
@@ -838,6 +855,12 @@ module.exports = function (io) {
 
           broadcastUserStatus(io, userId, 'offline');
         }
+      }
+
+      // Diagnostic snapshot to catch socket leaks per user.
+      const activeSocketsCount = userSockets.get(userId)?.size || 0;
+      if (activeSocketsCount > 0) {
+        console.log(`[Socket] user ${userId} still has ${activeSocketsCount} active socket(s) after disconnect`);
       }
     });
   });

@@ -38,6 +38,28 @@ router.get('/', async (req, res) => {
     const userObjectId = mongoose.Types.ObjectId.isValid(userId)
       ? new mongoose.Types.ObjectId(userId)
       : null;
+    const io = req.app.get('io');
+    const socketData = req.app.get('socketData');
+    const userSockets = socketData?.userSockets;
+    const isUserOnlineBySockets = (candidateUserId) => {
+      const key = String(candidateUserId || '');
+      if (!key) return false;
+      const sockets = userSockets?.get?.(key);
+      if (!sockets || sockets.size === 0) return false;
+
+      let alive = 0;
+      sockets.forEach((socketId) => {
+        if (io?.sockets?.sockets?.get?.(socketId)) {
+          alive += 1;
+        } else {
+          sockets.delete(socketId);
+        }
+      });
+      if (sockets.size === 0) {
+        userSockets?.delete?.(key);
+      }
+      return alive > 0;
+    };
 
     const chats = await Chat.find({ 'participants.user': userId })
       .populate('participants.user', 'name phone avatarUrl status lastSeen')
@@ -74,10 +96,11 @@ router.get('/', async (req, res) => {
           p => p.user._id.toString() !== userId
         );
         if (otherParticipant) {
+          const otherUserId = otherParticipant.user._id.toString();
           chat.displayName = otherParticipant.user.name;
           chat.displayPhone = otherParticipant.user.phone;
           chat.displayAvatar = otherParticipant.user.avatarUrl;
-          chat.displayStatus = otherParticipant.user.status;
+          chat.displayStatus = isUserOnlineBySockets(otherUserId) ? 'online' : 'offline';
           chat.displayLastSeen = otherParticipant.user.lastSeen;
         }
       } else {
@@ -100,6 +123,27 @@ router.get('/', async (req, res) => {
 router.post('/private', async (req, res) => {
   try {
     const userId = req.userId;
+    const io = req.app.get('io');
+    const socketData = req.app.get('socketData');
+    const userSockets = socketData?.userSockets;
+    const isUserOnlineBySockets = (candidateUserId) => {
+      const key = String(candidateUserId || '');
+      if (!key) return false;
+      const sockets = userSockets?.get?.(key);
+      if (!sockets || sockets.size === 0) return false;
+      let alive = 0;
+      sockets.forEach((socketId) => {
+        if (io?.sockets?.sockets?.get?.(socketId)) {
+          alive += 1;
+        } else {
+          sockets.delete(socketId);
+        }
+      });
+      if (sockets.size === 0) {
+        userSockets?.delete?.(key);
+      }
+      return alive > 0;
+    };
     const { userId: targetUserId, phone } = req.body;
 
     let targetUser;
@@ -136,7 +180,9 @@ router.post('/private', async (req, res) => {
       displayName: otherParticipant?.user.name,
       displayPhone: otherParticipant?.user.phone,
       displayAvatar: otherParticipant?.user.avatarUrl,
-      displayStatus: otherParticipant?.user.status,
+      displayStatus: otherParticipant?.user?._id
+        ? (isUserOnlineBySockets(otherParticipant.user._id.toString()) ? 'online' : 'offline')
+        : otherParticipant?.user.status,
       unreadCount: 0
     };
 
