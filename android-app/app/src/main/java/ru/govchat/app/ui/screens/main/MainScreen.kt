@@ -1,6 +1,7 @@
 ﻿package ru.govchat.app.ui.screens.main
 
 import android.graphics.BitmapFactory
+import android.app.Activity
 import android.content.Intent
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
@@ -90,6 +91,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.animation.animateColorAsState
@@ -117,6 +119,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -128,6 +131,7 @@ import io.livekit.android.room.track.TrackPublication as LiveKitTrackPublication
 import io.livekit.android.room.track.VideoTrack as LiveKitMediaVideoTrack
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import livekit.org.webrtc.RendererCommon as LiveKitRendererCommon
 import livekit.org.webrtc.SurfaceViewRenderer as LiveKitSurfaceViewRenderer
@@ -238,13 +242,41 @@ fun MainScreen(
             null
         }
     }
+    val screenShareScope = rememberCoroutineScope()
     val screenShareLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        onStartScreenShare(result.resultCode, result.data)
+        val activeCall = state.activeCall
+        val shouldPrepareMediaProjectionService =
+            result.resultCode == Activity.RESULT_OK &&
+                result.data != null &&
+                activeCall?.type == "video"
+        if (shouldPrepareMediaProjectionService && activeCall != null) {
+            CallForegroundService.start(
+                context = context,
+                remoteName = activeCall.chatName,
+                callType = activeCall.type,
+                isScreenShareActive = true
+            )
+            // Give the service a short window to switch foreground type to mediaProjection.
+            screenShareScope.launch {
+                delay(150)
+                onStartScreenShare(result.resultCode, result.data)
+            }
+        } else {
+            onStartScreenShare(result.resultCode, result.data)
+        }
     }
     val toggleScreenShare: () -> Unit = screenShareToggle@{
         if (callUiState.controls.isScreenSharing) {
+            state.activeCall?.let { activeCall ->
+                CallForegroundService.start(
+                    context = context,
+                    remoteName = activeCall.chatName,
+                    callType = activeCall.type,
+                    isScreenShareActive = false
+                )
+            }
             onStopScreenShare()
             return@screenShareToggle
         }
@@ -273,26 +305,24 @@ fun MainScreen(
         IncomingCallNotifications.show(context, incoming)
     }
 
-    LaunchedEffect(state.activeCall?.callId) {
+    LaunchedEffect(state.activeCall?.callId, callUiState.controls.isScreenSharing) {
         val active = state.activeCall
         if (active == null) {
             CallForegroundService.stop(context)
             return@LaunchedEffect
         }
         IncomingCallNotifications.cancel(context, active.callId)
-        // On Android 14+ (targetSdk 34+), startForeground with microphone|camera
-        // type requires runtime permissions to be already granted. Check before starting.
+        // On Android 14+ (targetSdk 34+), foreground service with microphone type
+        // requires RECORD_AUDIO runtime permission to be granted.
         val hasMic = ContextCompat.checkSelfPermission(
             context, android.Manifest.permission.RECORD_AUDIO
         ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-        val hasCam = active.type != "video" || ContextCompat.checkSelfPermission(
-            context, android.Manifest.permission.CAMERA
-        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-        if (hasMic && hasCam) {
+        if (hasMic) {
             CallForegroundService.start(
                 context = context,
                 remoteName = active.chatName,
-                callType = active.type
+                callType = active.type,
+                isScreenShareActive = callUiState.controls.isScreenSharing
             )
         }
     }
@@ -2996,6 +3026,15 @@ private fun CallControlsBar(
     onToggleScreenShare: () -> Unit,
     onLeaveCall: () -> Unit
 ) {
+    val isCompactControls = LocalConfiguration.current.screenWidthDp <= 360
+    val regularButtonSize = if (isCompactControls) 48.dp else 56.dp
+    val dangerButtonSize = if (isCompactControls) 52.dp else 60.dp
+    val regularIconSize = if (isCompactControls) 21.dp else 23.dp
+    val dangerIconSize = if (isCompactControls) 22.dp else 24.dp
+    val controlsSpacing = if (isCompactControls) 6.dp else 10.dp
+    val controlsHorizontalPadding = if (isCompactControls) 8.dp else 14.dp
+    val controlsVerticalPadding = if (isCompactControls) 10.dp else 12.dp
+
     Surface(
         color = Color.Transparent,
         shape = RoundedCornerShape(32.dp),
@@ -3015,14 +3054,17 @@ private fun CallControlsBar(
                         )
                     )
                 )
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = controlsHorizontalPadding, vertical = controlsVerticalPadding),
+            horizontalArrangement = Arrangement.spacedBy(controlsSpacing),
             verticalAlignment = Alignment.CenterVertically
         ) {
             CallControlButton(
                 icon = if (controls.isMicrophoneEnabled) Icons.Filled.Mic else Icons.Filled.MicOff,
                 contentDescription = if (controls.isMicrophoneEnabled) "Выключить микрофон" else "Включить микрофон",
                 selected = !controls.isMicrophoneEnabled,
+                buttonSize = regularButtonSize,
+                iconSize = regularIconSize,
                 onClick = {
                     onInteraction()
                     onToggleMicrophone()
@@ -3034,6 +3076,8 @@ private fun CallControlsBar(
                     icon = if (controls.isCameraEnabled) Icons.Filled.Videocam else Icons.Filled.VideocamOff,
                     contentDescription = if (controls.isCameraEnabled) "Выключить камеру" else "Включить камеру",
                     selected = !controls.isCameraEnabled,
+                    buttonSize = regularButtonSize,
+                    iconSize = regularIconSize,
                     onClick = {
                         onInteraction()
                         onToggleCamera()
@@ -3044,6 +3088,8 @@ private fun CallControlsBar(
                     contentDescription = "Сменить камеру",
                     selected = false,
                     enabled = controls.canSwitchCamera,
+                    buttonSize = regularButtonSize,
+                    iconSize = regularIconSize,
                     onClick = {
                         onInteraction()
                         onSwitchCamera()
@@ -3058,6 +3104,8 @@ private fun CallControlsBar(
                     },
                     selected = controls.isScreenSharing,
                     enabled = controls.isScreenSharing || controls.isScreenShareSupported,
+                    buttonSize = regularButtonSize,
+                    iconSize = regularIconSize,
                     onClick = {
                         onInteraction()
                         onToggleScreenShare()
@@ -3070,6 +3118,8 @@ private fun CallControlsBar(
                 contentDescription = "Завершить звонок",
                 selected = true,
                 danger = true,
+                buttonSize = dangerButtonSize,
+                iconSize = dangerIconSize,
                 onClick = {
                     onInteraction()
                     onLeaveCall()
@@ -3085,6 +3135,8 @@ private fun CallControlButton(
     contentDescription: String,
     selected: Boolean,
     onClick: () -> Unit,
+    buttonSize: Dp = 56.dp,
+    iconSize: Dp = 23.dp,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     danger: Boolean = false
@@ -3131,7 +3183,6 @@ private fun CallControlButton(
         label = "callControlIcon"
     )
 
-    val buttonSize = if (danger) 64.dp else 56.dp
     Surface(
         modifier = modifier
             .graphicsLayer {
@@ -3155,7 +3206,7 @@ private fun CallControlButton(
                 imageVector = icon,
                 contentDescription = contentDescription,
                 tint = iconColor,
-                modifier = Modifier.size(if (danger) 24.dp else 23.dp)
+                modifier = Modifier.size(iconSize)
             )
         }
     }

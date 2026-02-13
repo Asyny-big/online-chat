@@ -50,7 +50,7 @@
             android:name=".service.call.CallForegroundService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="microphone|camera" />
+            android:foregroundServiceType="microphone|camera|mediaProjection" />
 
         <service
             android:name=".push.GovChatFirebaseMessagingService"

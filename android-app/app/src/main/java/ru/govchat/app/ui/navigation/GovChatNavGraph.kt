@@ -115,9 +115,7 @@ fun GovChatNavGraph(
             )
             val state = viewModel.state.collectAsStateWithLifecycle().value
             val callUiState = viewModel.callUiState.collectAsStateWithLifecycle().value
-            val canEnterPip = state.activeCall?.let { active ->
-                !active.isGroup && active.type == "video"
-            } ?: false
+            val canEnterPip = state.activeCall?.type == "video"
 
             LaunchedEffect(canEnterPip) {
                 onCallPipAvailabilityChanged(canEnterPip)

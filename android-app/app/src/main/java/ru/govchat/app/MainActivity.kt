@@ -42,11 +42,24 @@ class MainActivity : ComponentActivity() {
 
     fun onCallPipAvailabilityChanged(isAvailable: Boolean) {
         canEnterPipForCall = isAvailable
+        updateCallPictureInPictureParams(isAvailable)
     }
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        if (canEnterPipForCall) {
+        if (canEnterPipForCall && Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            enterCallPictureInPicture()
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        if (
+            canEnterPipForCall &&
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.S &&
+            !isChangingConfigurations &&
+            !isInPictureInPictureMode
+        ) {
             enterCallPictureInPicture()
         }
     }
@@ -64,11 +77,24 @@ class MainActivity : ComponentActivity() {
         if (!packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) return
         if (isInPictureInPictureMode) return
 
+        enterPictureInPictureMode(buildCallPictureInPictureParams(autoEnter = canEnterPipForCall))
+    }
+
+    private fun updateCallPictureInPictureParams(isCallPipAvailable: Boolean) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        if (!packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) return
+
+        setPictureInPictureParams(
+            buildCallPictureInPictureParams(autoEnter = isCallPipAvailable)
+        )
+    }
+
+    private fun buildCallPictureInPictureParams(autoEnter: Boolean): PictureInPictureParams {
         val paramsBuilder = PictureInPictureParams.Builder()
             .setAspectRatio(Rational(9, 16))
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            paramsBuilder.setAutoEnterEnabled(true)
+            paramsBuilder.setAutoEnterEnabled(autoEnter)
         }
-        enterPictureInPictureMode(paramsBuilder.build())
+        return paramsBuilder.build()
     }
 }

@@ -1,10 +1,12 @@
 package ru.govchat.app.service.call
 
+import android.Manifest
 import android.app.Notification
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
@@ -30,7 +32,12 @@ class CallForegroundService : Service() {
     private fun startCallForeground(intent: Intent) {
         val remoteName = intent.getStringExtra(EXTRA_REMOTE_NAME).orEmpty().ifBlank { "Contact" }
         val callType = intent.getStringExtra(EXTRA_CALL_TYPE).orEmpty().ifBlank { "audio" }
-        val typeLabel = if (callType == "video") "Video call" else "Audio call"
+        val isScreenShareActive = intent.getBooleanExtra(EXTRA_SCREEN_SHARE_ACTIVE, false)
+        val typeLabel = when {
+            callType == "video" && isScreenShareActive -> "Video call - Screen share"
+            callType == "video" -> "Video call"
+            else -> "Audio call"
+        }
         val notification = buildNotification(
             title = getString(R.string.call_service_notification_title),
             text = "$typeLabel with $remoteName"
@@ -38,11 +45,16 @@ class CallForegroundService : Service() {
 
         runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val foregroundType = if (callType == "video") {
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
-                } else {
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                var foregroundType = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                val hasCameraPermission = ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.CAMERA
+                ) == PackageManager.PERMISSION_GRANTED
+                if (callType == "video" && hasCameraPermission) {
+                    foregroundType = foregroundType or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+                }
+                if (isScreenShareActive) {
+                    foregroundType = foregroundType or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
                 }
                 startForeground(NOTIFICATION_ID, notification, foregroundType)
             } else {
@@ -88,12 +100,19 @@ class CallForegroundService : Service() {
         const val ACTION_STOP = "ru.govchat.app.call.STOP"
         const val EXTRA_REMOTE_NAME = "extra_remote_name"
         const val EXTRA_CALL_TYPE = "extra_call_type"
+        const val EXTRA_SCREEN_SHARE_ACTIVE = "extra_screen_share_active"
 
-        fun start(context: Context, remoteName: String, callType: String) {
+        fun start(
+            context: Context,
+            remoteName: String,
+            callType: String,
+            isScreenShareActive: Boolean = false
+        ) {
             val intent = Intent(context, CallForegroundService::class.java).apply {
                 action = ACTION_START
                 putExtra(EXTRA_REMOTE_NAME, remoteName)
                 putExtra(EXTRA_CALL_TYPE, callType)
+                putExtra(EXTRA_SCREEN_SHARE_ACTIVE, isScreenShareActive)
             }
             runCatching {
                 ContextCompat.startForegroundService(context, intent)
