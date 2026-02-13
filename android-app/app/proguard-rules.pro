@@ -19,3 +19,10 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# Moshi uses reflection for network DTOs in this package.
+# Keep names and members to avoid JSON mapping regressions in release builds.
+-keep class ru.govchat.app.core.network.** { *; }
+
+# Keep annotation/metadata information required by Moshi + Kotlin reflection.
+-keepattributes RuntimeVisibleAnnotations,RuntimeVisibleParameterAnnotations,Signature,InnerClasses,EnclosingMethod
