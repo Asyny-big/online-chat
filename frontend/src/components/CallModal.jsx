@@ -1078,6 +1078,7 @@ function CallModal({
 
   const isMobile = isMobileBrowser() || window.innerWidth < 768;
   const isMobileVideoLayout = isMobile && callType === 'video';
+  const isIncomingScreen = callState === 'incoming';
 
   const MOBILE_PIP_W = 112;
   const MOBILE_PIP_H = 152;
@@ -1325,7 +1326,7 @@ function CallModal({
   // Если это web-desktop, мы хотим "модальное" окно, а не full-screen
   // Если мобилка - full screen
   
-  const modalStyle = isMobile ? {
+  const modalStyle = (isMobile || isIncomingScreen) ? {
     width: '100%',
     height: '100%',
     borderRadius: 0,
@@ -1341,8 +1342,14 @@ function CallModal({
     border: '1px solid rgba(255, 255, 255, 0.1)',
   };
 
+  const overlayStyle = {
+    ...styles.overlay,
+    ...(isMobile ? styles.overlayMobile : {}),
+    ...(isIncomingScreen ? styles.overlayIncoming : {})
+  };
+
   return (
-    <div className="govchat-call-modal" style={styles.overlay}>
+    <div className="govchat-call-modal" style={overlayStyle}>
       <div style={{
           ...styles.modal,
           ...modalStyle
@@ -1351,7 +1358,8 @@ function CallModal({
         <div style={{
             ...styles.videoContainer,
             background: isMobile ? '#000' : '#0f172a', // Чуть светлее фон на десктопе для контейнера
-            borderRadius: isMobile ? 0 : '24px', 
+            borderRadius: isMobile ? 0 : '24px',
+            ...(isIncomingScreen ? { background: '#000', borderRadius: 0 } : {}),
         }} ref={videoContainerRef}>
           {/* Remote video (full screen) */}
           {callType === 'video' ? (
@@ -1422,7 +1430,7 @@ function CallModal({
         </div>
         
         {/* Info */}
-        <div style={styles.info}>
+        <div style={{ ...styles.info, ...(isIncomingScreen ? styles.infoIncoming : {}) }}>
           <div style={styles.userName}>{remoteUser?.name || 'Пользователь'}</div>
           <div style={styles.status}>{getStatusText()}</div>
           {callState === 'incoming' && (
@@ -1435,6 +1443,7 @@ function CallModal({
         {/* Controls */}
         <div style={{
           ...styles.controls,
+          ...(isIncomingScreen ? styles.controlsIncoming : {}),
           ...(callState === 'active' ? {
              opacity: showControls ? 1 : 0,
              transform: showControls ? 'translateX(-50%) translateY(0)' : 'translateX(-50%) translateY(24px)',
@@ -1529,6 +1538,14 @@ const styles = {
     zIndex: 10000,
     perspective: '1000px',
   },
+  overlayMobile: {
+    background: '#000',
+    backdropFilter: 'none',
+  },
+  overlayIncoming: {
+    background: '#020617',
+    backdropFilter: 'none',
+  },
   modal: {
     position: 'relative',
     overflow: 'hidden',
@@ -1611,6 +1628,11 @@ const styles = {
     zIndex: 20,
     pointerEvents: 'none',
   },
+  infoIncoming: {
+    top: '50%',
+    transform: 'translateY(-50%)',
+    padding: '0 24px',
+  },
   userName: {
     fontSize: '28px',
     fontWeight: '600',
@@ -1646,6 +1668,16 @@ const styles = {
     boxShadow: '0 20px 40px rgba(0, 0, 0, 0.4), inset 0 1px 1px rgba(255,255,255,0.1)',
     zIndex: 50,
     transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  controlsIncoming: {
+    bottom: '56px',
+    padding: 0,
+    border: 'none',
+    borderRadius: 0,
+    background: 'transparent',
+    boxShadow: 'none',
+    backdropFilter: 'none',
+    gap: '28px',
   },
   controlBtn: {
     width: '52px',

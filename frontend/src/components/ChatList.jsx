@@ -1,7 +1,7 @@
 import React from 'react';
 import { resolveAssetUrl } from '../utils/resolveAssetUrl';
 
-function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
+function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId, label = 'Чаты' }) {
   // Защита от неправильного типа данных
   const chatList = Array.isArray(chats) ? chats : [];
   
@@ -19,7 +19,7 @@ function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
 
   return (
     <div style={styles.container}>
-      <div style={styles.label}>Чаты</div>
+      <div style={styles.label}>{label}</div>
       {chatList.map((chat) => {
         const isActive = selectedChat?._id === chat._id;
         const hasIncomingCall = incomingCallChatId === chat._id;

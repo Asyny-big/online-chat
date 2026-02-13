@@ -18,6 +18,7 @@ function MessageInput({ chatId, socket, token, onTyping }) {
   const timerRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const lastEconomyProbeAtRef = useRef(0);
+  const textAreaRef = useRef(null);
 
   // Очистка при размонтировании
   useEffect(() => {
@@ -40,6 +41,13 @@ function MessageInput({ chatId, socket, token, onTyping }) {
       }, 2000);
     }
   };
+
+  useEffect(() => {
+    const el = textAreaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
+  }, [input]);
 
   const handleSend = (e) => {
     e?.preventDefault();
@@ -289,6 +297,7 @@ function MessageInput({ chatId, socket, token, onTyping }) {
 
   return (
     <div
+      className="gm-message-input"
       style={{
         ...styles.container,
         ...(isDragging ? styles.dragging : {})
@@ -338,13 +347,14 @@ function MessageInput({ chatId, socket, token, onTyping }) {
             📎
           </button>
 
-          <input
-            type="text"
+          <textarea
+            ref={textAreaRef}
             value={input}
             onChange={handleInputChange}
             placeholder={uploading ? 'Загрузка...' : 'Введите сообщение...'}
             style={styles.input}
             disabled={uploading}
+            rows={1}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
@@ -383,10 +393,12 @@ function MessageInput({ chatId, socket, token, onTyping }) {
 
 const styles = {
   container: {
-    padding: '12px 16px',
+    padding: '10px 12px calc(10px + env(safe-area-inset-bottom, 0px))',
     borderTop: '1px solid #334155',
-    background: '#1e293b',
+    background: 'rgba(30, 41, 59, 0.92)',
     position: 'relative',
+    backdropFilter: 'blur(10px)',
+    zIndex: 4,
   },
   dragging: {
     background: '#1e40af',
@@ -411,19 +423,25 @@ const styles = {
   },
   form: {
     display: 'flex',
-    alignItems: 'center',
+    alignItems: 'flex-end',
     gap: '8px',
   },
   input: {
     flex: 1,
-    padding: '12px 16px',
+    padding: '10px 14px',
     background: '#0f172a',
     border: '1px solid #334155',
-    borderRadius: '24px',
+    borderRadius: '18px',
     color: '#fff',
     fontSize: '14px',
     outline: 'none',
     transition: 'border-color 0.2s',
+    resize: 'none',
+    minHeight: '42px',
+    maxHeight: '140px',
+    overflowY: 'auto',
+    lineHeight: 1.35,
+    fontFamily: 'inherit',
   },
   iconBtn: {
     width: '40px',

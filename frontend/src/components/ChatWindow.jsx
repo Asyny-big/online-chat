@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import axios from 'axios';
 import MessageInput from './MessageInput';
 import { API_URL } from '../config';
@@ -10,14 +10,8 @@ function ChatWindow({
   socket,
   currentUserId,
   onStartCall,
-  onStartGroupCall,  // Новый пропс для групповых звонков
+  onStartGroupCall,
   typingUsers,
-  incomingCall,
-  incomingGroupCall,  // Новый пропс для входящего группового звонка 
-  onAcceptCall,
-  onDeclineCall,
-  onAcceptGroupCall,  // Новый пропс
-  onDeclineGroupCall, // Новый пропс
   onBack,
   onDeleteMessage,
   onDeleteChat
@@ -86,84 +80,83 @@ function ChatWindow({
   const participantCount = chat.participants?.length || 0;
 
   // Проверяем есть ли входящий звонок для этого чата
-  const hasIncomingCall = incomingCall && incomingCall.chatId === chat._id;
-
   // Проверяем есть ли входящий групповой звонок для этого чата
   const hasIncomingGroupCall = incomingGroupCall && incomingGroupCall.chatId === chat._id;
 
-  return (
-    <div style={styles.container}>
-      {/* Всплывающее уведомление о входящем звонке */}
-      {hasIncomingCall && (
-        <div style={styles.incomingCallBanner}>
-          <div style={styles.callBannerContent}>
-            <div style={styles.callBannerIcon}>
-              {incomingCall.type === 'video' ? '📹' : '📞'}
-            </div>
-            <div style={styles.callBannerInfo}>
-              <div style={styles.callBannerTitle}>Входящий звонок</div>
-              <div style={styles.callBannerSubtitle}>
-                {incomingCall.initiator?.name || 'Пользователь'} звонит вам
-              </div>
-            </div>
-          </div>
-          <div style={styles.callBannerActions}>
-            <button
-              onClick={() => onDeclineCall?.(incomingCall.callId)}
-              style={styles.callBannerDecline}
-              title="Отклонить"
-            >
-              ✕
-            </button>
-            <button
-              onClick={() => onAcceptCall?.(incomingCall.callId, incomingCall.type)}
-              style={styles.callBannerAccept}
-              title="Принять"
-            >
-              {incomingCall.type === 'video' ? '🎥' : '📞'}
-            </button>
-          </div>
-        </div>
-      )}
+  const formatDayLabel = useCallback((rawDate) => {
+    if (!rawDate) return 'Сегодня';
+    const date = new Date(rawDate);
+    if (Number.isNaN(date.getTime())) return 'Сегодня';
 
-      {/* Всплывающее уведомление о входящем групповом звонке */}
-      {hasIncomingGroupCall && (
-        <div style={styles.incomingGroupCallBanner}>
-          <div style={styles.callBannerContent}>
-            <div style={styles.callBannerIcon}>
-              {incomingGroupCall.type === 'video' ? '📹' : '📞'}
-            </div>
-            <div style={styles.callBannerInfo}>
-              <div style={styles.callBannerTitle}>Групповой звонок</div>
-              <div style={styles.callBannerSubtitle}>
-                {incomingGroupCall.initiator?.name || 'Участник'} начал звонок
-                {incomingGroupCall.participants?.length > 1 &&
-                  ` • ${incomingGroupCall.participants.length} участников`
-                }
-              </div>
-            </div>
-          </div>
-          <div style={styles.callBannerActions}>
-            <button
-              onClick={() => onDeclineGroupCall?.(incomingGroupCall.callId)}
-              style={styles.callBannerDecline}
-              title="Отклонить"
-            >
-              ✕
-            </button>
-            <button
-              onClick={() => onAcceptGroupCall?.(incomingGroupCall.callId, incomingGroupCall.type)}
-              style={styles.callBannerAccept}
-              title="Присоединиться"
-            >
-              {incomingGroupCall.type === 'video' ? '🎥' : '📞'}
-            </button>
-          </div>
-        </div>
-      )}
+    const now = new Date();
+    const startNow = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const startDate = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+    const diffDays = Math.round((startNow - startDate) / 86400000);
+
+    if (diffDays === 0) return 'Сегодня';
+    if (diffDays === 1) return 'Вчера';
+    return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+  }, []);
+
+  const timelineItems = useMemo(() => {
+    const items = [];
+    let prevDateKey = '';
+    const toDate = (message) => {
+      if (!message) return null;
+      const raw = message.createdAt || message.createdAtMillis || message.created_at || null;
+      if (!raw) return null;
+      const parsed = new Date(raw);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    };
+
+    messages.forEach((msg, idx) => {
+      const isMine = msg.sender?._id === currentUserId || msg.sender === currentUserId;
+      const createdDate = toDate(msg);
+      const dateKey = createdDate
+        ? `${createdDate.getFullYear()}-${createdDate.getMonth()}-${createdDate.getDate()}`
+        : 'unknown';
+
+      if (dateKey !== prevDateKey) {
+        items.push({
+          kind: 'day',
+          key: `day-${dateKey}-${idx}`,
+          label: formatDayLabel(createdDate)
+        });
+        prevDateKey = dateKey;
+      }
+
+      const prev = messages[idx - 1];
+      const next = messages[idx + 1];
+      const senderId = msg.sender?._id || msg.sender;
+      const prevSenderId = prev?.sender?._id || prev?.sender;
+      const nextSenderId = next?.sender?._id || next?.sender;
+
+      const prevDate = toDate(prev);
+      const nextDate = toDate(next);
+      const prevGap = createdDate && prevDate ? Math.abs(createdDate.getTime() - prevDate.getTime()) : Infinity;
+      const nextGap = createdDate && nextDate ? Math.abs(nextDate.getTime() - createdDate.getTime()) : Infinity;
+
+      const groupedTop = !!prev && senderId === prevSenderId && prevGap < 5 * 60 * 1000;
+      const groupedBottom = !!next && senderId === nextSenderId && nextGap < 5 * 60 * 1000;
+
+      items.push({
+        kind: 'message',
+        key: msg._id || `m-${idx}`,
+        isMine,
+        groupedTop,
+        groupedBottom,
+        message: msg
+      });
+    });
+
+    return items;
+  }, [messages, currentUserId, formatDayLabel]);
+
+  return (
+    <div className="gm-chat-window" style={styles.container}>
 
       {/* Шапка с кнопками звонков */}
-      <div style={styles.header}>
+      <div className="gm-chat-header" style={styles.header}>
         <div style={styles.headerInfo}>
           {/* Кнопка назад для мобильных */}
           {isMobile && (
@@ -186,6 +179,11 @@ function ChatWindow({
             {isGroupChat && (
               <div style={styles.participantCount}>
                 {participantCount} участников
+              </div>
+            )}
+            {!isGroupChat && typingList.length === 0 && (
+              <div style={styles.participantCount}>
+                {chat.isOnline ? 'онлайн' : 'в сети недавно'}
               </div>
             )}
             {typingList.length > 0 && (
@@ -267,25 +265,34 @@ function ChatWindow({
 
       {/* Список сообщений */}
       <div
+        className="gm-chat-messages"
         ref={containerRef}
         style={styles.messagesContainer}
         onScroll={handleScroll}
       >
-        {messages.length === 0 ? (
+        {timelineItems.length === 0 ? (
           <div style={styles.noMessages}>
             <span style={styles.noMessagesIcon}>👋</span>
             <span>Начните общение</span>
           </div>
         ) : (
-          messages.map((msg, idx) => {
-            const isMine = msg.sender?._id === currentUserId || msg.sender === currentUserId;
+          timelineItems.map((item) => {
+            if (item.kind === 'day') {
+              return (
+                <div key={item.key} className="gm-day-separator">
+                  {item.label}
+                </div>
+              );
+            }
             return (
               <MessageBubble
-                key={msg._id || idx}
-                message={msg}
-                isMine={isMine}
+                key={item.key}
+                message={item.message}
+                isMine={item.isMine}
+                groupedTop={item.groupedTop}
+                groupedBottom={item.groupedBottom}
                 token={token}
-                onDelete={isMine ? () => onDeleteMessage?.(msg._id) : null}
+                onDelete={item.isMine ? () => onDeleteMessage?.(item.message._id) : null}
               />
             );
           })
@@ -333,7 +340,7 @@ function ChatWindow({
 }
 
 // Компонент сообщения
-function MessageBubble({ message, isMine, onDelete, token }) {
+function MessageBubble({ message, isMine, groupedTop, groupedBottom, onDelete, token }) {
   const [showMenu, setShowMenu] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const { type: rawType = 'text', text, attachment, createdAt, sender } = message;
@@ -522,12 +529,16 @@ function MessageBubble({ message, isMine, onDelete, token }) {
     <div style={{
       ...styles.messageRow,
       justifyContent: isMine ? 'flex-end' : 'flex-start',
+      marginTop: groupedTop ? '2px' : '10px',
+      marginBottom: groupedBottom ? '0px' : '4px',
     }}>
       <div
         style={{
           ...styles.bubble,
           ...(isMine ? styles.bubbleMine : styles.bubbleTheirs),
           position: 'relative',
+          borderTopLeftRadius: !isMine && groupedTop ? '8px' : styles.bubble.borderRadius,
+          borderTopRightRadius: isMine && groupedTop ? '8px' : styles.bubble.borderRadius,
         }}
         onContextMenu={(e) => {
           if (onDelete) {
@@ -537,10 +548,12 @@ function MessageBubble({ message, isMine, onDelete, token }) {
         }}
         onClick={() => setShowMenu(false)}
       >
-        {!isMine && senderName && (
+        {!isMine && senderName && !groupedTop && (
           <div style={styles.senderName}>{senderName}</div>
         )}
-        {renderContent()}
+        <div className="gm-message-text">
+          {renderContent()}
+        </div>
         <div style={{
           ...styles.messageTime,
           textAlign: isMine ? 'right' : 'left',
@@ -851,7 +864,7 @@ const styles = {
     width: '100%',
   },
   bubble: {
-    maxWidth: '75%',
+    maxWidth: '84%',
     padding: '10px 14px',
     borderRadius: '18px',
     wordWrap: 'break-word',
@@ -874,7 +887,9 @@ const styles = {
   },
   textContent: {
     fontSize: '14px',
-    lineHeight: '1.4',
+    lineHeight: '1.45',
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'anywhere',
   },
   messageTime: {
     fontSize: '10px',

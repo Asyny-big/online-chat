@@ -141,13 +141,13 @@ const MediaStreamVideo = React.memo(function MediaStreamVideo({ mediaStreamTrack
     }
 
     const p = el.play?.();
-    if (p && typeof p.catch === 'function') p.catch(() => {});
+    if (p && typeof p.catch === 'function') p.catch(() => { });
 
     return () => {
       // На unmount: полностью отвязываем srcObject, чтобы не держать last frame.
       try {
         el.srcObject = null;
-      } catch (_) {}
+      } catch (_) { }
     };
   }, []);
 
@@ -166,14 +166,14 @@ const MediaStreamVideo = React.memo(function MediaStreamVideo({ mediaStreamTrack
     if (prev && endedHandlerRef.current) {
       try {
         prev.removeEventListener?.('ended', endedHandlerRef.current);
-      } catch (_) {}
+      } catch (_) { }
     }
 
     // Удаляем предыдущий track из stream.
     if (prev) {
       try {
         stream.removeTrack(prev);
-      } catch (_) {}
+      } catch (_) { }
     }
 
     attachedTrackRef.current = next;
@@ -183,7 +183,7 @@ const MediaStreamVideo = React.memo(function MediaStreamVideo({ mediaStreamTrack
       // Доп. защита: можно сбросить srcObject, чтобы не держать последний кадр.
       try {
         el.srcObject = null;
-      } catch (_) {}
+      } catch (_) { }
       onTrackEnded?.();
       return undefined;
     }
@@ -191,23 +191,23 @@ const MediaStreamVideo = React.memo(function MediaStreamVideo({ mediaStreamTrack
     // Добавляем новый track.
     try {
       stream.addTrack(next);
-    } catch (_) {}
+    } catch (_) { }
 
     // Если srcObject был сброшен — восстанавливаем ссылку на тот же stream (не новый!).
     try {
       if (el.srcObject !== stream) {
         el.srcObject = stream;
       }
-    } catch (_) {}
+    } catch (_) { }
 
     const handleEnded = () => {
       // Для кейса track stopped: убираем track из stream и сбрасываем srcObject.
       try {
         stream.removeTrack(next);
-      } catch (_) {}
+      } catch (_) { }
       try {
         if (el.srcObject === stream) el.srcObject = null;
-      } catch (_) {}
+      } catch (_) { }
       attachedTrackRef.current = null;
       onTrackEnded?.();
     };
@@ -215,12 +215,12 @@ const MediaStreamVideo = React.memo(function MediaStreamVideo({ mediaStreamTrack
     endedHandlerRef.current = handleEnded;
     try {
       next.addEventListener?.('ended', handleEnded);
-    } catch (_) {}
+    } catch (_) { }
 
     return () => {
       try {
         next.removeEventListener?.('ended', handleEnded);
-      } catch (_) {}
+      } catch (_) { }
     };
   }, [mediaStreamTrack, onTrackEnded]);
 
@@ -261,7 +261,7 @@ const LiveKitVideo = React.memo(function LiveKitVideo({ track, muted, className,
       if (typeof muted === 'boolean') {
         el.muted = muted;
       }
-    } catch (_) {}
+    } catch (_) { }
 
     try {
       track.attach(el);
@@ -277,13 +277,13 @@ const LiveKitVideo = React.memo(function LiveKitVideo({ track, muted, className,
       el.addEventListener('pause', replay);
       el.addEventListener('stalled', replay);
       el.addEventListener('suspend', replay);
-    } catch (_) {}
+    } catch (_) { }
 
     const mst = track?.mediaStreamTrack || null;
     const handleEnded = () => onTrackEnded?.();
     try {
       mst?.addEventListener?.('ended', handleEnded);
-    } catch (_) {}
+    } catch (_) { }
 
     return () => {
       try {
@@ -292,10 +292,10 @@ const LiveKitVideo = React.memo(function LiveKitVideo({ track, muted, className,
         el.removeEventListener('pause', replay);
         el.removeEventListener('stalled', replay);
         el.removeEventListener('suspend', replay);
-      } catch (_) {}
+      } catch (_) { }
       try {
         mst?.removeEventListener?.('ended', handleEnded);
-      } catch (_) {}
+      } catch (_) { }
       try {
         track.detach(el);
       } catch (_) {
@@ -454,7 +454,7 @@ function qualityLabel(q) {
     if (q === VideoQuality.HIGH) return 'HIGH';
     if (q === VideoQuality.MEDIUM) return 'MEDIUM';
     if (q === VideoQuality.LOW) return 'LOW';
-  } catch (_) {}
+  } catch (_) { }
   return 'N/A';
 }
 
@@ -470,20 +470,20 @@ function setPublicationSubscribedQuality(pub, quality) {
       pub.setSubscribedQuality(quality);
       return;
     }
-  } catch (_) {}
+  } catch (_) { }
 
   try {
     if (typeof pub.setVideoQuality === 'function') {
       pub.setVideoQuality(quality);
       return;
     }
-  } catch (_) {}
+  } catch (_) { }
 
   try {
     if (pub.track && typeof pub.track.setSubscribedQuality === 'function') {
       pub.track.setSubscribedQuality(quality);
     }
-  } catch (_) {}
+  } catch (_) { }
 }
 
 function isScreenSharePublication(pub) {
@@ -588,7 +588,7 @@ function GroupCallModalLiveKit({
     try {
       const elements = document.querySelectorAll('.gvc-overlay video, .gvc-overlay audio');
       elements.forEach((el) => safePlayMediaElement(el, 'overlay-wakeup'));
-    } catch (_) {}
+    } catch (_) { }
   }, []);
 
   useEffect(() => {
@@ -604,7 +604,7 @@ function GroupCallModalLiveKit({
     const t = hideControlsTimerRef.current;
     if (t) {
       hideControlsTimerRef.current = null;
-      try { clearTimeout(t); } catch (_) {}
+      try { clearTimeout(t); } catch (_) { }
     }
   }, []);
 
@@ -658,7 +658,7 @@ function GroupCallModalLiveKit({
           const next = Math.round(w || 0);
           setThumbWidth((prev) => (prev === next ? prev : next));
         }
-      } catch (_) {}
+      } catch (_) { }
     };
 
     // ResizeObserver может стрелять очень часто — используем rAF throttle.
@@ -676,13 +676,13 @@ function GroupCallModalLiveKit({
     try {
       if (ro && stageEl) ro.observe(stageEl);
       if (ro && thumbsEl) ro.observe(thumbsEl);
-    } catch (_) {}
+    } catch (_) { }
 
     window.addEventListener?.('resize', update);
     return () => {
       window.removeEventListener?.('resize', update);
-      try { if (raf) cancelAnimationFrame(raf); } catch (_) {}
-      try { ro?.disconnect?.(); } catch (_) {}
+      try { if (raf) cancelAnimationFrame(raf); } catch (_) { }
+      try { ro?.disconnect?.(); } catch (_) { }
     };
   }, []);
 
@@ -721,7 +721,7 @@ function GroupCallModalLiveKit({
       // object map
       try {
         Object.keys(stats).forEach((k) => out.push(stats[k]));
-      } catch (_) {}
+      } catch (_) { }
       return out;
     };
 
@@ -745,7 +745,7 @@ function GroupCallModalLiveKit({
         if (proto.includes('udp')) return 'UDP';
         // fallback
         if (remote?.protocol) return String(remote.protocol).toUpperCase();
-      } catch (_) {}
+      } catch (_) { }
       return '';
     };
 
@@ -846,7 +846,7 @@ function GroupCallModalLiveKit({
 
     return () => {
       cancelled = true;
-      try { if (timer) clearInterval(timer); } catch (_) {}
+      try { if (timer) clearInterval(timer); } catch (_) { }
     };
   }, [callStatus, showConnStatus]);
 
@@ -953,7 +953,7 @@ function GroupCallModalLiveKit({
         try {
           const initId = initiator?._id ? String(initiator._id) : '';
           if (initId) next[initId] = { name: String(initiator?.name || '').trim() || prev?.[initId]?.name || '' };
-        } catch (_) {}
+        } catch (_) { }
 
         try {
           if (Array.isArray(existingParticipants)) {
@@ -964,7 +964,7 @@ function GroupCallModalLiveKit({
               next[pid] = { name: pname || prev?.[pid]?.name || '' };
             });
           }
-        } catch (_) {}
+        } catch (_) { }
 
         return next;
       });
@@ -979,7 +979,7 @@ function GroupCallModalLiveKit({
       // Обновляем connectionState (помогает UI статуса даже без stats).
       try {
         setLkConnectionState(String(room.connectionState || ''));
-      } catch (_) {}
+      } catch (_) { }
 
       try {
         if (RoomEvent.ConnectionStateChanged) {
@@ -988,7 +988,7 @@ function GroupCallModalLiveKit({
             setLkConnectionState(String(state || ''));
           });
         }
-      } catch (_) {}
+      } catch (_) { }
 
       // Важно: подписки на события до/после connect допустимы,
       // но state-апдейты защищаем mountedRef.
@@ -1049,13 +1049,13 @@ function GroupCallModalLiveKit({
         audio: true,
         video: callType === 'video'
           ? {
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
-              // FPS smoothing:
-              // Ограничиваем FPS на capture-уровне (getUserMedia constraints), без SDP/setParameters.
-              // Это снижает нагрузку на энкодер/девайс и уменьшает микрофризы, особенно на мобилках.
-              frameRate: { ideal: 24, max: 24 }
-            }
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            // FPS smoothing:
+            // Ограничиваем FPS на capture-уровне (getUserMedia constraints), без SDP/setParameters.
+            // Это снижает нагрузку на энкодер/девайс и уменьшает микрофризы, особенно на мобилках.
+            frameRate: { ideal: 24, max: 24 }
+          }
           : false
       });
 
@@ -1072,7 +1072,7 @@ function GroupCallModalLiveKit({
             muted: localVideo.mediaStreamTrack.muted,
             settings: localVideo.mediaStreamTrack.getSettings?.()
           });
-        } catch (_) {}
+        } catch (_) { }
       }
       if (mountedRef.current) {
         setLocalVideoTrack(localVideo);
@@ -1207,7 +1207,7 @@ function GroupCallModalLiveKit({
           ...prev,
           [pid]: { name: name || prev?.[pid]?.name || '' }
         }));
-      } catch (_) {}
+      } catch (_) { }
     };
 
     const onLeft = (payload) => {
@@ -1215,7 +1215,7 @@ function GroupCallModalLiveKit({
         const pid = String(payload?.oderId || '').trim();
         if (!pid) return;
         // Не удаляем запись — имена могут понадобиться для UI истории/анимаций.
-      } catch (_) {}
+      } catch (_) { }
     };
 
     socket.on('group-call:participant-joined', onJoined);
@@ -1563,7 +1563,7 @@ function GroupCallModalLiveKit({
       try {
         e.preventDefault?.();
         e.stopPropagation?.();
-      } catch (_) {}
+      } catch (_) { }
     }
   }, [bumpControls, callStatus, controlsVisible, showConnStatus]);
 
@@ -1644,7 +1644,7 @@ function GroupCallModalLiveKit({
       )}
 
       {/* ─── MAIN CONTENT ─── */}
-      <main className="gvc-content">
+      <main className={`gvc-content${participantCount === 1 ? ' gvc-solo' : participantCount === 2 ? ' gvc-two-up' : ''}`}>
         {/* Hidden Audio */}
         <div className="gvc-hidden-audio">
           {remoteMedia.map((r) => (
@@ -1663,7 +1663,7 @@ function GroupCallModalLiveKit({
             isSpeaking={focusTarget.isSpeaking}
             onTrackEnded={syncUiFromTracks}
           />
-          
+
           {/* Controls - Floating above Thumbs */}
           <div className={`gvc-controls ${showControls ? '' : 'hidden'}`}>
             <button

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import axios from 'axios';
 import io from 'socket.io-client';
 import { API_URL, SOCKET_URL } from '../config';
@@ -6,8 +6,14 @@ import Sidebar from '../components/Sidebar';
 import ChatWindow from '../components/ChatWindow';
 import CallModal from '../components/CallModal';
 import GroupCallModalLiveKit from '../components/GroupCallModalLiveKit';
+import UserSearch from '../components/UserSearch';
+import ChatList from '../components/ChatList';
+import CreateGroupModal from '../components/CreateGroupModal';
+import { useMediaQuery } from '../hooks/useMediaQuery';
+import { MobileBottomNav, ContextFab, MobileCallsPanel, MobileProfilePanel } from '../components/mobile/MobileUx';
 import { HrumToastProvider, useHrumToast } from '../components/HrumToast';
 import { getTransactions } from '../economy/api';
+import '../styles/mobileMessenger.css';
 
 function ChatPageInner({ token, onLogout }) {
   const { showEarn } = useHrumToast();
@@ -22,6 +28,7 @@ function ChatPageInner({ token, onLogout }) {
   const [callType, setCallType] = useState(null);     // audio | video
   const [callId, setCallId] = useState(null);
   const [remoteUser, setRemoteUser] = useState(null);
+  const [activeCallChatId, setActiveCallChatId] = useState(null);
   
   // Данные входящего звонка для отображения в UI (баннер и индикатор)
   const [incomingCallData, setIncomingCallData] = useState(null);
@@ -29,6 +36,10 @@ function ChatPageInner({ token, onLogout }) {
   // Состояние группового звонка
   const [groupCallState, setGroupCallState] = useState('idle'); // idle | incoming | active
   const [groupCallData, setGroupCallData] = useState(null);
+  const [mobileTab, setMobileTab] = useState('chats');
+  const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
+  const [profileSettingsOpen, setProfileSettingsOpen] = useState(false);
+  const isMobile = useMediaQuery('(max-width: 768px)', { defaultValue: false });
   
   const socketRef = useRef(null);
   
@@ -201,9 +212,6 @@ function ChatPageInner({ token, onLogout }) {
     socket.on('call:incoming', ({ callId: incomingCallId, chatId: incomingChatId, chatName, initiator, type }) => {
       console.log('[ChatPage] Incoming call:', { incomingCallId, incomingChatId, initiator, type });
       
-      // Ищем чат для отображения
-      const chat = chatsRef.current.find(c => c._id === incomingChatId);
-      
       // Сохраняем данные входящего звонка для UI
       setIncomingCallData({
         callId: incomingCallId,
@@ -219,18 +227,14 @@ function ChatPageInner({ token, onLogout }) {
       setCallState('incoming');
       setCallType(type);
       setCallId(incomingCallId);
+      setActiveCallChatId(incomingChatId || null);
       setRemoteUser({
         _id: initiator._id,
         name: initiator.name || chatName || 'Пользователь',
         avatarUrl: initiator.avatarUrl
       });
       
-      // Если мы не в этом чате - переключаемся
-      if (!selectedChatRef.current || selectedChatRef.current._id !== incomingChatId) {
-        if (chat) {
-          setSelectedChat(chat);
-        }
-      }
+      // Не переключаем экран принудительно: входящий звонок показывается как полноэкранный call-screen.
     });
 
     socket.on('call:participant_joined', ({ callId: cId, userId: joinedUserId, userName }) => {
@@ -371,8 +375,68 @@ function ChatPageInner({ token, onLogout }) {
     }
   }, [token, selectedChat]);
 
+  useEffect(() => {
+    if (!isMobile) return;
+    const syncFromHash = () => {
+      const normalized = String(window.location.hash || '').replace(/^#\/?/, '');
+      const [tabRaw, chatIdRaw] = normalized.split('/');
+      const nextTab = ['chats', 'calls', 'contacts', 'profile'].includes(tabRaw) ? tabRaw : 'chats';
+      setMobileTab(nextTab);
+
+      if (nextTab !== 'chats') {
+        if (selectedChatRef.current) setSelectedChat(null);
+        return;
+      }
+
+      const chatIdFromHash = chatIdRaw ? decodeURIComponent(chatIdRaw) : null;
+      if (!chatIdFromHash) {
+        if (selectedChatRef.current) setSelectedChat(null);
+        return;
+      }
+
+      const chatFromHash = chatsRef.current.find((chat) => chat._id === chatIdFromHash);
+      if (chatFromHash) {
+        setSelectedChat(chatFromHash);
+      } else if (selectedChatRef.current) {
+        setSelectedChat(null);
+      }
+    };
+    syncFromHash();
+    window.addEventListener('hashchange', syncFromHash);
+    return () => window.removeEventListener('hashchange', syncFromHash);
+  }, [isMobile]);
+
+  useEffect(() => {
+    if (!isMobile || chats.length === 0) return;
+    const normalized = String(window.location.hash || '').replace(/^#\/?/, '');
+    const [tabRaw, chatIdRaw] = normalized.split('/');
+    if (tabRaw !== 'chats' || !chatIdRaw) return;
+    const chatIdFromHash = decodeURIComponent(chatIdRaw);
+    if (selectedChatRef.current?._id === chatIdFromHash) return;
+    const chatFromHash = chats.find((chat) => chat._id === chatIdFromHash);
+    if (chatFromHash) setSelectedChat(chatFromHash);
+  }, [chats, isMobile]);
+
+  useEffect(() => {
+    if (!isMobile) return;
+    const nextHash = selectedChat
+      ? `#/chats/${encodeURIComponent(selectedChat._id)}`
+      : `#/${mobileTab}`;
+    if (window.location.hash !== nextHash) {
+      window.history.replaceState(null, '', nextHash);
+    }
+  }, [isMobile, mobileTab, selectedChat]);
+
+  useEffect(() => {
+    if (!isMobile) return;
+    if (selectedChat && mobileTab !== 'chats') {
+      setMobileTab('chats');
+    }
+  }, [isMobile, mobileTab, selectedChat]);
+
   const handleSelectChat = (chat) => {
     setSelectedChat(chat);
+    if (isMobile) setMobileTab('chats');
   };
 
   const handleCreateChat = async (userId) => {
@@ -392,6 +456,7 @@ function ChatPageInner({ token, onLogout }) {
       });
 
       setSelectedChat(newChat);
+      if (isMobile) setMobileTab('chats');
     } catch (error) {
       console.error('Ошибка создания чата:', error);
       alert('Не удалось создать чат');
@@ -455,6 +520,7 @@ function ChatPageInner({ token, onLogout }) {
     });
     setCallType(type);
     setCallState('outgoing');
+    setActiveCallChatId(selectedChat._id);
 
     socketRef.current.emit('call:start', {
       chatId: selectedChat._id,
@@ -476,6 +542,7 @@ function ChatPageInner({ token, onLogout }) {
     setCallId(null);
     setRemoteUser(null);
     setIncomingCallData(null);
+    setActiveCallChatId(null);
   };
 
   const resetGroupCallState = () => {
@@ -566,28 +633,185 @@ function ChatPageInner({ token, onLogout }) {
   }, []);
 
   // Обработчик принятия звонка из баннера
-  const handleAcceptCallFromBanner = useCallback((cId, type) => {
-    console.log('[ChatPage] Accept call from banner:', cId, type);
-    // Убираем баннер и переводим звонок в активное состояние
-    setIncomingCallData(null);
-    setCallState('active');
-  }, []);
-
-  // Обработчик отклонения звонка из баннера
-  const handleDeclineCallFromBanner = useCallback((cId) => {
-    console.log('[ChatPage] Decline call from banner:', cId);
-    if (socketRef.current) {
-      socketRef.current.emit('call:decline', { callId: cId });
-    }
-    resetCallState();
-  }, []);
   
   // Колбэк когда звонок принят в CallModal
   const handleCallAccepted = useCallback(() => {
     console.log('[ChatPage] Call accepted in modal');
+    const nextChatId = incomingCallData?.chatId || activeCallChatId;
+    if (nextChatId) {
+      const incomingChat = chatsRef.current.find((c) => c._id === nextChatId);
+      if (incomingChat) setSelectedChat(incomingChat);
+    }
+    if (nextChatId) setActiveCallChatId(nextChatId);
     setIncomingCallData(null);
     setCallState('active');
-  }, []);
+    if (isMobile) setMobileTab('chats');
+  }, [activeCallChatId, incomingCallData?.chatId, isMobile]);
+
+  const privateChats = useMemo(
+    () => chats.filter((chat) => chat?.type !== 'group' && chat?.isGroup !== true),
+    [chats]
+  );
+
+  const openChatById = useCallback((chatId) => {
+    const nextChat = chats.find((chat) => chat._id === chatId);
+    if (!nextChat) return;
+    setSelectedChat(nextChat);
+    if (isMobile) setMobileTab('chats');
+  }, [chats, isMobile]);
+
+  const callModalChatId = activeCallChatId || incomingCallData?.chatId || selectedChat?._id || null;
+  const effectiveRemoteUser = remoteUser || incomingCallData?.initiator || null;
+  const shouldShowCallModal = callState !== 'idle';
+
+  const renderChatWindow = () => (
+    <ChatWindow
+      token={token}
+      chat={selectedChat}
+      messages={messages}
+      socket={socketRef.current}
+      currentUserId={currentUserId}
+      onStartCall={handleStartCall}
+      onStartGroupCall={handleStartGroupCall}
+      typingUsers={typingUsers}
+      incomingGroupCall={groupCallState === 'incoming' ? groupCallData : null}
+      onAcceptGroupCall={handleJoinGroupCall}
+      onDeclineGroupCall={handleDeclineGroupCall}
+      onBack={() => {
+        setSelectedChat(null);
+        if (isMobile) setMobileTab('chats');
+      }}
+      onDeleteMessage={handleDeleteMessage}
+      onDeleteChat={handleDeleteChat}
+    />
+  );
+
+  if (isMobile) {
+    const hideChrome = !!selectedChat;
+    return (
+      <div className="gm-mobile-shell">
+        <main className={`gm-mobile-main ${hideChrome ? 'gm-mobile-main--chat-open' : ''}`}>
+          {mobileTab === 'chats' && (
+            selectedChat ? (
+              renderChatWindow()
+            ) : (
+              <section className="gm-mobile-panel">
+                <header className="gm-mobile-panel__header">
+                  <h2>Чаты</h2>
+                </header>
+                <ChatList
+                  chats={chats}
+                  selectedChat={selectedChat}
+                  onSelectChat={handleSelectChat}
+                  incomingCallChatId={incomingCallData?.chatId}
+                  label="Диалоги"
+                />
+              </section>
+            )
+          )}
+
+          {mobileTab === 'calls' && (
+            <MobileCallsPanel
+              chats={chats}
+              incomingCallData={incomingCallData}
+              groupCallData={groupCallState === 'incoming' ? groupCallData : null}
+              onOpenChat={openChatById}
+            />
+          )}
+
+          {mobileTab === 'contacts' && (
+            <section className="gm-mobile-panel">
+              <header className="gm-mobile-panel__header">
+                <h2>Контакты</h2>
+              </header>
+              <UserSearch token={token} onCreateChat={handleCreateChat} inputId="gc-mobile-contact-search" />
+              <ChatList
+                chats={privateChats}
+                selectedChat={selectedChat}
+                onSelectChat={handleSelectChat}
+                incomingCallChatId={incomingCallData?.chatId}
+                label="Контакты"
+              />
+            </section>
+          )}
+
+          {mobileTab === 'profile' && (
+            <MobileProfilePanel
+              token={token}
+              onLogout={onLogout}
+              settingsOpen={profileSettingsOpen}
+              onToggleSettings={() => setProfileSettingsOpen((v) => !v)}
+            />
+          )}
+        </main>
+
+        {!hideChrome && (
+          <MobileBottomNav
+            activeTab={mobileTab}
+            onChange={(nextTab) => {
+              setSelectedChat(null);
+              setMobileTab(nextTab);
+            }}
+          />
+        )}
+
+        <ContextFab
+          tab={mobileTab}
+          hidden={hideChrome}
+          onChatsAction={() => setShowCreateGroupModal(true)}
+          onContactsAction={() => window.dispatchEvent(new Event('govchat:focus-user-search'))}
+          onProfileAction={() => setProfileSettingsOpen((v) => !v)}
+          onCallsAction={() => setMobileTab('chats')}
+        />
+
+        {showCreateGroupModal && (
+          <CreateGroupModal
+            token={token}
+            onClose={() => setShowCreateGroupModal(false)}
+            onGroupCreated={(groupChat) => {
+              handleAddChat(groupChat);
+              setSelectedChat(groupChat);
+              setMobileTab('chats');
+              setShowCreateGroupModal(false);
+            }}
+          />
+        )}
+
+        {shouldShowCallModal && (
+          <CallModal
+            socket={socketRef.current}
+            callState={callState}
+            callType={callType}
+            callId={callId}
+            chatId={callModalChatId}
+            remoteUser={effectiveRemoteUser}
+            onClose={resetCallState}
+            onCallAccepted={handleCallAccepted}
+            currentUserId={currentUserId}
+            token={token}
+          />
+        )}
+
+        {groupCallState !== 'idle' && groupCallData && (
+          <GroupCallModalLiveKit
+            socket={socketRef.current}
+            callId={groupCallData.callId}
+            chatId={groupCallData.chatId}
+            chatName={groupCallData.chatName}
+            callType={groupCallData.type}
+            isIncoming={groupCallState === 'incoming'}
+            autoJoin={!!groupCallData.autoJoin}
+            initiator={groupCallData.initiator}
+            existingParticipants={groupCallData.existingParticipants || []}
+            currentUserId={currentUserId}
+            token={token}
+            onClose={resetGroupCallState}
+            onJoin={handleJoinGroupCall}
+          />
+        )}
+      </div>
+    );
+  }
 
   return (
     <div style={styles.container}>
@@ -622,10 +846,7 @@ function ChatPageInner({ token, onLogout }) {
           onStartCall={handleStartCall}
           onStartGroupCall={handleStartGroupCall}
           typingUsers={typingUsers}
-          incomingCall={incomingCallData}
           incomingGroupCall={groupCallState === 'incoming' ? groupCallData : null}
-          onAcceptCall={handleAcceptCallFromBanner}
-          onDeclineCall={handleDeclineCallFromBanner}
           onAcceptGroupCall={handleJoinGroupCall}
           onDeclineGroupCall={handleDeclineGroupCall}
           onBack={() => setSelectedChat(null)}
@@ -635,14 +856,14 @@ function ChatPageInner({ token, onLogout }) {
       </div>
 
       {/* Модальное окно 1-to-1 звонка */}
-      {callState !== 'idle' && selectedChat?.type === 'private' && (
+      {shouldShowCallModal && (
         <CallModal
           socket={socketRef.current}
           callState={callState}
           callType={callType}
           callId={callId}
-          chatId={selectedChat?._id}
-          remoteUser={remoteUser}
+          chatId={callModalChatId}
+          remoteUser={effectiveRemoteUser}
           onClose={resetCallState}
           onCallAccepted={handleCallAccepted}
           currentUserId={currentUserId}
@@ -696,58 +917,6 @@ const styles = {
   },
 };
 
-// Добавляем медиа-запросы через CSS-in-JS
-if (typeof window !== 'undefined') {
-  const styleSheet = document.createElement('style');
-  styleSheet.textContent = `
-    @media (max-width: 768px) {
-      .mobile-menu-btn {
-        display: none !important;
-      }
-      .sidebar-wrapper {
-        position: absolute !important;
-        top: 0;
-        left: 0;
-        height: 100% !important;
-        z-index: 100;
-        width: 100% !important;
-        transform: translateX(0);
-        transition: transform 0.3s ease;
-      }
-      .sidebar-wrapper.hidden {
-        transform: translateX(-100%);
-        pointer-events: none;
-      }
-      .chat-window-wrapper {
-        position: absolute !important;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        z-index: 99;
-        transform: translateX(100%);
-        transition: transform 0.3s ease;
-      }
-      .chat-window-wrapper.active {
-        transform: translateX(0);
-      }
-      .overlay {
-        display: block !important;
-      }
-    }
-    
-    @keyframes blink {
-      0%, 50%, 100% { opacity: 1; }
-      25%, 75% { opacity: 0.3; }
-    }
-    
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
-    }
-  `;
-  document.head.appendChild(styleSheet);
-}
 
 function ChatPageWithToasts(props) {
   return (

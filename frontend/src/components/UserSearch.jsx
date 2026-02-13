@@ -1,9 +1,20 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { usePhoneUserLookup } from '../hooks/usePhoneUserLookup';
 import { resolveAssetUrl } from '../utils/resolveAssetUrl';
 
-function UserSearch({ token, onCreateChat }) {
+function UserSearch({ token, onCreateChat, inputId = 'govchat-user-search' }) {
   const { phone, setPhone, status, user, error } = usePhoneUserLookup({ token, minLen: 9, debounceMs: 400 });
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    const onFocusRequest = () => {
+      if (!inputRef.current) return;
+      inputRef.current.focus();
+      inputRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    };
+    window.addEventListener('govchat:focus-user-search', onFocusRequest);
+    return () => window.removeEventListener('govchat:focus-user-search', onFocusRequest);
+  }, []);
 
   const handleSelectUser = (userId) => {
     onCreateChat(userId);
@@ -13,6 +24,8 @@ function UserSearch({ token, onCreateChat }) {
   return (
     <div style={styles.container}>
       <input
+        id={inputId}
+        ref={inputRef}
         type="text"
         value={phone}
         onChange={(e) => setPhone(e.target.value)}
