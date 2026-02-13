@@ -1,12 +1,9 @@
 ﻿import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { API_URL } from './config';
-import MobileApp from './pages/MobileApp';
-import DesktopApp from './pages/DesktopApp';
+import ChatPage from './pages/ChatPage';
 import AdminPage from './pages/AdminPage';
 import { authStyles as styles } from './styles/authStyles';
-
-const isMobile = window.matchMedia('(max-width: 768px)').matches;
 
 function App() {
   const [token, setToken] = useState(localStorage.getItem('token'));
@@ -56,9 +53,7 @@ function App() {
     if (route === '#/admin') {
       return <AdminPage token={token} onBack={() => { window.location.hash = ''; }} />;
     }
-    return isMobile
-      ? <MobileApp token={token} onLogout={handleLogout} />
-      : <DesktopApp token={token} onLogout={handleLogout} />;
+    return <ChatPage token={token} onLogout={handleLogout} />;
   }
 
   return (
