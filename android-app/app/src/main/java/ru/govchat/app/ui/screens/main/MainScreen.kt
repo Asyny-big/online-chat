@@ -2,6 +2,7 @@
 
 import android.graphics.BitmapFactory
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
@@ -198,6 +199,15 @@ fun MainScreen(
         GovChatAttachmentDownloader(context.applicationContext)
     }
     var lastIncomingCallId by remember { mutableStateOf<String?>(null) }
+    val permissionPrefs = remember(context.applicationContext) {
+        context.applicationContext.getSharedPreferences(
+            INITIAL_PERMISSION_PREFS_NAME,
+            Context.MODE_PRIVATE
+        )
+    }
+    var initialPermissionRequestTriggered by remember {
+        mutableStateOf(permissionPrefs.getBoolean(INITIAL_PERMISSION_PREFS_KEY, false))
+    }
 
     var permissionPrompt by remember { mutableStateOf<PermissionPrompt?>(null) }
 
@@ -222,6 +232,16 @@ fun MainScreen(
                 return
             }
             requestPermission(features[index]) {
+                next(index + 1)
+            }
+        }
+        next(0)
+    }
+
+    val requestPermissionsInOrderIgnoringDenial: (List<GovChatPermissionFeature>) -> Unit = { features ->
+        fun next(index: Int) {
+            if (index >= features.size) return
+            permissionFlow.request(features[index]) {
                 next(index + 1)
             }
         }
@@ -304,6 +324,24 @@ fun MainScreen(
             return@LaunchedEffect
         }
         lastIncomingCallId = incoming.callId
+    }
+
+    LaunchedEffect(state.currentUserId, isInPictureInPictureMode, initialPermissionRequestTriggered) {
+        if (initialPermissionRequestTriggered) return@LaunchedEffect
+        if (isInPictureInPictureMode) return@LaunchedEffect
+        if (state.currentUserId.isNullOrBlank()) return@LaunchedEffect
+
+        initialPermissionRequestTriggered = true
+        permissionPrefs.edit().putBoolean(INITIAL_PERMISSION_PREFS_KEY, true).apply()
+
+        requestPermissionsInOrderIgnoringDenial(
+            listOf(
+                GovChatPermissionFeature.Notifications,
+                GovChatPermissionFeature.Camera,
+                GovChatPermissionFeature.Microphone,
+                GovChatPermissionFeature.MediaRead
+            )
+        )
     }
 
     LaunchedEffect(state.activeCall?.callId, callUiState.controls.isScreenSharing) {
@@ -3637,6 +3675,9 @@ private data class PermissionPrompt(
     val permanentlyDenied: Boolean,
     val onGranted: (() -> Unit)?
 )
+
+private const val INITIAL_PERMISSION_PREFS_NAME = "govchat_permission_prefs"
+private const val INITIAL_PERMISSION_PREFS_KEY = "initial_runtime_permissions_requested_v1"
 
 private fun resolveMediaUrl(rawUrl: String?): String? {
     if (rawUrl.isNullOrBlank()) return null
