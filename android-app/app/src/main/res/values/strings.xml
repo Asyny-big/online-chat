@@ -1,7 +1,9 @@
 <resources>
     <string name="app_name">GovChat</string>
     <string name="notifications_channel_calls">Звонки</string>
-    <string name="notifications_channel_calls_desc">Активные и входящие звонки GovChat</string>
+    <string name="notifications_channel_calls_desc">Активные звонки GovChat</string>
+    <string name="notifications_channel_incoming_calls">Входящие звонки</string>
+    <string name="notifications_channel_incoming_calls_desc">Срочные push-уведомления о входящих звонках</string>
     <string name="notifications_channel_messages">Сообщения</string>
     <string name="notifications_channel_messages_desc">Новые сообщения и события GovChat</string>
     <string name="call_service_notification_title">Звонок GovChat активен</string>

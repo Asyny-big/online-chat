@@ -94,6 +94,7 @@ data class ChatDto(
     val displayAvatar: String? = null,
     val displayStatus: String? = null,
     val lastMessage: LastMessageDto? = null,
+    val unreadCount: Int? = null,
     val participantCount: Int? = null,
     val participants: List<ChatParticipantDto> = emptyList(),
     val updatedAt: String? = null

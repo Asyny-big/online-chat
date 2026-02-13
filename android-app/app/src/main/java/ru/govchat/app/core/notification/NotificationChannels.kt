@@ -2,6 +2,8 @@ package ru.govchat.app.core.notification
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.media.AudioAttributes
+import android.media.RingtoneManager
 import android.content.Context
 import android.content.Intent
 import android.os.Build
@@ -9,7 +11,8 @@ import ru.govchat.app.R
 import java.util.UUID
 
 object NotificationChannels {
-    const val CALLS_CHANNEL_ID = "govchat_calls"
+    const val CALLS_CHANNEL_ID = "govchat_calls_active"
+    const val INCOMING_CALLS_CHANNEL_ID = "govchat_calls_incoming_v2"
     const val MESSAGES_CHANNEL_ID = "govchat_messages"
 
     fun ensureCreated(context: Context) {
@@ -17,15 +20,33 @@ object NotificationChannels {
 
         val manager = context.getSystemService(NotificationManager::class.java)
 
-        val callsChannel = NotificationChannel(
+        val activeCallsChannel = NotificationChannel(
             CALLS_CHANNEL_ID,
             context.getString(R.string.notifications_channel_calls),
-            NotificationManager.IMPORTANCE_HIGH
+            NotificationManager.IMPORTANCE_LOW
         ).apply {
             description = context.getString(R.string.notifications_channel_calls_desc)
             setShowBadge(false)
             lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+            enableVibration(false)
+            setSound(null, null)
+        }
+
+        val incomingCallsChannel = NotificationChannel(
+            INCOMING_CALLS_CHANNEL_ID,
+            context.getString(R.string.notifications_channel_incoming_calls),
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = context.getString(R.string.notifications_channel_incoming_calls_desc)
+            setShowBadge(false)
+            lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
             enableVibration(true)
+            val ringtoneUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+            val audioAttributes = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+            setSound(ringtoneUri, audioAttributes)
         }
 
         val messagesChannel = NotificationChannel(
@@ -37,7 +58,8 @@ object NotificationChannels {
             lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE
         }
 
-        manager.createNotificationChannel(callsChannel)
+        manager.createNotificationChannel(activeCallsChannel)
+        manager.createNotificationChannel(incomingCallsChannel)
         manager.createNotificationChannel(messagesChannel)
     }
 }

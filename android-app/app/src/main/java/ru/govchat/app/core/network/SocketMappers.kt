@@ -71,6 +71,7 @@ internal fun JSONObject.toSocketChatPreview(): ChatPreview? {
 
     val participants = optJSONArray("participants")
     val participantCount = optInt("participantCount").takeIf { it > 0 } ?: (participants?.length() ?: 0)
+    val unreadCount = optInt("unreadCount", 0).coerceAtLeast(0)
 
     return ChatPreview(
         id = chatId,
@@ -82,7 +83,7 @@ internal fun JSONObject.toSocketChatPreview(): ChatPreview? {
         subtitle = subtitle,
         avatarUrl = optString("displayAvatar").takeIf { it.isNotBlank() },
         isOnline = optString("displayStatus") == "online",
-        unreadCount = 0,
+        unreadCount = unreadCount,
         participantCount = participantCount,
         updatedAtMillis = optString("updatedAt").toEpochMillisOrZero()
     )

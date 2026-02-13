@@ -6,6 +6,8 @@ import android.content.Context
 import android.content.Intent
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.app.Person
+import androidx.core.graphics.drawable.IconCompat
 import ru.govchat.app.MainActivity
 import ru.govchat.app.R
 import ru.govchat.app.ui.screens.main.IncomingCallUi
@@ -105,7 +107,7 @@ object IncomingCallNotifications {
             initiatorName
         }
 
-        val notification = NotificationCompat.Builder(context, NotificationChannels.CALLS_CHANNEL_ID)
+        val notification = NotificationCompat.Builder(context, NotificationChannels.INCOMING_CALLS_CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(title)
             .setContentText(body)
@@ -114,18 +116,20 @@ object IncomingCallNotifications {
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setAutoCancel(true)
             .setOngoing(true)
+            .setColorized(true)
+            .setColor(0xFF1B5E20.toInt())
+            .setStyle(
+                NotificationCompat.CallStyle.forIncomingCall(
+                    Person.Builder()
+                        .setName(body)
+                        .setIcon(IconCompat.createWithResource(context, R.mipmap.ic_launcher))
+                        .build(),
+                    declineIntent,
+                    acceptIntent
+                )
+            )
             .setFullScreenIntent(openIntent, true)
             .setContentIntent(openIntent)
-            .addAction(
-                android.R.drawable.ic_menu_close_clear_cancel,
-                context.getString(R.string.notification_call_decline),
-                declineIntent
-            )
-            .addAction(
-                android.R.drawable.ic_menu_call,
-                context.getString(R.string.notification_call_accept),
-                acceptIntent
-            )
             .build()
 
         val manager = NotificationManagerCompat.from(context)

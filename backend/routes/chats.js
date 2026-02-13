@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const mongoose = require('mongoose');
 const Chat = require('../models/Chat');
 const User = require('../models/User');
 const Message = require('../models/Message');
@@ -34,11 +35,38 @@ const deleteAttachmentFile = (attachmentUrl) => {
 router.get('/', async (req, res) => {
   try {
     const userId = req.userId;
+    const userObjectId = mongoose.Types.ObjectId.isValid(userId)
+      ? new mongoose.Types.ObjectId(userId)
+      : null;
 
     const chats = await Chat.find({ 'participants.user': userId })
       .populate('participants.user', 'name phone avatarUrl status lastSeen')
       .sort({ updatedAt: -1 })
       .lean(); // lean() для производительности
+
+    let unreadByChatId = new Map();
+    const chatIds = chats.map(chat => chat._id).filter(Boolean);
+    if (chatIds.length > 0 && userObjectId) {
+      const unreadStats = await Message.aggregate([
+        {
+          $match: {
+            chat: { $in: chatIds },
+            sender: { $ne: userObjectId },
+            'readBy.user': { $ne: userObjectId }
+          }
+        },
+        {
+          $group: {
+            _id: '$chat',
+            unreadCount: { $sum: 1 }
+          }
+        }
+      ]);
+
+      unreadByChatId = new Map(
+        unreadStats.map(item => [item._id.toString(), Number(item.unreadCount) || 0])
+      );
+    }
 
     const formattedChats = chats.map(chat => {
       if (chat.type === 'private') {
@@ -57,6 +85,7 @@ router.get('/', async (req, res) => {
         chat.displayAvatar = chat.avatarUrl;
         chat.participantCount = chat.participants.length;
       }
+      chat.unreadCount = unreadByChatId.get(chat._id.toString()) || 0;
       return chat;
     });
 
@@ -107,7 +136,8 @@ router.post('/private', async (req, res) => {
       displayName: otherParticipant?.user.name,
       displayPhone: otherParticipant?.user.phone,
       displayAvatar: otherParticipant?.user.avatarUrl,
-      displayStatus: otherParticipant?.user.status
+      displayStatus: otherParticipant?.user.status,
+      unreadCount: 0
     };
 
     // Уведомляем только если чат был создан
@@ -186,7 +216,8 @@ router.post('/group', async (req, res) => {
       ...chat.toObject(),
       displayName: chat.name,
       displayAvatar: chat.avatarUrl,
-      participantCount: chat.participants.length
+      participantCount: chat.participants.length,
+      unreadCount: 0
     };
 
     participants.forEach(p => {

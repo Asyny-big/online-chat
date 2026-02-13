@@ -54,7 +54,7 @@ fun ChatDto.toDomain(): ChatPreview {
         subtitle = lastMessageText,
         avatarUrl = displayAvatar,
         isOnline = displayStatus == "online",
-        unreadCount = 0,
+        unreadCount = unreadCount ?: 0,
         participantCount = participantSize,
         updatedAtMillis = updatedAt.toEpochMillisOrZero()
     )
