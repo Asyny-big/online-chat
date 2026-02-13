@@ -16,6 +16,7 @@ import ru.govchat.app.MainActivity
 import ru.govchat.app.R
 import ru.govchat.app.core.notification.IncomingCallNotifications
 import ru.govchat.app.core.notification.NotificationChannels
+import ru.govchat.app.core.notification.NotificationIntents
 
 class GovChatFirebaseMessagingService : FirebaseMessagingService() {
 
@@ -30,71 +31,107 @@ class GovChatFirebaseMessagingService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
         val payload = message.data
-        val eventType = payload["eventType"].orEmpty()
-        val title = payload["title"].orEmpty()
-        val body = payload["body"].orEmpty()
+        if (payload.isEmpty()) return
+
+        val eventType = payload.read("eventType", "event_type")
+        val title = payload.read("title")
+        val body = payload.read("body", "text", "message")
 
         when (eventType) {
-            "incoming_call" -> showNotification(
-                notificationId = 2001,
-                channelId = NotificationChannels.CALLS_CHANNEL_ID,
-                title = title.ifBlank { getString(R.string.push_call_title) },
-                body = body.ifBlank { getString(R.string.push_call_body) },
-                callStyle = true
-            )
+            "incoming_call", "incoming_group_call" -> {
+                val callId = payload.read("callId", "call_id").ifBlank {
+                    "call-${System.currentTimeMillis()}"
+                }
+                val chatId = payload.read("chatId", "chat_id")
+                val chatName = payload.read("chatName", "chat_name")
+                val initiatorName = payload.read("initiatorName", "initiator_name", "senderName", "sender_name")
+                    .ifBlank { body }
+                    .ifBlank { getString(R.string.push_call_body) }
+                val initiatorId = payload.read("initiatorId", "initiator_id", "senderId", "sender_id")
+                val callType = payload.read("type", "callType", "call_type").ifBlank { "audio" }
+                val isGroup = eventType == "incoming_group_call" || payload.readBoolean("isGroup", "is_group")
 
-            "incoming_group_call" -> showNotification(
-                notificationId = 2003,
-                channelId = NotificationChannels.CALLS_CHANNEL_ID,
-                title = title.ifBlank { getString(R.string.push_group_call_title) },
-                body = body.ifBlank { getString(R.string.push_call_body) },
-                callStyle = true
-            )
+                IncomingCallNotifications.show(
+                    context = this,
+                    callId = callId,
+                    chatId = chatId,
+                    chatName = chatName.ifBlank { title.ifBlank { "GovChat" } },
+                    initiatorName = initiatorName,
+                    isGroup = isGroup,
+                    callType = callType,
+                    initiatorId = initiatorId
+                )
+            }
 
-            else -> showNotification(
-                notificationId = 2002,
-                channelId = NotificationChannels.MESSAGES_CHANNEL_ID,
-                title = title.ifBlank { getString(R.string.push_message_title) },
-                body = body.ifBlank { getString(R.string.push_message_body) },
-                callStyle = false
-            )
+            else -> {
+                val chatId = payload.read("chatId", "chat_id")
+                val chatName = payload.read("chatName", "chat_name")
+                val messageId = payload.read("messageId", "message_id")
+                showMessageNotification(
+                    chatId = chatId,
+                    chatName = chatName,
+                    messageId = messageId,
+                    title = title.ifBlank { getString(R.string.push_message_title) },
+                    body = body.ifBlank { getString(R.string.push_message_body) }
+                )
+            }
         }
     }
 
     @SuppressLint("MissingPermission")
-    private fun showNotification(
-        notificationId: Int,
-        channelId: String,
+    private fun showMessageNotification(
+        chatId: String,
+        chatName: String,
+        messageId: String,
         title: String,
-        body: String,
-        callStyle: Boolean
+        body: String
     ) {
-        val openAppIntent = PendingIntent.getActivity(
+        val openIntent = PendingIntent.getActivity(
             this,
-            notificationId,
-            Intent(this, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                putExtra(IncomingCallNotifications.EXTRA_CALL_ID, notificationId.toString())
-            },
+            (chatId + "|" + messageId).hashCode(),
+            NotificationIntents.addCommandExtras(
+                Intent(this, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                },
+                action = NotificationIntents.ACTION_OPEN_CHAT,
+                chatId = chatId.ifBlank { null },
+                chatName = chatName.ifBlank { null }
+            ),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        val notification = NotificationCompat.Builder(this, channelId)
+        val notification = NotificationCompat.Builder(this, NotificationChannels.MESSAGES_CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(title)
             .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setAutoCancel(true)
-            .setPriority(if (callStyle) NotificationCompat.PRIORITY_MAX else NotificationCompat.PRIORITY_HIGH)
-            .setCategory(if (callStyle) NotificationCompat.CATEGORY_CALL else NotificationCompat.CATEGORY_MESSAGE)
-            .setContentIntent(openAppIntent).apply {
-                if (callStyle) {
-                    setFullScreenIntent(openAppIntent, true)
-                }
-            }.build()
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setContentIntent(openIntent)
+            .build()
 
         val manager = NotificationManagerCompat.from(this)
         if (!manager.areNotificationsEnabled()) return
-        manager.notify(notificationId, notification)
+
+        val stableId = (chatId.ifBlank { messageId.ifBlank { NotificationIntents.newEventId() } }).hashCode()
+        manager.notify(MESSAGE_NOTIFICATION_BASE_ID + stableId, notification)
+    }
+
+    private fun Map<String, String>.read(vararg keys: String): String {
+        keys.forEach { key ->
+            val value = this[key]
+            if (!value.isNullOrBlank()) return value
+        }
+        return ""
+    }
+
+    private fun Map<String, String>.readBoolean(vararg keys: String): Boolean {
+        val raw = read(*keys).lowercase()
+        return raw == "true" || raw == "1"
+    }
+
+    private companion object {
+        const val MESSAGE_NOTIFICATION_BASE_ID = 20_000
     }
 }
-

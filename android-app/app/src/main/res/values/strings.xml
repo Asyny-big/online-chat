@@ -10,4 +10,6 @@
     <string name="push_call_body">Open GovChat to answer</string>
     <string name="push_message_title">New message</string>
     <string name="push_message_body">Open GovChat to read it</string>
+    <string name="notification_call_accept">Accept</string>
+    <string name="notification_call_decline">Decline</string>
 </resources>

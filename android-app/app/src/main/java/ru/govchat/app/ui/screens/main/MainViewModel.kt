@@ -19,6 +19,9 @@ import ru.govchat.app.BuildConfig
 import ru.govchat.app.core.call.CallManager
 import ru.govchat.app.core.call.CallUiPhase
 import ru.govchat.app.core.call.CallUiState
+import ru.govchat.app.core.notification.IncomingCallNotifications
+import ru.govchat.app.core.notification.NotificationCommand
+import ru.govchat.app.core.notification.NotificationIntents
 import ru.govchat.app.core.ui.viewModelFactory
 import ru.govchat.app.domain.model.ChatMessage
 import ru.govchat.app.domain.model.ChatType
@@ -73,16 +76,18 @@ class MainViewModel(
     private val authRepository: AuthRepository
 ) : ViewModel() {
 
+    private val applicationContext = appContext.applicationContext
     private val mutableState = MutableStateFlow(MainUiState(isLoadingChats = true))
     val state: StateFlow<MainUiState> = mutableState.asStateFlow()
     private val callManager = CallManager(
-        appContext = appContext.applicationContext
+        appContext = applicationContext
     )
     val callUiState: StateFlow<CallUiState> = callManager.state
 
     private var typingStopJob: Job? = null
     private var callControlsAutoHideJob: Job? = null
     private var tokenInitialized = false
+    private val handledNotificationEventIds = LinkedHashSet<String>()
 
     init {
         callManager.bind(viewModelScope)
@@ -484,6 +489,38 @@ class MainViewModel(
         mutableState.update { it.copy(existingGroupCallPrompt = null) }
     }
 
+    fun handleNotificationCommand(command: NotificationCommand) {
+        if (!shouldHandleNotificationCommand(command.eventId)) return
+
+        viewModelScope.launch {
+            val chatId = command.chatId.orEmpty()
+            if (chatId.isNotBlank()) {
+                selectChat(chatId)
+            }
+
+            val callId = command.callId.orEmpty()
+            if (callId.isNotBlank()) {
+                IncomingCallNotifications.cancel(applicationContext, callId)
+            }
+
+            when (command.action) {
+                NotificationIntents.ACTION_OPEN_CALL -> {
+                    ensureIncomingCallFromNotification(command)
+                }
+
+                NotificationIntents.ACTION_ACCEPT_CALL -> {
+                    ensureIncomingCallFromNotification(command)
+                    acceptIncomingCall()
+                }
+
+                NotificationIntents.ACTION_DECLINE_CALL -> {
+                    ensureIncomingCallFromNotification(command)
+                    declineIncomingCall()
+                }
+            }
+        }
+    }
+
     fun acceptIncomingCall() {
         val incoming = mutableState.value.incomingCall ?: return
         if (mutableState.value.isCallActionInProgress) return
@@ -496,6 +533,7 @@ class MainViewModel(
                     existingGroupCallPrompt = null
                 )
             }
+            chatRepository.connectRealtime()
             val result = if (incoming.isGroup) {
                 mutableState.update {
                     it.copy(
@@ -511,7 +549,9 @@ class MainViewModel(
                     )
                 }
                 runCatching {
-                    joinGroupCallUseCase(chatId = incoming.chatId, callId = incoming.callId).getOrThrow()
+                    retrySocketOnce {
+                        joinGroupCallUseCase(chatId = incoming.chatId, callId = incoming.callId)
+                    }.getOrThrow()
                     initializeLiveKitForGroupCall(
                         callId = incoming.callId,
                         callType = incoming.type
@@ -551,7 +591,9 @@ class MainViewModel(
                         )
                     )
                 }
-                acceptCallUseCase(callId = incoming.callId)
+                retrySocketOnce {
+                    acceptCallUseCase(callId = incoming.callId)
+                }
             }
 
             result.onSuccess {
@@ -595,6 +637,7 @@ class MainViewModel(
         val incoming = mutableState.value.incomingCall ?: return
 
         viewModelScope.launch {
+            chatRepository.connectRealtime()
             if (!incoming.isGroup) {
                 declineCallUseCase(callId = incoming.callId)
             }
@@ -1112,6 +1155,47 @@ class MainViewModel(
         mutableState.update { it.copy(userSearchStatus = UserSearchStatus.Idle, searchedUser = null) }
     }
 
+    private fun ensureIncomingCallFromNotification(command: NotificationCommand) {
+        val callId = command.callId.orEmpty()
+        val chatId = command.chatId.orEmpty()
+        if (callId.isBlank() || chatId.isBlank()) return
+
+        val currentIncoming = mutableState.value.incomingCall
+        if (currentIncoming?.callId == callId) return
+
+        val chatName = command.chatName
+            ?.takeIf { it.isNotBlank() }
+            ?: mutableState.value.chats.firstOrNull { it.id == chatId }?.title
+            ?: "GovChat"
+
+        mutableState.update {
+            it.copy(
+                incomingCall = IncomingCallUi(
+                    callId = callId,
+                    chatId = chatId,
+                    chatName = chatName,
+                    type = command.callType.orEmpty().ifBlank { "audio" },
+                    isGroup = command.isGroupCall,
+                    initiatorId = command.initiatorId.orEmpty(),
+                    initiatorName = command.initiatorName.orEmpty().ifBlank { "Contact" },
+                    participantCount = 0
+                ),
+                callErrorMessage = null,
+                existingGroupCallPrompt = null
+            )
+        }
+    }
+
+    private fun shouldHandleNotificationCommand(eventId: String): Boolean {
+        if (eventId.isBlank()) return true
+        if (!handledNotificationEventIds.add(eventId)) return false
+        while (handledNotificationEventIds.size > MAX_HANDLED_NOTIFICATION_EVENTS) {
+            val oldest = handledNotificationEventIds.firstOrNull() ?: break
+            handledNotificationEventIds.remove(oldest)
+        }
+        return true
+    }
+
     private suspend fun loadMessages(chatId: String) {
         mutableState.update { it.copy(isLoadingMessages = true, errorMessage = null) }
 
@@ -1283,6 +1367,20 @@ class MainViewModel(
         )
     }
 
+    private suspend fun <T> retrySocketOnce(block: suspend () -> Result<T>): Result<T> {
+        val first = block()
+        if (first.isSuccess) return first
+
+        val message = first.exceptionOrNull()?.message.orEmpty().lowercase()
+        if (!message.contains("socket disconnected")) {
+            return first
+        }
+
+        chatRepository.connectRealtime()
+        delay(300)
+        return block()
+    }
+
     private fun showCallControlsTemporarily() {
         if (mutableState.value.activeCall == null) return
         callManager.setControlsVisible(true)
@@ -1319,6 +1417,7 @@ class MainViewModel(
         private const val TYPING_STOP_DELAY_MS = 2_000L
         private const val CALL_CONTROLS_AUTO_HIDE_MS = 3_500L
         private const val ICE_CONFIG_TIMEOUT_MS = 3_000L
+        private const val MAX_HANDLED_NOTIFICATION_EVENTS = 128
 
         fun factory(
             appContext: Context,

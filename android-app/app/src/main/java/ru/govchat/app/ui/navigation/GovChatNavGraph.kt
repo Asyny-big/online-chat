@@ -9,8 +9,10 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
 import ru.govchat.app.core.AppContainer
+import ru.govchat.app.core.notification.NotificationCommand
 import ru.govchat.app.ui.screens.login.LoginEffect
 import ru.govchat.app.ui.screens.login.LoginScreen
 import ru.govchat.app.ui.screens.login.LoginViewModel
@@ -25,7 +27,8 @@ fun GovChatNavGraph(
     container: AppContainer,
     navController: NavHostController = rememberNavController(),
     isInPictureInPictureMode: Boolean = false,
-    onCallPipAvailabilityChanged: (Boolean) -> Unit = {}
+    onCallPipAvailabilityChanged: (Boolean) -> Unit = {},
+    notificationCommands: Flow<NotificationCommand>? = null
 ) {
     NavHost(
         navController = navController,
@@ -131,6 +134,12 @@ fun GovChatNavGraph(
                     navController.navigate(GovChatDestination.Login.route) {
                         popUpTo(GovChatDestination.Main.route) { inclusive = true }
                     }
+                }
+            }
+
+            LaunchedEffect(viewModel, notificationCommands) {
+                notificationCommands?.collect { command ->
+                    viewModel.handleNotificationCommand(command)
                 }
             }
 

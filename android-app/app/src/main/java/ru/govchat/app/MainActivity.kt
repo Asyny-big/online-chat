@@ -1,6 +1,7 @@
 package ru.govchat.app
 
 import android.app.PictureInPictureParams
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.os.Bundle
@@ -12,13 +13,21 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.material3.Surface
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import ru.govchat.app.core.notification.NotificationCommand
+import ru.govchat.app.core.notification.NotificationIntents
 import ru.govchat.app.ui.navigation.GovChatNavGraph
 import ru.govchat.app.ui.theme.GovChatTheme
 
 class MainActivity : ComponentActivity() {
 
     private val pipModeFlow = MutableStateFlow(false)
+    private val notificationCommands = MutableSharedFlow<NotificationCommand>(
+        replay = 1,
+        extraBufferCapacity = 8
+    )
     private var canEnterPipForCall: Boolean = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -33,11 +42,19 @@ class MainActivity : ComponentActivity() {
                     GovChatNavGraph(
                         container = container,
                         isInPictureInPictureMode = isInPipMode,
-                        onCallPipAvailabilityChanged = ::onCallPipAvailabilityChanged
+                        onCallPipAvailabilityChanged = ::onCallPipAvailabilityChanged,
+                        notificationCommands = notificationCommands.asSharedFlow()
                     )
                 }
             }
         }
+        emitNotificationCommand(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        emitNotificationCommand(intent)
     }
 
     fun onCallPipAvailabilityChanged(isAvailable: Boolean) {
@@ -96,5 +113,10 @@ class MainActivity : ComponentActivity() {
             paramsBuilder.setAutoEnterEnabled(autoEnter)
         }
         return paramsBuilder.build()
+    }
+
+    private fun emitNotificationCommand(intent: Intent?) {
+        val command = NotificationIntents.toCommand(intent) ?: return
+        notificationCommands.tryEmit(command)
     }
 }

@@ -20,7 +20,9 @@ object IncomingCallNotifications {
             chatId = incomingCall.chatId,
             chatName = incomingCall.chatName,
             initiatorName = incomingCall.initiatorName,
-            isGroup = incomingCall.isGroup
+            isGroup = incomingCall.isGroup,
+            callType = incomingCall.type,
+            initiatorId = incomingCall.initiatorId
         )
     }
 
@@ -31,16 +33,64 @@ object IncomingCallNotifications {
         chatId: String,
         chatName: String,
         initiatorName: String,
-        isGroup: Boolean
+        isGroup: Boolean,
+        callType: String = "audio",
+        initiatorId: String = ""
     ) {
         val openIntent = PendingIntent.getActivity(
             context,
-            callId.hashCode(),
-            Intent(context, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                putExtra(EXTRA_CHAT_ID, chatId)
-                putExtra(EXTRA_CALL_ID, callId)
-            },
+            requestCode(callId, NotificationIntents.ACTION_OPEN_CALL),
+            NotificationIntents.addCommandExtras(
+                Intent(context, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                },
+                action = NotificationIntents.ACTION_OPEN_CALL,
+                chatId = chatId,
+                chatName = chatName,
+                callId = callId,
+                callType = callType,
+                isGroupCall = isGroup,
+                initiatorId = initiatorId,
+                initiatorName = initiatorName
+            ),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val acceptIntent = PendingIntent.getActivity(
+            context,
+            requestCode(callId, NotificationIntents.ACTION_ACCEPT_CALL),
+            NotificationIntents.addCommandExtras(
+                Intent(context, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                },
+                action = NotificationIntents.ACTION_ACCEPT_CALL,
+                chatId = chatId,
+                chatName = chatName,
+                callId = callId,
+                callType = callType,
+                isGroupCall = isGroup,
+                initiatorId = initiatorId,
+                initiatorName = initiatorName
+            ),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val declineIntent = PendingIntent.getActivity(
+            context,
+            requestCode(callId, NotificationIntents.ACTION_DECLINE_CALL),
+            NotificationIntents.addCommandExtras(
+                Intent(context, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                },
+                action = NotificationIntents.ACTION_DECLINE_CALL,
+                chatId = chatId,
+                chatName = chatName,
+                callId = callId,
+                callType = callType,
+                isGroupCall = isGroup,
+                initiatorId = initiatorId,
+                initiatorName = initiatorName
+            ),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
@@ -50,7 +100,7 @@ object IncomingCallNotifications {
             context.getString(R.string.push_call_title)
         }
         val body = if (isGroup) {
-            "$initiatorName • $chatName"
+            "$initiatorName - $chatName"
         } else {
             initiatorName
         }
@@ -61,10 +111,21 @@ object IncomingCallNotifications {
             .setContentText(body)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setAutoCancel(true)
-            .setOngoing(false)
+            .setOngoing(true)
             .setFullScreenIntent(openIntent, true)
             .setContentIntent(openIntent)
+            .addAction(
+                android.R.drawable.ic_menu_close_clear_cancel,
+                context.getString(R.string.notification_call_decline),
+                declineIntent
+            )
+            .addAction(
+                android.R.drawable.ic_menu_call,
+                context.getString(R.string.notification_call_accept),
+                acceptIntent
+            )
             .build()
 
         val manager = NotificationManagerCompat.from(context)
@@ -78,7 +139,11 @@ object IncomingCallNotifications {
 
     private fun notificationId(callId: String): Int = CALL_NOTIFICATION_BASE_ID + callId.hashCode()
 
-    const val EXTRA_CHAT_ID = "extra_chat_id"
-    const val EXTRA_CALL_ID = "extra_call_id"
+    private fun requestCode(callId: String, action: String): Int {
+        return (callId + "|" + action).hashCode()
+    }
+
+    const val EXTRA_CHAT_ID = NotificationIntents.EXTRA_CHAT_ID
+    const val EXTRA_CALL_ID = NotificationIntents.EXTRA_CALL_ID
     private const val CALL_NOTIFICATION_BASE_ID = 30_000
 }
