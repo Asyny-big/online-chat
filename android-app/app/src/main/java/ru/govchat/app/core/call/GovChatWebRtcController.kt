@@ -85,6 +85,8 @@ class GovChatWebRtcController(
     private var isScreenShareSupported: Boolean = false
     private var isScreenSharing: Boolean = false
     private var onSignal: ((String, CallSignalPayload) -> Unit)? = null
+    private var lastRemoteVideoTrack: CallVideoTrack.WebRtc? = null
+    private var isRemoteVideoDisabledBySignal: Boolean = false
 
     private var previousAudioMode: Int? = null
     private var previousSpeakerphoneState: Boolean? = null
@@ -122,6 +124,7 @@ class GovChatWebRtcController(
         this@GovChatWebRtcController.isScreenShareSupported =
             isVideo && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP
         this@GovChatWebRtcController.isScreenSharing = false
+        this@GovChatWebRtcController.isRemoteVideoDisabledBySignal = false
 
         val rtcConfig = PeerConnection.RTCConfiguration(config.toIceServerList()).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
@@ -145,8 +148,9 @@ class GovChatWebRtcController(
         attachLocalTracks(peerConnection = pc, isVideo = isVideo)
 
         mutableState.value = mutableState.value.copy(
-            localVideoTrack = videoTrack,
+            localVideoTrack = videoTrack?.let(CallVideoTrack::WebRtc),
             remoteVideoTrack = null,
+            remoteVideoTracks = emptyList(),
             connectionState = "NEW",
             isMicrophoneEnabled = microphoneEnabled,
             isCameraEnabled = cameraEnabled,
@@ -162,8 +166,8 @@ class GovChatWebRtcController(
         ensureMainThread("onParticipantJoined")
         logStep("onParticipantJoined:userId=$userId")
         if (userId.isBlank()) return@withContext
-        remoteUserId = userId
-        flushPendingOutgoingCandidates()
+        val accepted = bindRemoteUserIfNeeded(userId)
+        if (!accepted) return@withContext
         if (!initiator) return@withContext
 
         val pc = peerConnection ?: return@withContext
@@ -183,8 +187,11 @@ class GovChatWebRtcController(
         logStep("onSignal:type=${signal::class.simpleName} from=$fromUserId")
         val pc = peerConnection ?: return@withContext
         if (fromUserId.isNotBlank()) {
-            remoteUserId = fromUserId
-            flushPendingOutgoingCandidates()
+            val accepted = bindRemoteUserIfNeeded(fromUserId)
+            if (!accepted) {
+                logStep("onSignal:ignore foreign sender=$fromUserId active=$remoteUserId")
+                return@withContext
+            }
         }
 
         when (signal) {
@@ -195,6 +202,7 @@ class GovChatWebRtcController(
                 logStep("onSignal:before setRemoteDescription(offer)")
                 pc.setRemoteDescriptionSuspend(remote)
                 flushPendingRemoteCandidates(pc)
+                refreshRemoteVideoTrack(peerConnection = pc, reason = "set-remote-offer")
 
                 logStep("onSignal:before createAnswer")
                 val answer = pc.createAnswerSdp()
@@ -214,6 +222,7 @@ class GovChatWebRtcController(
                 logStep("onSignal:before setRemoteDescription(answer)")
                 pc.setRemoteDescriptionSuspend(remote)
                 flushPendingRemoteCandidates(pc)
+                refreshRemoteVideoTrack(peerConnection = pc, reason = "set-remote-answer")
             }
 
             is CallSignalPayload.IceCandidate -> {
@@ -231,7 +240,31 @@ class GovChatWebRtcController(
                 }
             }
 
-            is CallSignalPayload.VideoMode -> Unit
+            is CallSignalPayload.VideoMode -> {
+                val mode = signal.mode.trim().lowercase()
+                when (mode) {
+                    "camera-off", "off", "disabled", "none" -> {
+                        isRemoteVideoDisabledBySignal = true
+                        mutableState.value = mutableState.value.copy(
+                            remoteVideoTrack = null,
+                            remoteVideoTracks = emptyList()
+                        )
+                    }
+
+                    "camera", "screen" -> {
+                        isRemoteVideoDisabledBySignal = false
+                        val knownTrack = lastRemoteVideoTrack
+                        if (knownTrack != null) {
+                            mutableState.value = mutableState.value.copy(
+                                remoteVideoTrack = knownTrack,
+                                remoteVideoTracks = listOf(knownTrack)
+                            )
+                        } else {
+                            refreshRemoteVideoTrack(peerConnection = pc, reason = "video-mode:$mode")
+                        }
+                    }
+                }
+            }
             is CallSignalPayload.Unknown -> Unit
         }
     }
@@ -252,6 +285,13 @@ class GovChatWebRtcController(
         cameraEnabled = enabled
         track.setEnabled(enabled)
         mutableState.value = mutableState.value.copy(isCameraEnabled = enabled)
+        val targetUserId = remoteUserId
+        if (!targetUserId.isNullOrBlank()) {
+            onSignal?.invoke(
+                targetUserId,
+                CallSignalPayload.VideoMode(if (enabled) "camera" else "camera-off")
+            )
+        }
         return true
     }
 
@@ -326,7 +366,7 @@ class GovChatWebRtcController(
             sender.setTrack(screenVideoTrack, false)
             isScreenSharing = true
             mutableState.value = mutableState.value.copy(
-                localVideoTrack = screenVideoTrack,
+                localVideoTrack = screenVideoTrack?.let(CallVideoTrack::WebRtc),
                 isScreenSharing = true,
                 isScreenShareSupported = isScreenShareSupported
             )
@@ -358,7 +398,7 @@ class GovChatWebRtcController(
             disposeScreenCapture()
             isScreenSharing = false
             mutableState.value = mutableState.value.copy(
-                localVideoTrack = restoreCameraTrack,
+                localVideoTrack = restoreCameraTrack?.let(CallVideoTrack::WebRtc),
                 isCameraEnabled = cameraEnabled,
                 isScreenSharing = false,
                 isScreenShareSupported = isScreenShareSupported
@@ -544,6 +584,9 @@ class GovChatWebRtcController(
                     else -> "NEW"
                 }
                 mutableState.value = mutableState.value.copy(connectionState = normalized)
+                if (normalized == "CONNECTED") {
+                    peerConnection?.let { refreshRemoteVideoTrack(peerConnection = it, reason = "ice:$newState") }
+                }
             }
         }
 
@@ -574,14 +617,26 @@ class GovChatWebRtcController(
             mainHandler.post {
                 val remoteTrack = stream?.videoTracks?.firstOrNull()
                 if (remoteTrack != null) {
-                    mutableState.value = mutableState.value.copy(remoteVideoTrack = remoteTrack)
+                    val remoteVideoTrack = CallVideoTrack.WebRtc(remoteTrack)
+                    lastRemoteVideoTrack = remoteVideoTrack
+                    mutableState.value = mutableState.value.copy(
+                        remoteVideoTrack = remoteVideoTrack,
+                        remoteVideoTracks = listOf(remoteVideoTrack)
+                    )
                 }
             }
         }
 
         override fun onRemoveStream(stream: MediaStream?) {
             mainHandler.post {
-                mutableState.value = mutableState.value.copy(remoteVideoTrack = null)
+                if (stream?.videoTracks?.isNotEmpty() != true) {
+                    return@post
+                }
+                mutableState.value = mutableState.value.copy(
+                    remoteVideoTrack = null,
+                    remoteVideoTracks = emptyList()
+                )
+                lastRemoteVideoTrack = null
             }
         }
 
@@ -592,7 +647,12 @@ class GovChatWebRtcController(
             mainHandler.post {
                 val track = receiver?.track()
                 if (track is VideoTrack) {
-                    mutableState.value = mutableState.value.copy(remoteVideoTrack = track)
+                    val remoteTrack = CallVideoTrack.WebRtc(track)
+                    lastRemoteVideoTrack = remoteTrack
+                    mutableState.value = mutableState.value.copy(
+                        remoteVideoTrack = remoteTrack,
+                        remoteVideoTracks = listOf(remoteTrack)
+                    )
                 }
             }
         }
@@ -601,7 +661,12 @@ class GovChatWebRtcController(
             mainHandler.post {
                 val track = transceiver?.receiver?.track()
                 if (track is VideoTrack) {
-                    mutableState.value = mutableState.value.copy(remoteVideoTrack = track)
+                    val remoteTrack = CallVideoTrack.WebRtc(track)
+                    lastRemoteVideoTrack = remoteTrack
+                    mutableState.value = mutableState.value.copy(
+                        remoteVideoTrack = remoteTrack,
+                        remoteVideoTracks = listOf(remoteTrack)
+                    )
                 }
             }
         }
@@ -726,6 +791,64 @@ class GovChatWebRtcController(
         }
     }
 
+    private fun bindRemoteUserIfNeeded(userId: String): Boolean {
+        ensureMainThread("bindRemoteUserIfNeeded")
+        if (userId.isBlank()) return false
+        val current = remoteUserId
+        if (current.isNullOrBlank()) {
+            remoteUserId = userId
+            flushPendingOutgoingCandidates()
+            logStep("bindRemoteUserIfNeeded:bound remote=$userId")
+            return true
+        }
+        if (current == userId) {
+            return true
+        }
+        logStep("bindRemoteUserIfNeeded:ignore secondary remote=$userId active=$current")
+        return false
+    }
+
+    private fun refreshRemoteVideoTrack(peerConnection: PeerConnection, reason: String) {
+        ensureMainThread("refreshRemoteVideoTrack:$reason")
+        if (isRemoteVideoDisabledBySignal) return
+
+        val existing = mutableState.value.remoteVideoTracks.firstOrNull() ?: mutableState.value.remoteVideoTrack
+        if (existing != null) return
+
+        val knownTrack = lastRemoteVideoTrack
+        if (knownTrack != null) {
+            mutableState.value = mutableState.value.copy(
+                remoteVideoTrack = knownTrack,
+                remoteVideoTracks = listOf(knownTrack)
+            )
+            return
+        }
+
+        val remoteTrack = peerConnection.findRemoteVideoTrack() ?: return
+        val wrapped = CallVideoTrack.WebRtc(remoteTrack)
+        lastRemoteVideoTrack = wrapped
+        mutableState.value = mutableState.value.copy(
+            remoteVideoTrack = wrapped,
+            remoteVideoTracks = listOf(wrapped)
+        )
+        logStep("refreshRemoteVideoTrack:set reason=$reason track=${remoteTrack.id()}")
+    }
+
+    private fun PeerConnection.findRemoteVideoTrack(): VideoTrack? {
+        transceivers
+            .asSequence()
+            .mapNotNull { it.receiver?.track() }
+            .filterIsInstance<VideoTrack>()
+            .firstOrNull()
+            ?.let { return it }
+
+        return receivers
+            .asSequence()
+            .mapNotNull { it.track() }
+            .filterIsInstance<VideoTrack>()
+            .firstOrNull()
+    }
+
     private fun closeInternal() {
         ensureMainThread("closeInternal")
         logStep("closeInternal:begin")
@@ -736,6 +859,8 @@ class GovChatWebRtcController(
 
         pendingRemoteCandidates.clear()
         pendingOutgoingCandidates.clear()
+        lastRemoteVideoTrack = null
+        isRemoteVideoDisabledBySignal = false
         callId = null
         remoteUserId = null
         onSignal = null
@@ -860,10 +985,12 @@ class GovChatWebRtcController(
 }
 
 data class CallMediaState(
-    val localVideoTrack: VideoTrack? = null,
-    val remoteVideoTrack: VideoTrack? = null,
+    val localVideoTrack: CallVideoTrack? = null,
+    val remoteVideoTrack: CallVideoTrack? = null,
+    val remoteVideoTracks: List<CallVideoTrack> = emptyList(),
     val connectionState: String = "NEW",
     val eglContext: EglBase.Context? = null,
+    val liveKitRoom: io.livekit.android.room.Room? = null,
     val isMicrophoneEnabled: Boolean = true,
     val isCameraEnabled: Boolean = true,
     val isUsingFrontCamera: Boolean = true,

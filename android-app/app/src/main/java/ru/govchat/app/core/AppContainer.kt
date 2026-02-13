@@ -35,11 +35,13 @@ import ru.govchat.app.domain.usecase.LeaveCallUseCase
 import ru.govchat.app.domain.usecase.LeaveGroupCallUseCase
 import ru.govchat.app.domain.usecase.SendAttachmentMessageUseCase
 import ru.govchat.app.domain.usecase.SendCallSignalUseCase
+import ru.govchat.app.domain.usecase.SendGroupCallSignalUseCase
 import ru.govchat.app.domain.usecase.SendTextMessageUseCase
 import ru.govchat.app.domain.usecase.StartCallUseCase
 import ru.govchat.app.domain.usecase.StartGroupCallUseCase
 import ru.govchat.app.domain.usecase.SearchUserByPhoneUseCase
 import ru.govchat.app.domain.usecase.CreateChatUseCase
+import ru.govchat.app.domain.usecase.CreateGroupChatUseCase
 
 class AppContainer(application: Application) {
     val appContext = application.applicationContext
@@ -101,6 +103,7 @@ class AppContainer(application: Application) {
     val sendAttachmentMessageUseCase = SendAttachmentMessageUseCase(chatRepository)
     val loadWebRtcConfigUseCase = LoadWebRtcConfigUseCase(chatRepository)
     val sendCallSignalUseCase = SendCallSignalUseCase(chatRepository)
+    val sendGroupCallSignalUseCase = SendGroupCallSignalUseCase(chatRepository)
     val startCallUseCase = StartCallUseCase(chatRepository)
     val acceptCallUseCase = AcceptCallUseCase(chatRepository)
     val declineCallUseCase = DeclineCallUseCase(chatRepository)
@@ -110,5 +113,6 @@ class AppContainer(application: Application) {
     val leaveGroupCallUseCase = LeaveGroupCallUseCase(chatRepository)
     val searchUserByPhoneUseCase = SearchUserByPhoneUseCase(chatRepository)
     val createChatUseCase = CreateChatUseCase(chatRepository)
+    val createGroupChatUseCase = CreateGroupChatUseCase(chatRepository)
 }
 

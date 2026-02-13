@@ -15,6 +15,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import org.json.JSONArray
 import org.json.JSONObject
 import ru.govchat.app.domain.model.CallJoinParticipant
+import ru.govchat.app.domain.model.GroupCallStartResult
 import ru.govchat.app.domain.model.CallSignalPayload
 import ru.govchat.app.domain.model.ChatMessage
 import ru.govchat.app.domain.model.RealtimeEvent
@@ -147,7 +148,7 @@ class SocketGateway(
                     callId = payload.optString("callId"),
                     chatId = payload.optString("chatId"),
                     chatName = payload.optString("chatName"),
-                    type = payload.optString("type"),
+                    type = payload.optString("type").trim().lowercase(),
                     initiatorId = initiator?.optString("_id").orEmpty(),
                     initiatorName = initiator?.optString("name").orEmpty(),
                     initiatorAvatarUrl = initiator?.optString("avatarUrl")?.takeIf { it.isNotBlank() },
@@ -160,6 +161,8 @@ class SocketGateway(
             val payload = args.firstOrNull() as? JSONObject ?: return@on
             val callId = payload.optString("callId")
             val userId = payload.optString("userId")
+                .ifBlank { payload.optString("oderId") }
+                .ifBlank { payload.optString("fromUserId") }
             if (callId.isBlank() || userId.isBlank()) return@on
             emit(
                 RealtimeEvent.CallParticipantJoined(
@@ -174,6 +177,8 @@ class SocketGateway(
             val payload = args.firstOrNull() as? JSONObject ?: return@on
             val callId = payload.optString("callId")
             val userId = payload.optString("userId")
+                .ifBlank { payload.optString("oderId") }
+                .ifBlank { payload.optString("fromUserId") }
             if (callId.isBlank() || userId.isBlank()) return@on
             emit(
                 RealtimeEvent.CallParticipantLeft(
@@ -204,7 +209,7 @@ class SocketGateway(
                     callId = payload.optString("callId"),
                     chatId = payload.optString("chatId"),
                     chatName = payload.optString("chatName"),
-                    type = payload.optString("type"),
+                    type = payload.optString("type").trim().lowercase(),
                     initiatorId = initiator?.optString("_id").orEmpty(),
                     initiatorName = initiator?.optString("name").orEmpty(),
                     initiatorAvatarUrl = initiator?.optString("avatarUrl")?.takeIf { it.isNotBlank() },
@@ -223,7 +228,7 @@ class SocketGateway(
                 RealtimeEvent.GroupCallStarted(
                     callId = callId,
                     chatId = chatId,
-                    type = payload.optString("type"),
+                    type = payload.optString("type").trim().lowercase(),
                     participantCount = payload.optInt("participantCount")
                 )
             )
@@ -257,10 +262,70 @@ class SocketGateway(
             )
         }
 
+        socket.on("group-call:participant-joined") { args ->
+            val payload = args.firstOrNull() as? JSONObject ?: return@on
+            val callId = payload.optString("callId")
+            val userId = payload.optString("oderId").ifBlank { payload.optString("userId") }
+            if (callId.isBlank() || userId.isBlank()) return@on
+            emit(
+                RealtimeEvent.CallParticipantJoined(
+                    callId = callId,
+                    userId = userId,
+                    userName = payload.optString("userName")
+                )
+            )
+        }
+
+        socket.on("group-call:participant-left") { args ->
+            val payload = args.firstOrNull() as? JSONObject ?: return@on
+            val callId = payload.optString("callId")
+            val userId = payload.optString("oderId").ifBlank { payload.optString("userId") }
+            if (callId.isBlank() || userId.isBlank()) return@on
+            emit(
+                RealtimeEvent.CallParticipantLeft(
+                    callId = callId,
+                    userId = userId,
+                    callEnded = false
+                )
+            )
+        }
+
+        socket.on("group-call:signal") { args ->
+            val payload = args.firstOrNull() as? JSONObject ?: return@on
+            val callId = payload.optString("callId")
+            val fromUserId = payload.optString("fromUserId")
+            val signalJson = payload.optJSONObject("signal") ?: return@on
+            if (callId.isBlank() || fromUserId.isBlank()) return@on
+
+            val signal = when (signalJson.optString("type")) {
+                "offer" -> CallSignalPayload.Offer(signalJson.optString("sdp"))
+                "answer" -> CallSignalPayload.Answer(signalJson.optString("sdp"))
+                "ice-candidate" -> {
+                    val candidate = signalJson.optJSONObject("candidate")
+                    CallSignalPayload.IceCandidate(
+                        candidate = candidate?.optString("candidate").orEmpty(),
+                        sdpMid = candidate?.optString("sdpMid")?.takeIf { it.isNotBlank() },
+                        sdpMLineIndex = candidate?.optInt("sdpMLineIndex") ?: 0
+                    )
+                }
+                "video-mode" -> CallSignalPayload.VideoMode(signalJson.optString("mode"))
+                else -> CallSignalPayload.Unknown(signalJson.optString("type"))
+            }
+
+            emit(
+                RealtimeEvent.CallSignalReceived(
+                    callId = callId,
+                    fromUserId = fromUserId,
+                    signal = signal
+                )
+            )
+        }
+
         socket.on("call:signal") { args ->
             val payload = args.firstOrNull() as? JSONObject ?: return@on
             val callId = payload.optString("callId")
             val fromUserId = payload.optString("fromUserId")
+                .ifBlank { payload.optString("senderId") }
             val signalJson = payload.optJSONObject("signal") ?: return@on
             if (callId.isBlank() || fromUserId.isBlank()) return@on
 
@@ -351,15 +416,76 @@ class SocketGateway(
             }
     }
 
-    suspend fun startGroupCall(chatId: String, type: String): Result<String> {
+    suspend fun startGroupCall(chatId: String, type: String): Result<GroupCallStartResult> {
         val payload = JSONObject()
             .put("chatId", chatId)
             .put("type", type)
-        return emitWithAck("group-call:start", payload)
-            .mapCatching { response ->
-                response.optString("callId").takeIf { it.isNotBlank() }
-                    ?: throw IllegalStateException("Server did not return group callId")
+        return suspendCancellableCoroutine { continuation ->
+            val activeSocket = socket
+            if (activeSocket == null || !activeSocket.connected()) {
+                continuation.resume(Result.failure(IllegalStateException("Socket disconnected")))
+                return@suspendCancellableCoroutine
             }
+
+            val timeoutJob = applicationScope.launch {
+                delay(SEND_ACK_TIMEOUT_MS)
+                if (continuation.isActive) {
+                    continuation.resume(Result.failure(IllegalStateException("Socket ack timeout: group-call:start")))
+                }
+            }
+            continuation.invokeOnCancellation {
+                timeoutJob.cancel()
+            }
+
+            activeSocket.emit("group-call:start", payload, Ack { args ->
+                if (!continuation.isActive) return@Ack
+                timeoutJob.cancel()
+                val response = args.firstOrNull() as? JSONObject ?: JSONObject()
+                val errorMessage = response.optString("error")
+                val responseCallId = response.optString("callId")
+                val responseType = response.optString("type").ifBlank { type }
+
+                if (errorMessage.isBlank()) {
+                    val callId = responseCallId.takeIf { it.isNotBlank() }
+                    if (callId == null) {
+                        continuation.resume(
+                            Result.failure(IllegalStateException("Server did not return group callId"))
+                        )
+                    } else {
+                        continuation.resume(
+                            Result.success(
+                                GroupCallStartResult(
+                                    callId = callId,
+                                    type = responseType,
+                                    alreadyActive = false
+                                )
+                            )
+                        )
+                    }
+                    return@Ack
+                }
+
+                if (errorMessage == "already_active") {
+                    val existingCallId = responseCallId.takeIf { it.isNotBlank() }
+                    if (existingCallId != null) {
+                        continuation.resume(
+                            Result.success(
+                                GroupCallStartResult(
+                                    callId = existingCallId,
+                                    type = responseType,
+                                    alreadyActive = true
+                                )
+                            )
+                        )
+                    } else {
+                        continuation.resume(Result.failure(IllegalStateException("already_active")))
+                    }
+                    return@Ack
+                }
+
+                continuation.resume(Result.failure(IllegalStateException(errorMessage)))
+            })
+        }
     }
 
     suspend fun acceptCall(callId: String): Result<Unit> {
@@ -441,8 +567,40 @@ class SocketGateway(
         val payload = JSONObject()
             .put("callId", callId)
             .put("targetUserId", targetUserId)
+            .put("oderId", targetUserId)
             .put("signal", signalPayload)
         socket?.emit("call:signal", payload)
+    }
+
+    fun sendGroupCallSignal(callId: String, targetUserId: String, signal: CallSignalPayload) {
+        val signalPayload = when (signal) {
+            is CallSignalPayload.Offer -> JSONObject()
+                .put("type", "offer")
+                .put("sdp", signal.sdp)
+            is CallSignalPayload.Answer -> JSONObject()
+                .put("type", "answer")
+                .put("sdp", signal.sdp)
+            is CallSignalPayload.IceCandidate -> JSONObject()
+                .put("type", "ice-candidate")
+                .put(
+                    "candidate",
+                    JSONObject()
+                        .put("candidate", signal.candidate)
+                        .put("sdpMid", signal.sdpMid)
+                        .put("sdpMLineIndex", signal.sdpMLineIndex)
+                )
+            is CallSignalPayload.VideoMode -> JSONObject()
+                .put("type", "video-mode")
+                .put("mode", signal.mode)
+            is CallSignalPayload.Unknown -> JSONObject()
+                .put("type", signal.type)
+        }
+
+        val payload = JSONObject()
+            .put("callId", callId)
+            .put("oderId", targetUserId)
+            .put("signal", signalPayload)
+        socket?.emit("group-call:signal", payload)
     }
 
     private suspend fun sendMessage(
@@ -574,4 +732,3 @@ class SocketGateway(
         const val SEND_ACK_TIMEOUT_MS = 15_000L
     }
 }
-

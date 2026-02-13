@@ -13,12 +13,15 @@ import kotlinx.coroutines.withTimeout
 import ru.govchat.app.core.network.GovChatApi
 import ru.govchat.app.core.network.SocketGateway
 import ru.govchat.app.core.network.UriUploadRequestBody
+import ru.govchat.app.core.network.CreateGroupChatRequest
 import ru.govchat.app.core.storage.SessionStorage
 import ru.govchat.app.data.mapper.toDomain
+import ru.govchat.app.data.mapper.toParticipantsDomain
 import ru.govchat.app.domain.model.CallJoinParticipant
 import ru.govchat.app.domain.model.CallSignalPayload
 import ru.govchat.app.domain.model.ChatMessage
 import ru.govchat.app.domain.model.ChatPreview
+import ru.govchat.app.domain.model.GroupCallStartResult
 import ru.govchat.app.domain.model.RealtimeEvent
 import ru.govchat.app.domain.model.UserProfile
 import ru.govchat.app.domain.model.WebRtcConfig
@@ -100,7 +103,7 @@ class ChatRepositoryImpl(
         }
     }
 
-    override suspend fun startGroupCall(chatId: String, type: String): Result<String> {
+    override suspend fun startGroupCall(chatId: String, type: String): Result<GroupCallStartResult> {
         return runCatching {
             withTimeout(SOCKET_SEND_TIMEOUT_MS) {
                 socketGateway.startGroupCall(chatId = chatId, type = type).getOrThrow()
@@ -148,8 +151,24 @@ class ChatRepositoryImpl(
         }
     }
 
+    override suspend fun loadLiveKitToken(room: String, identity: String): Result<String> {
+        return runAuthorized {
+            val token = api.getLiveKitToken(room = room, identity = identity).token
+            token.takeIf { it.isNotBlank() }
+                ?: throw IllegalStateException("LiveKit token is empty")
+        }
+    }
+
     override fun sendCallSignal(callId: String, targetUserId: String, signal: CallSignalPayload) {
         socketGateway.sendCallSignal(
+            callId = callId,
+            targetUserId = targetUserId,
+            signal = signal
+        )
+    }
+
+    override fun sendGroupCallSignal(callId: String, targetUserId: String, signal: CallSignalPayload) {
+        socketGateway.sendGroupCallSignal(
             callId = callId,
             targetUserId = targetUserId,
             signal = signal
@@ -259,6 +278,24 @@ class ChatRepositoryImpl(
         }
     }
 
+    override suspend fun createGroupChat(name: String, participantIds: List<String>): Result<ChatPreview> {
+        return runAuthorized {
+            val dto = api.createGroupChat(
+                CreateGroupChatRequest(
+                    name = name,
+                    participantIds = participantIds
+                )
+            )
+            dto.toDomain()
+        }
+    }
+
+    override suspend fun getChatParticipants(chatId: String): Result<List<UserProfile>> {
+        return runAuthorized {
+            api.getChat(chatId).toParticipantsDomain()
+        }
+    }
+
     override fun startTyping(chatId: String) {
         socketGateway.startTyping(chatId)
     }
@@ -356,4 +393,3 @@ class ChatRepositoryImpl(
         val AUDIO_EXTENSIONS = setOf("mp3", "ogg", "wav", "m4a", "aac", "webm")
     }
 }
-

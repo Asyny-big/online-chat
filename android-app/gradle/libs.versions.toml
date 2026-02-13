@@ -19,6 +19,8 @@ splashscreen = "1.0.1"
 workRuntime = "2.9.1"
 firebaseMessaging = "24.1.0"
 webrtcSdk = "137.7151.05"
+livekit = "2.21.0"
+ktor = "2.3.11"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -53,6 +55,9 @@ moshi-kotlin = { group = "com.squareup.moshi", name = "moshi-kotlin", version.re
 socket-io-client = { group = "io.socket", name = "socket.io-client", version.ref = "socketIo" }
 firebase-messaging = { group = "com.google.firebase", name = "firebase-messaging", version.ref = "firebaseMessaging" }
 google-webrtc = { group = "io.github.webrtc-sdk", name = "android", version.ref = "webrtcSdk" }
+livekit-android = { group = "io.livekit", name = "livekit-android", version.ref = "livekit" }
+ktor-client-okhttp = { group = "io.ktor", name = "ktor-client-okhttp", version.ref = "ktor" }
+ktor-client-websockets = { group = "io.ktor", name = "ktor-client-websockets", version.ref = "ktor" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

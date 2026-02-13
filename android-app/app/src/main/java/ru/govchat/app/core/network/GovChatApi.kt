@@ -24,11 +24,20 @@ interface GovChatApi {
     @GET("chats")
     suspend fun getChats(): List<ChatDto>
 
+    @GET("chats/{chatId}")
+    suspend fun getChat(@Path("chatId") chatId: String): ChatDto
+
     @GET("messages/{chatId}")
     suspend fun getMessages(@Path("chatId") chatId: String): List<MessageDto>
 
     @GET("webrtc/ice")
     suspend fun getWebRtcIceConfig(): WebRtcIceConfigDto
+
+    @GET("livekit/token")
+    suspend fun getLiveKitToken(
+        @Query("room") room: String,
+        @Query("identity") identity: String
+    ): LiveKitTokenDto
 
     @Multipart
     @POST("upload")
@@ -42,6 +51,9 @@ interface GovChatApi {
 
     @POST("chats/private")
     suspend fun createPrivateChat(@Body request: CreateChatRequest): ChatDto
+
+    @POST("chats/group")
+    suspend fun createGroupChat(@Body request: CreateGroupChatRequest): ChatDto
 }
 
 data class LoginRequest(
@@ -148,6 +160,10 @@ data class WebRtcIceConfigDto(
     val iceCandidatePoolSize: Int = 0
 )
 
+data class LiveKitTokenDto(
+    val token: String
+)
+
 data class IceServerDto(
     val urls: Any? = null,
     val username: String? = null,
@@ -158,3 +174,8 @@ data class CreateChatRequest(
     val userId: String
 )
 
+data class CreateGroupChatRequest(
+    val name: String,
+    val participantPhones: List<String> = emptyList(),
+    val participantIds: List<String> = emptyList()
+)

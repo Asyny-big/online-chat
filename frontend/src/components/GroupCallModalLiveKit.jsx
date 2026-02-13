@@ -2,6 +2,34 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { API_URL, LIVEKIT_URL } from '../config';
 import { createLocalTracks, Room, RoomEvent, Track, VideoQuality } from 'livekit-client';
 
+function isAndroidWebViewRuntime() {
+  if (typeof navigator === 'undefined') return false;
+  const ua = String(navigator.userAgent || '').toLowerCase();
+  const isAndroid = ua.includes('android');
+  const hasWvToken = ua.includes('; wv') || ua.includes(' wv');
+  const hasVersionToken = ua.includes('version/');
+  const hasChromeToken = ua.includes('chrome/');
+  return isAndroid && (hasWvToken || (hasVersionToken && hasChromeToken));
+}
+
+function safePlayMediaElement(el, reason) {
+  if (!el) return;
+  try {
+    const p = el.play?.();
+    if (p && typeof p.catch === 'function') {
+      p.catch((err) => {
+        if (process.env.NODE_ENV !== 'production') {
+          console.debug('[LiveKit] media play blocked:', reason, err?.name || err?.message || err);
+        }
+      });
+    }
+  } catch (err) {
+    if (process.env.NODE_ENV !== 'production') {
+      console.debug('[LiveKit] media play failed:', reason, err?.name || err?.message || err);
+    }
+  }
+}
+
 /* ─────────────────────────────────────────────────────────────
    ICONS (SVG Components)
 ───────────────────────────────────────────────────────────── */
@@ -223,10 +251,33 @@ const LiveKitVideo = React.memo(function LiveKitVideo({ track, muted, className,
     if (!el || !track) return undefined;
 
     try {
+      el.autoplay = true;
+      el.playsInline = true;
+      el.disablePictureInPicture = true;
+      el.disableRemotePlayback = true;
+      el.setAttribute('playsinline', '');
+      el.setAttribute('webkit-playsinline', '');
+      el.setAttribute('x5-playsinline', '');
+      if (typeof muted === 'boolean') {
+        el.muted = muted;
+      }
+    } catch (_) {}
+
+    try {
       track.attach(el);
     } catch (_) {
       // no-op
     }
+
+    const replay = () => safePlayMediaElement(el, 'video-replay');
+    replay();
+    try {
+      el.addEventListener('loadedmetadata', replay);
+      el.addEventListener('canplay', replay);
+      el.addEventListener('pause', replay);
+      el.addEventListener('stalled', replay);
+      el.addEventListener('suspend', replay);
+    } catch (_) {}
 
     const mst = track?.mediaStreamTrack || null;
     const handleEnded = () => onTrackEnded?.();
@@ -236,6 +287,13 @@ const LiveKitVideo = React.memo(function LiveKitVideo({ track, muted, className,
 
     return () => {
       try {
+        el.removeEventListener('loadedmetadata', replay);
+        el.removeEventListener('canplay', replay);
+        el.removeEventListener('pause', replay);
+        el.removeEventListener('stalled', replay);
+        el.removeEventListener('suspend', replay);
+      } catch (_) {}
+      try {
         mst?.removeEventListener?.('ended', handleEnded);
       } catch (_) {}
       try {
@@ -244,7 +302,7 @@ const LiveKitVideo = React.memo(function LiveKitVideo({ track, muted, className,
         // no-op
       }
     };
-  }, [track, onTrackEnded]);
+  }, [track, muted, onTrackEnded]);
 
   return (
     <video
@@ -266,12 +324,13 @@ function TrackAudio({ track }) {
   useEffect(() => {
     if (!track || !ref.current) return undefined;
     track.attach(ref.current);
+    safePlayMediaElement(ref.current, 'audio-attach');
     return () => {
       track.detach(ref.current);
     };
   }, [track]);
 
-  return <audio ref={ref} autoPlay />;
+  return <audio ref={ref} autoPlay playsInline />;
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -503,6 +562,7 @@ function GroupCallModalLiveKit({
   const [actualVideoInRes, setActualVideoInRes] = useState(null);
   const [actualVideoOutRes, setActualVideoOutRes] = useState(null);
   const [statsNote, setStatsNote] = useState('');
+  const isAndroidWebView = useMemo(() => isAndroidWebViewRuntime(), []);
 
   // Для responsive: ширина stage и примерная ширина превью
   const stageWrapRef = useRef(null);
@@ -523,6 +583,22 @@ function GroupCallModalLiveKit({
     inBytes: 0,
     outBytes: 0
   });
+
+  const wakeupMediaElements = useCallback(() => {
+    try {
+      const elements = document.querySelectorAll('.gvc-overlay video, .gvc-overlay audio');
+      elements.forEach((el) => safePlayMediaElement(el, 'overlay-wakeup'));
+    } catch (_) {}
+  }, []);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'production') return;
+    console.info('[LiveKit] runtime', {
+      isAndroidWebView,
+      isSecureContext: typeof window !== 'undefined' ? window.isSecureContext : null,
+      userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : ''
+    });
+  }, [isAndroidWebView]);
 
   const clearHideTimer = useCallback(() => {
     const t = hideControlsTimerRef.current;
@@ -897,7 +973,7 @@ function GroupCallModalLiveKit({
 
       const rtcConfig = iceData?.iceServers ? { iceServers: iceData.iceServers } : undefined;
 
-      const room = new Room({ adaptiveStream: true, dynacast: true });
+      const room = new Room({ adaptiveStream: !isAndroidWebView, dynacast: !isAndroidWebView });
       roomRef.current = room;
 
       // Обновляем connectionState (помогает UI статуса даже без stats).
@@ -957,6 +1033,18 @@ function GroupCallModalLiveKit({
         throw e;
       }
 
+      if (callType === 'video' && navigator?.mediaDevices?.enumerateDevices) {
+        try {
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          console.info(
+            '[LiveKit] enumerateDevices',
+            devices.map((d) => ({ kind: d.kind, label: d.label, deviceId: d.deviceId }))
+          );
+        } catch (e) {
+          console.warn('[LiveKit] enumerateDevices failed:', e);
+        }
+      }
+
       const tracks = await createLocalTracks({
         audio: true,
         video: callType === 'video'
@@ -976,15 +1064,32 @@ function GroupCallModalLiveKit({
       await Promise.all(tracks.map((track) => room.localParticipant.publishTrack(track)));
 
       const localVideo = tracks.find((t) => t.kind === 'video') || null;
+      if (localVideo?.mediaStreamTrack) {
+        try {
+          console.info('[LiveKit] local video track', {
+            id: localVideo.mediaStreamTrack.id,
+            readyState: localVideo.mediaStreamTrack.readyState,
+            muted: localVideo.mediaStreamTrack.muted,
+            settings: localVideo.mediaStreamTrack.getSettings?.()
+          });
+        } catch (_) {}
+      }
       if (mountedRef.current) {
         setLocalVideoTrack(localVideo);
         setCallStatus('active');
       }
       updateRemoteParticipants();
+      wakeupMediaElements();
 
       // При старте активного звонка: показываем controls и запускаем auto-hide.
       bumpControls();
     } catch (err) {
+      console.error('[LiveKit] connect flow failed', {
+        error: err?.message || err,
+        callType,
+        isAndroidWebView,
+        isSecureContext: typeof window !== 'undefined' ? window.isSecureContext : null
+      });
       if (mountedRef.current) {
         setError(err?.message || 'LiveKit connection failed');
         setCallStatus('ended');
@@ -992,7 +1097,7 @@ function GroupCallModalLiveKit({
     } finally {
       isConnectingRef.current = false;
     }
-  }, [callId, chatId, callType, fetchIceServers, fetchLiveKitToken, socket, updateRemoteParticipants]);
+  }, [callId, chatId, callType, fetchIceServers, fetchLiveKitToken, isAndroidWebView, socket, updateRemoteParticipants, wakeupMediaElements]);
 
   const disconnectLiveKit = useCallback(async () => {
     const room = roomRef.current;
@@ -1032,9 +1137,11 @@ function GroupCallModalLiveKit({
   }, [callId, disconnectLiveKit, onClose, socket]);
 
   const handleJoinClick = useCallback(async () => {
+    wakeupMediaElements();
     onJoin?.(callId, callType);
     await connectLiveKit();
-  }, [callId, callType, connectLiveKit, onJoin]);
+    wakeupMediaElements();
+  }, [callId, callType, connectLiveKit, onJoin, wakeupMediaElements]);
 
   const toggleMute = useCallback(async () => {
     const room = roomRef.current;
@@ -1430,11 +1537,13 @@ function GroupCallModalLiveKit({
   // Auto-hide UX: слушаем активность на overlay.
   const handleOverlayMouseMove = useCallback(() => {
     bumpControls();
-  }, [bumpControls]);
+    wakeupMediaElements();
+  }, [bumpControls, wakeupMediaElements]);
 
   const handleOverlayTouchStart = useCallback(() => {
     bumpControls();
-  }, [bumpControls]);
+    wakeupMediaElements();
+  }, [bumpControls, wakeupMediaElements]);
 
   const handleOverlayClickCapture = useCallback((e) => {
     // Mobile-first: если controls скрыты — первый тап только показывает их.

@@ -18,6 +18,7 @@ data class MainUiState(
     val currentUserId: String? = null,
     val incomingCall: IncomingCallUi? = null,
     val activeCall: ActiveCallUi? = null,
+    val existingGroupCallPrompt: ExistingGroupCallPromptUi? = null,
     val isCallActionInProgress: Boolean = false,
     val callErrorMessage: String? = null,
     val errorMessage: String? = null,
@@ -25,7 +26,10 @@ data class MainUiState(
     val userProfile: UserProfile? = null,
     val userProfileLoading: Boolean = false,
     val searchedUser: UserProfile? = null,
-    val userSearchStatus: UserSearchStatus = UserSearchStatus.Idle
+    val userSearchStatus: UserSearchStatus = UserSearchStatus.Idle,
+    val groupParticipants: List<UserProfile> = emptyList(),
+    val isLoadingGroupParticipants: Boolean = false,
+    val groupParticipantsErrorMessage: String? = null
 ) {
     val selectedChat: ChatPreview?
         get() = chats.firstOrNull { it.id == selectedChatId }
@@ -53,6 +57,13 @@ data class ActiveCallUi(
     val type: String,
     val isGroup: Boolean,
     val phase: ActiveCallPhase
+)
+
+data class ExistingGroupCallPromptUi(
+    val callId: String,
+    val chatId: String,
+    val chatName: String,
+    val type: String
 )
 
 enum class ActiveCallPhase {

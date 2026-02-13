@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
+import ru.govchat.app.BuildConfig
 import ru.govchat.app.core.call.CallManager
 import ru.govchat.app.core.call.CallUiPhase
 import ru.govchat.app.core.call.CallUiState
@@ -40,11 +41,13 @@ import ru.govchat.app.domain.usecase.LoadWebRtcConfigUseCase
 import ru.govchat.app.domain.usecase.LogoutUseCase
 import ru.govchat.app.domain.usecase.SendAttachmentMessageUseCase
 import ru.govchat.app.domain.usecase.SendCallSignalUseCase
+import ru.govchat.app.domain.usecase.SendGroupCallSignalUseCase
 import ru.govchat.app.domain.usecase.SendTextMessageUseCase
 import ru.govchat.app.domain.usecase.StartCallUseCase
 import ru.govchat.app.domain.usecase.StartGroupCallUseCase
 import ru.govchat.app.domain.usecase.SearchUserByPhoneUseCase
 import ru.govchat.app.domain.usecase.CreateChatUseCase
+import ru.govchat.app.domain.usecase.CreateGroupChatUseCase
 
 class MainViewModel(
     appContext: Context,
@@ -54,6 +57,7 @@ class MainViewModel(
     private val sendAttachmentMessageUseCase: SendAttachmentMessageUseCase,
     private val loadWebRtcConfigUseCase: LoadWebRtcConfigUseCase,
     private val sendCallSignalUseCase: SendCallSignalUseCase,
+    private val sendGroupCallSignalUseCase: SendGroupCallSignalUseCase,
     private val startCallUseCase: StartCallUseCase,
     private val acceptCallUseCase: AcceptCallUseCase,
     private val declineCallUseCase: DeclineCallUseCase,
@@ -64,6 +68,7 @@ class MainViewModel(
     private val logoutUseCase: LogoutUseCase,
     private val searchUserByPhoneUseCase: SearchUserByPhoneUseCase,
     private val createChatUseCase: CreateChatUseCase,
+    private val createGroupChatUseCase: CreateGroupChatUseCase,
     private val chatRepository: ChatRepository,
     private val authRepository: AuthRepository
 ) : ViewModel() {
@@ -126,7 +131,7 @@ class MainViewModel(
                     mutableState.update {
                         it.copy(
                             isLoadingChats = false,
-                            errorMessage = error.message ?: "РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё С‡Р°С‚РѕРІ"
+                            errorMessage = error.message ?: "Р С›РЎв‚¬Р С‘Р В±Р С”Р В° Р В·Р В°Р С–РЎР‚РЎС“Р В·Р С”Р С‘ РЎвЂЎР В°РЎвЂљР С•Р Р†"
                         )
                     }
                 }
@@ -151,6 +156,48 @@ class MainViewModel(
         viewModelScope.launch {
             chatRepository.joinChat(chatId)
             loadMessages(chatId)
+
+            val chatType = mutableState.value.chats.firstOrNull { it.id == chatId }?.type
+            if (chatType == ChatType.GROUP) {
+                loadGroupParticipants(chatId)
+            } else {
+                mutableState.update {
+                    it.copy(
+                        groupParticipants = emptyList(),
+                        isLoadingGroupParticipants = false,
+                        groupParticipantsErrorMessage = null
+                    )
+                }
+            }
+        }
+    }
+
+    private fun loadGroupParticipants(chatId: String) {
+        viewModelScope.launch {
+            mutableState.update {
+                it.copy(
+                    isLoadingGroupParticipants = true,
+                    groupParticipantsErrorMessage = null
+                )
+            }
+            chatRepository.getChatParticipants(chatId)
+                .onSuccess { participants ->
+                    mutableState.update {
+                        it.copy(
+                            groupParticipants = participants,
+                            isLoadingGroupParticipants = false,
+                            groupParticipantsErrorMessage = null
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    mutableState.update {
+                        it.copy(
+                            isLoadingGroupParticipants = false,
+                            groupParticipantsErrorMessage = error.message ?: "РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РіСЂСѓР·РёС‚СЊ СѓС‡Р°СЃС‚РЅРёРєРѕРІ"
+                        )
+                    }
+                }
         }
     }
 
@@ -194,7 +241,7 @@ class MainViewModel(
                     mutableState.update {
                         it.copy(
                             isSending = false,
-                            errorMessage = error.message ?: "РћС€РёР±РєР° РѕС‚РїСЂР°РІРєРё"
+                            errorMessage = error.message ?: "Р С›РЎв‚¬Р С‘Р В±Р С”Р В° Р С•РЎвЂљР С—РЎР‚Р В°Р Р†Р С”Р С‘"
                         )
                     }
                 }
@@ -222,7 +269,7 @@ class MainViewModel(
                     it.copy(
                         isSending = false,
                         uploadProgress = null,
-                        errorMessage = error.message ?: "РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё С„Р°Р№Р»Р°"
+                        errorMessage = error.message ?: "Р С›РЎв‚¬Р С‘Р В±Р С”Р В° Р В·Р В°Р С–РЎР‚РЎС“Р В·Р С”Р С‘ РЎвЂћР В°Р в„–Р В»Р В°"
                     )
                 }
             }
@@ -280,15 +327,10 @@ class MainViewModel(
 
             val callId = result.getOrNull().orEmpty()
             try {
-                initializeWebRtc(
-                    callId = callId,
-                    callType = type,
-                    isInitiator = true,
-                    remoteUserId = null
-                )
+                // Set activeCall BEFORE WebRTC init so participant/signal events
+                // for this call are not dropped while ICE config/media are loading.
                 mutableState.update {
                     it.copy(
-                        isCallActionInProgress = false,
                         activeCall = ActiveCallUi(
                             callId = callId,
                             chatId = chat.id,
@@ -297,6 +339,17 @@ class MainViewModel(
                             isGroup = false,
                             phase = ActiveCallPhase.Outgoing
                         )
+                    )
+                }
+                initializeWebRtc(
+                    callId = callId,
+                    callType = type,
+                    isInitiator = true,
+                    remoteUserId = null
+                )
+                mutableState.update {
+                    it.copy(
+                        isCallActionInProgress = false
                     )
                 }
                 showCallControlsTemporarily()
@@ -326,26 +379,50 @@ class MainViewModel(
                 it.copy(
                     isCallActionInProgress = true,
                     callErrorMessage = null,
-                    incomingCall = null
+                    incomingCall = null,
+                    existingGroupCallPrompt = null
                 )
             }
             startGroupCallUseCase(chatId = chat.id, type = type)
-                .onSuccess { callId ->
-                    callManager.markGroupCallActive(type = type)
-                    mutableState.update {
-                        it.copy(
-                            isCallActionInProgress = false,
-                            activeCall = ActiveCallUi(
-                                callId = callId,
-                                chatId = chat.id,
-                                chatName = chat.title,
-                                type = type,
-                                isGroup = true,
-                                phase = ActiveCallPhase.Active
+                .onSuccess { startResult ->
+                    val callId = startResult.callId
+                    val callType = startResult.type.ifBlank { type }
+                    if (startResult.alreadyActive) {
+                        mutableState.update {
+                            it.copy(
+                                isCallActionInProgress = false,
+                                activeCall = null,
+                                existingGroupCallPrompt = ExistingGroupCallPromptUi(
+                                    callId = callId,
+                                    chatId = chat.id,
+                                    chatName = chat.title,
+                                    type = callType
+                                )
                             )
-                        )
+                        }
+                        return@onSuccess
                     }
-                    showCallControlsTemporarily()
+                    try {
+                        joinAndActivateGroupCall(
+                            chatId = chat.id,
+                            chatName = chat.title,
+                            callId = callId,
+                            callType = callType
+                        )
+                    } catch (error: Throwable) {
+                        leaveGroupCallUseCase(callId)
+                        try {
+                            callManager.close()
+                        } catch (_: Throwable) {
+                        }
+                        mutableState.update {
+                            it.copy(
+                                isCallActionInProgress = false,
+                                activeCall = null,
+                                callErrorMessage = error.message ?: "LiveKit init failed"
+                            )
+                        }
+                    }
                 }
                 .onFailure { error ->
                     viewModelScope.launch {
@@ -358,6 +435,7 @@ class MainViewModel(
                         it.copy(
                             isCallActionInProgress = false,
                             activeCall = null,
+                            existingGroupCallPrompt = null,
                             callErrorMessage = error.message ?: "Group call start failed"
                         )
                     }
@@ -365,14 +443,80 @@ class MainViewModel(
         }
     }
 
+    fun confirmJoinExistingGroupCall() {
+        val prompt = mutableState.value.existingGroupCallPrompt ?: return
+        if (mutableState.value.isCallActionInProgress) return
+
+        viewModelScope.launch {
+            mutableState.update {
+                it.copy(
+                    isCallActionInProgress = true,
+                    callErrorMessage = null,
+                    incomingCall = null,
+                    existingGroupCallPrompt = null
+                )
+            }
+            try {
+                joinAndActivateGroupCall(
+                    chatId = prompt.chatId,
+                    chatName = prompt.chatName,
+                    callId = prompt.callId,
+                    callType = prompt.type
+                )
+            } catch (error: Throwable) {
+                leaveGroupCallUseCase(prompt.callId)
+                try {
+                    callManager.close()
+                } catch (_: Throwable) {
+                }
+                mutableState.update {
+                    it.copy(
+                        isCallActionInProgress = false,
+                        activeCall = null,
+                        callErrorMessage = error.message ?: "Group call join failed"
+                    )
+                }
+            }
+        }
+    }
+
+    fun dismissExistingGroupCallPrompt() {
+        mutableState.update { it.copy(existingGroupCallPrompt = null) }
+    }
+
     fun acceptIncomingCall() {
         val incoming = mutableState.value.incomingCall ?: return
         if (mutableState.value.isCallActionInProgress) return
 
         viewModelScope.launch {
-            mutableState.update { it.copy(isCallActionInProgress = true, callErrorMessage = null) }
+            mutableState.update {
+                it.copy(
+                    isCallActionInProgress = true,
+                    callErrorMessage = null,
+                    existingGroupCallPrompt = null
+                )
+            }
             val result = if (incoming.isGroup) {
-                joinGroupCallUseCase(chatId = incoming.chatId, callId = incoming.callId).map { Unit }
+                mutableState.update {
+                    it.copy(
+                        incomingCall = null,
+                        activeCall = ActiveCallUi(
+                            callId = incoming.callId,
+                            chatId = incoming.chatId,
+                            chatName = incoming.chatName,
+                            type = incoming.type,
+                            isGroup = true,
+                            phase = ActiveCallPhase.Connecting
+                        )
+                    )
+                }
+                runCatching {
+                    joinGroupCallUseCase(chatId = incoming.chatId, callId = incoming.callId).getOrThrow()
+                    initializeLiveKitForGroupCall(
+                        callId = incoming.callId,
+                        callType = incoming.type
+                    )
+                }.map { Unit }
             } else {
                 try {
                     initializeWebRtc(
@@ -411,9 +555,6 @@ class MainViewModel(
             }
 
             result.onSuccess {
-                if (incoming.isGroup) {
-                    callManager.markGroupCallActive(type = incoming.type)
-                }
                 mutableState.update {
                     it.copy(
                         isCallActionInProgress = false,
@@ -430,12 +571,13 @@ class MainViewModel(
                 }
                 showCallControlsTemporarily()
             }.onFailure { error ->
-                if (!incoming.isGroup) {
-                    viewModelScope.launch {
-                        try {
-                            callManager.close()
-                        } catch (_: Throwable) {
-                        }
+                if (incoming.isGroup) {
+                    leaveGroupCallUseCase(incoming.callId)
+                }
+                viewModelScope.launch {
+                    try {
+                        callManager.close()
+                    } catch (_: Throwable) {
                     }
                 }
                 mutableState.update {
@@ -522,25 +664,33 @@ class MainViewModel(
 
     fun toggleMicrophone() {
         if (mutableState.value.activeCall == null) return
-        callManager.toggleMicrophone().onFailure { error ->
-            mutableState.update { it.copy(callErrorMessage = error.message ?: "РњРёРєСЂРѕС„РѕРЅ РЅРµРґРѕСЃС‚СѓРїРµРЅ") }
+        viewModelScope.launch {
+            callManager.toggleMicrophone().onFailure { error ->
+                mutableState.update {
+                    it.copy(callErrorMessage = error.message ?: "Не удалось переключить микрофон")
+                }
+            }
+            showCallControlsTemporarily()
         }
-        showCallControlsTemporarily()
     }
 
     fun toggleCamera() {
         if (mutableState.value.activeCall == null) return
-        callManager.toggleCamera().onFailure { error ->
-            mutableState.update { it.copy(callErrorMessage = error.message ?: "РљР°РјРµСЂР° РЅРµРґРѕСЃС‚СѓРїРЅР°") }
+        viewModelScope.launch {
+            callManager.toggleCamera().onFailure { error ->
+                mutableState.update {
+                    it.copy(callErrorMessage = error.message ?: "Не удалось переключить камеру")
+                }
+            }
+            showCallControlsTemporarily()
         }
-        showCallControlsTemporarily()
     }
 
     fun switchCamera() {
         if (mutableState.value.activeCall == null) return
         viewModelScope.launch {
             callManager.switchCamera().onFailure { error ->
-                mutableState.update { it.copy(callErrorMessage = error.message ?: "РќРµ СѓРґР°Р»РѕСЃСЊ РїРµСЂРµРєР»СЋС‡РёС‚СЊ РєР°РјРµСЂСѓ") }
+                mutableState.update { it.copy(callErrorMessage = error.message ?: "Р СњР Вµ РЎС“Р Т‘Р В°Р В»Р С•РЎРѓРЎРЉ Р С—Р ВµРЎР‚Р ВµР С”Р В»РЎР‹РЎвЂЎР С‘РЎвЂљРЎРЉ Р С”Р В°Р СР ВµРЎР‚РЎС“") }
             }
             showCallControlsTemporarily()
         }
@@ -549,22 +699,26 @@ class MainViewModel(
     fun startScreenShare(resultCode: Int, permissionData: Intent?) {
         val activeCall = mutableState.value.activeCall ?: return
         if (activeCall.type != "video") return
-        callManager.startScreenShare(resultCode = resultCode, permissionData = permissionData)
-            .onFailure { error ->
-                mutableState.update { it.copy(callErrorMessage = error.message ?: "Screen share недоступен") }
-            }
-        showCallControlsTemporarily()
+        viewModelScope.launch {
+            callManager.startScreenShare(resultCode = resultCode, permissionData = permissionData)
+                .onFailure { error ->
+                    mutableState.update { it.copy(callErrorMessage = error.message ?: "Screen share unavailable") }
+                }
+            showCallControlsTemporarily()
+        }
     }
 
     fun stopScreenShare() {
         val activeCall = mutableState.value.activeCall ?: return
         if (activeCall.type != "video") return
-        callManager.stopScreenShare().onFailure { error ->
-            mutableState.update {
-                it.copy(callErrorMessage = error.message ?: "Не удалось выключить демонстрацию экрана")
+        viewModelScope.launch {
+            callManager.stopScreenShare().onFailure { error ->
+                mutableState.update {
+                    it.copy(callErrorMessage = error.message ?: "Failed to stop screen share")
+                }
             }
+            showCallControlsTemporarily()
         }
-        showCallControlsTemporarily()
     }
 
     private suspend fun observeRealtime() {
@@ -605,7 +759,13 @@ class MainViewModel(
                         initiatorName = event.initiatorName.ifBlank { "Contact" },
                         participantCount = event.participantCount
                     )
-                    mutableState.update { it.copy(incomingCall = incoming, callErrorMessage = null) }
+                    mutableState.update {
+                        it.copy(
+                            incomingCall = incoming,
+                            callErrorMessage = null,
+                            existingGroupCallPrompt = null
+                        )
+                    }
                     if (mutableState.value.selectedChatId != event.chatId) {
                         selectChat(event.chatId)
                     }
@@ -644,7 +804,7 @@ class MainViewModel(
                 is RealtimeEvent.CallParticipantJoined -> {
                     mutableState.update { current ->
                         val active = current.activeCall ?: return@update current
-                        if (active.callId != event.callId || active.isGroup) return@update current
+                        if (active.callId != event.callId) return@update current
                         if (active.phase == ActiveCallPhase.Active) return@update current
                         current.copy(activeCall = active.copy(phase = ActiveCallPhase.Active))
                     }
@@ -690,10 +850,6 @@ class MainViewModel(
                 }
 
                 is RealtimeEvent.GroupCallStarted -> {
-                    val active = mutableState.value.activeCall
-                    if (active != null && active.isGroup && active.callId == event.callId) {
-                        callManager.markGroupCallActive(type = active.type)
-                    }
                     mutableState.update { current ->
                         val active = current.activeCall ?: return@update current
                         if (!active.isGroup || active.callId != event.callId) return@update current
@@ -722,7 +878,14 @@ class MainViewModel(
 
                 is RealtimeEvent.CallSignalReceived -> {
                     val active = mutableState.value.activeCall
-                    if (active == null || active.callId != event.callId || active.isGroup) {
+                    if (active == null || active.callId != event.callId) {
+                        return@collect
+                    }
+                    if (active.isGroup) {
+                        return@collect
+                    }
+                    val currentUserId = mutableState.value.currentUserId
+                    if (!currentUserId.isNullOrBlank() && event.fromUserId == currentUserId) {
                         return@collect
                     }
                     runCatching {
@@ -759,6 +922,82 @@ class MainViewModel(
                 signal = signal
             )
         }
+    }
+
+    private suspend fun initializeWebRtcForGroupCall(
+        callId: String,
+        callType: String,
+        isInitiator: Boolean,
+        remoteUserId: String?
+    ) {
+        val config = runCatching {
+            withTimeout(ICE_CONFIG_TIMEOUT_MS) {
+                loadWebRtcConfigUseCase().getOrThrow()
+            }
+        }.getOrElse { fallbackWebRtcConfig() }
+        callManager.startWebRtcSession(
+            callId = callId,
+            isInitiator = isInitiator,
+            isVideo = callType == "video",
+            config = config,
+            remoteUserId = remoteUserId
+        ) { targetUserId, signal ->
+            sendGroupCallSignalUseCase(
+                callId = callId,
+                targetUserId = targetUserId,
+                signal = signal
+            )
+        }
+    }
+
+    private suspend fun initializeLiveKitForGroupCall(
+        callId: String,
+        callType: String
+    ) {
+        val identity = resolveCurrentUserIdForLiveKit()
+        val token = chatRepository.loadLiveKitToken(room = callId, identity = identity).getOrThrow()
+        callManager.startLiveKitGroupSession(
+            liveKitUrl = BuildConfig.LIVEKIT_URL,
+            token = token,
+            isVideo = callType == "video"
+        )
+    }
+
+    private suspend fun joinAndActivateGroupCall(
+        chatId: String,
+        chatName: String,
+        callId: String,
+        callType: String
+    ) {
+        joinGroupCallUseCase(chatId = chatId, callId = callId).getOrThrow()
+        initializeLiveKitForGroupCall(
+            callId = callId,
+            callType = callType
+        )
+        mutableState.update {
+            it.copy(
+                isCallActionInProgress = false,
+                activeCall = ActiveCallUi(
+                    callId = callId,
+                    chatId = chatId,
+                    chatName = chatName,
+                    type = callType,
+                    isGroup = true,
+                    phase = ActiveCallPhase.Active
+                )
+            )
+        }
+        showCallControlsTemporarily()
+    }
+
+    private suspend fun resolveCurrentUserIdForLiveKit(): String {
+        val current = mutableState.value.currentUserId
+        if (!current.isNullOrBlank()) {
+            return current
+        }
+        val profile = chatRepository.getCurrentUser().getOrThrow()
+        mutableState.update { it.copy(currentUserId = profile.id, userProfile = profile) }
+        return profile.id
     }
 
     private suspend fun observeSession() {
@@ -846,7 +1085,23 @@ class MainViewModel(
                 }
                 .onFailure { error ->
                     mutableState.update {
-                        it.copy(errorMessage = error.message ?: "Не удалось создать чат")
+                        it.copy(errorMessage = error.message ?: "РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ С‡Р°С‚")
+                    }
+                }
+        }
+    }
+
+    fun createGroupChat(name: String, participantIds: List<String>) {
+        viewModelScope.launch {
+            createGroupChatUseCase(name = name, participantIds = participantIds)
+                .onSuccess { chat ->
+                    upsertChatOnTop(chat)
+                    selectChat(chat.id)
+                    resetUserSearch()
+                }
+                .onFailure { error ->
+                    mutableState.update {
+                        it.copy(errorMessage = error.message ?: "РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ РіСЂСѓРїРїСѓ")
                     }
                 }
         }
@@ -875,7 +1130,7 @@ class MainViewModel(
                 mutableState.update {
                     it.copy(
                         isLoadingMessages = false,
-                        errorMessage = error.message ?: "РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё СЃРѕРѕР±С‰РµРЅРёР№"
+                        errorMessage = error.message ?: "Р С›РЎв‚¬Р С‘Р В±Р С”Р В° Р В·Р В°Р С–РЎР‚РЎС“Р В·Р С”Р С‘ РЎРѓР С•Р С•Р В±РЎвЂ°Р ВµР Р…Р С‘Р в„–"
                     )
                 }
             }
@@ -1073,6 +1328,7 @@ class MainViewModel(
             sendAttachmentMessageUseCase: SendAttachmentMessageUseCase,
             loadWebRtcConfigUseCase: LoadWebRtcConfigUseCase,
             sendCallSignalUseCase: SendCallSignalUseCase,
+            sendGroupCallSignalUseCase: SendGroupCallSignalUseCase,
             startCallUseCase: StartCallUseCase,
             acceptCallUseCase: AcceptCallUseCase,
             declineCallUseCase: DeclineCallUseCase,
@@ -1083,6 +1339,7 @@ class MainViewModel(
             logoutUseCase: LogoutUseCase,
             searchUserByPhoneUseCase: SearchUserByPhoneUseCase,
             createChatUseCase: CreateChatUseCase,
+            createGroupChatUseCase: CreateGroupChatUseCase,
             chatRepository: ChatRepository,
             authRepository: AuthRepository
         ) = viewModelFactory {
@@ -1094,6 +1351,7 @@ class MainViewModel(
                 sendAttachmentMessageUseCase = sendAttachmentMessageUseCase,
                 loadWebRtcConfigUseCase = loadWebRtcConfigUseCase,
                 sendCallSignalUseCase = sendCallSignalUseCase,
+                sendGroupCallSignalUseCase = sendGroupCallSignalUseCase,
                 startCallUseCase = startCallUseCase,
                 acceptCallUseCase = acceptCallUseCase,
                 declineCallUseCase = declineCallUseCase,
@@ -1104,6 +1362,7 @@ class MainViewModel(
                 logoutUseCase = logoutUseCase,
                 searchUserByPhoneUseCase = searchUserByPhoneUseCase,
                 createChatUseCase = createChatUseCase,
+                createGroupChatUseCase = createGroupChatUseCase,
                 chatRepository = chatRepository,
                 authRepository = authRepository
             )
@@ -1113,12 +1372,12 @@ class MainViewModel(
 
 private fun ChatMessage.toChatSubtitle(): String {
     return when (type) {
-        MessageType.Audio -> "рџЋ¤ Р“РѕР»РѕСЃРѕРІРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ"
-        MessageType.Image -> "рџ“· РР·РѕР±СЂР°Р¶РµРЅРёРµ"
-        MessageType.Video -> "рџЋҐ Р’РёРґРµРѕ"
-        MessageType.File -> "рџ“Ћ Р¤Р°Р№Р»"
-        MessageType.System -> text.ifBlank { "РЎРёСЃС‚РµРјРЅРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ" }
-        MessageType.Text -> text.ifBlank { "РЎРѕРѕР±С‰РµРЅРёРµ" }
+        MessageType.Audio -> "СЂСџР‹В¤ Р вЂњР С•Р В»Р С•РЎРѓР С•Р Р†Р С•Р Вµ РЎРѓР С•Р С•Р В±РЎвЂ°Р ВµР Р…Р С‘Р Вµ"
+        MessageType.Image -> "СЂСџвЂњВ· Р ВР В·Р С•Р В±РЎР‚Р В°Р В¶Р ВµР Р…Р С‘Р Вµ"
+        MessageType.Video -> "СЂСџР‹Тђ Р вЂ™Р С‘Р Т‘Р ВµР С•"
+        MessageType.File -> "СЂСџвЂњР‹ Р В¤Р В°Р в„–Р В»"
+        MessageType.System -> text.ifBlank { "Р РЋР С‘РЎРѓРЎвЂљР ВµР СР Р…Р С•Р Вµ РЎРѓР С•Р С•Р В±РЎвЂ°Р ВµР Р…Р С‘Р Вµ" }
+        MessageType.Text -> text.ifBlank { "Р РЋР С•Р С•Р В±РЎвЂ°Р ВµР Р…Р С‘Р Вµ" }
     }
 }
 

@@ -5,7 +5,7 @@ const config: CapacitorConfig = {
   appName: 'ГоВЧат',
   webDir: 'frontend/build',
   server: {
-    androidScheme: 'http'
+    androidScheme: 'https'
   }
 };
 

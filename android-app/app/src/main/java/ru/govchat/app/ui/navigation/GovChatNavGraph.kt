@@ -96,6 +96,7 @@ fun GovChatNavGraph(
                     sendTextMessageUseCase = container.sendTextMessageUseCase,
                     sendAttachmentMessageUseCase = container.sendAttachmentMessageUseCase,
                     loadWebRtcConfigUseCase = container.loadWebRtcConfigUseCase,
+                    sendGroupCallSignalUseCase = container.sendGroupCallSignalUseCase,
                     sendCallSignalUseCase = container.sendCallSignalUseCase,
                     startCallUseCase = container.startCallUseCase,
                     acceptCallUseCase = container.acceptCallUseCase,
@@ -107,6 +108,7 @@ fun GovChatNavGraph(
                     logoutUseCase = container.logoutUseCase,
                     searchUserByPhoneUseCase = container.searchUserByPhoneUseCase,
                     createChatUseCase = container.createChatUseCase,
+                    createGroupChatUseCase = container.createGroupChatUseCase,
                     chatRepository = container.chatRepository,
                     authRepository = container.authRepository
                 )
@@ -146,6 +148,8 @@ fun GovChatNavGraph(
                 onSendAttachment = viewModel::sendAttachment,
                 onStartCall = viewModel::startCall,
                 onStartGroupCall = viewModel::startGroupCall,
+                onConfirmJoinExistingGroupCall = viewModel::confirmJoinExistingGroupCall,
+                onDismissExistingGroupCallPrompt = viewModel::dismissExistingGroupCallPrompt,
                 onAcceptIncomingCall = viewModel::acceptIncomingCall,
                 onDeclineIncomingCall = viewModel::declineIncomingCall,
                 onLeaveCall = viewModel::leaveActiveCall,
@@ -161,6 +165,7 @@ fun GovChatNavGraph(
                 onLogout = viewModel::logout,
                 onSearchUserByPhone = viewModel::searchUserByPhone,
                 onCreateChatWithUser = viewModel::createChatWithUser,
+                onCreateGroupChat = viewModel::createGroupChat,
                 onResetUserSearch = viewModel::resetUserSearch,
                 onRefreshProfile = viewModel::refreshProfile
             )

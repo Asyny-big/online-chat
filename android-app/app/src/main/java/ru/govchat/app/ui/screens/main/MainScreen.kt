@@ -14,6 +14,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +25,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -45,6 +49,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -81,6 +86,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -91,17 +97,24 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
+import io.livekit.android.room.participant.RemoteParticipant
+import io.livekit.android.room.Room
+import io.livekit.android.room.track.Track as LiveKitTrack
+import io.livekit.android.room.track.TrackPublication as LiveKitTrackPublication
+import io.livekit.android.room.track.VideoTrack as LiveKitMediaVideoTrack
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import livekit.org.webrtc.RendererCommon as LiveKitRendererCommon
+import livekit.org.webrtc.SurfaceViewRenderer as LiveKitSurfaceViewRenderer
 import org.webrtc.EglBase
-import org.webrtc.RendererCommon
-import org.webrtc.SurfaceViewRenderer
-import org.webrtc.VideoTrack
+import org.webrtc.RendererCommon as WebRtcRendererCommon
+import org.webrtc.SurfaceViewRenderer as WebRtcSurfaceViewRenderer
 import ru.govchat.app.BuildConfig
 import ru.govchat.app.core.call.CallControlsState
 import ru.govchat.app.core.call.CallUiPhase
 import ru.govchat.app.core.call.CallUiState
+import ru.govchat.app.core.call.CallVideoTrack
 import ru.govchat.app.core.file.GovChatAttachmentDownloader
 import ru.govchat.app.core.notification.IncomingCallNotifications
 import ru.govchat.app.core.permission.GovChatPermissionFeature
@@ -128,6 +141,8 @@ fun MainScreen(
     onSendAttachment: (Uri) -> Unit,
     onStartCall: (String) -> Unit,
     onStartGroupCall: (String) -> Unit,
+    onConfirmJoinExistingGroupCall: () -> Unit,
+    onDismissExistingGroupCallPrompt: () -> Unit,
     onAcceptIncomingCall: () -> Unit,
     onDeclineIncomingCall: () -> Unit,
     onLeaveCall: () -> Unit,
@@ -143,6 +158,7 @@ fun MainScreen(
     onLogout: () -> Unit,
     onSearchUserByPhone: (String) -> Unit,
     onCreateChatWithUser: (String) -> Unit,
+    onCreateGroupChat: (String, List<String>) -> Unit,
     onResetUserSearch: () -> Unit,
     onRefreshProfile: () -> Unit
 ) {
@@ -282,6 +298,7 @@ fun MainScreen(
                         },
                         onSearchUserByPhone = onSearchUserByPhone,
                         onCreateChatWithUser = onCreateChatWithUser,
+                        onCreateGroupChat = onCreateGroupChat,
                         onResetUserSearch = onResetUserSearch,
                         onRefreshProfile = onRefreshProfile
                     )
@@ -337,6 +354,9 @@ fun MainScreen(
                 ActiveCallOverlay(
                     call = state.activeCall,
                     uiState = callUiState,
+                    groupParticipants = state.groupParticipants,
+                    currentUserProfile = state.userProfile,
+                    remoteChatAvatarUrl = state.chats.firstOrNull { it.id == state.activeCall.chatId }?.avatarUrl,
                     onLeaveCall = onLeaveCall,
                     onToggleMinimize = onToggleCallMinimized,
                     onInteraction = onCallSurfaceInteraction,
@@ -382,6 +402,35 @@ fun MainScreen(
             }
         )
     }
+
+    if (state.existingGroupCallPrompt != null && !isInPictureInPictureMode) {
+        val prompt = state.existingGroupCallPrompt
+        AlertDialog(
+            onDismissRequest = onDismissExistingGroupCallPrompt,
+            title = { Text("Звонок уже активен") },
+            text = {
+                Text(
+                    "В группе \"${prompt.chatName}\" уже идет ${if (prompt.type == "video") "видеозвонок" else "аудиозвонок"}. Подключиться?"
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        requestCallPermissions(prompt.type) {
+                            onConfirmJoinExistingGroupCall()
+                        }
+                    }
+                ) {
+                    Text("Да")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismissExistingGroupCallPrompt) {
+                    Text("Нет")
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -394,11 +443,13 @@ private fun ChatsListContent(
     onRequestNotifications: () -> Unit,
     onSearchUserByPhone: (String) -> Unit,
     onCreateChatWithUser: (String) -> Unit,
+    onCreateGroupChat: (String, List<String>) -> Unit,
     onResetUserSearch: () -> Unit,
     onRefreshProfile: () -> Unit
 ) {
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     var showAddChatDialog by remember { mutableStateOf(false) }
+    var showCreateGroupDialog by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -498,20 +549,37 @@ private fun ChatsListContent(
 
             // FAB on Chats tab
             if (selectedTab == 0) {
-                FloatingActionButton(
-                    onClick = { showAddChatDialog = true },
+                Column(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .padding(end = 16.dp, bottom = 16.dp),
-                    containerColor = Color(0xFF3B82F6),
-                    contentColor = Color.White,
-                    shape = CircleShape
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalAlignment = Alignment.End
                 ) {
-                    Icon(
-                        imageVector = Icons.Filled.Add,
-                        contentDescription = "Новый чат",
-                        modifier = Modifier.size(28.dp)
-                    )
+                    FloatingActionButton(
+                        onClick = { showCreateGroupDialog = true },
+                        containerColor = Color(0xFF7E22CE),
+                        contentColor = Color.White,
+                        shape = CircleShape
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.GroupAdd,
+                            contentDescription = "Создать группу",
+                            modifier = Modifier.size(26.dp)
+                        )
+                    }
+                    FloatingActionButton(
+                        onClick = { showAddChatDialog = true },
+                        containerColor = Color(0xFF3B82F6),
+                        contentColor = Color.White,
+                        shape = CircleShape
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Add,
+                            contentDescription = "Новый чат",
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
                 }
             }
         }
@@ -534,6 +602,22 @@ private fun ChatsListContent(
             onCreateChat = { userId ->
                 onCreateChatWithUser(userId)
                 showAddChatDialog = false
+            }
+        )
+    }
+
+    if (showCreateGroupDialog) {
+        CreateGroupDialog(
+            state = state,
+            onDismiss = {
+                showCreateGroupDialog = false
+                onResetUserSearch()
+            },
+            onSearchPhone = onSearchUserByPhone,
+            onResetSearch = onResetUserSearch,
+            onCreateGroup = { name, participantIds ->
+                onCreateGroupChat(name, participantIds)
+                showCreateGroupDialog = false
             }
         )
     }
@@ -857,7 +941,7 @@ private fun AddChatDialog(
                     UserSearchStatus.Idle -> {}
                     UserSearchStatus.TooShort -> {
                         Text(
-                            text = "Введите минимум 4 цифры",
+                            text = "Введите минимум 9 цифр",
                             color = Color(0xFF64748B),
                             style = MaterialTheme.typography.bodySmall
                         )
@@ -959,6 +1043,302 @@ private fun AddChatDialog(
     }
 }
 
+@Composable
+private fun CreateGroupDialog(
+    state: MainUiState,
+    onDismiss: () -> Unit,
+    onSearchPhone: (String) -> Unit,
+    onResetSearch: () -> Unit,
+    onCreateGroup: (String, List<String>) -> Unit
+) {
+    var groupName by remember { mutableStateOf("") }
+    var phoneInput by remember { mutableStateOf("") }
+    var participants by remember { mutableStateOf<List<UserProfile>>(emptyList()) }
+    var localError by remember { mutableStateOf<String?>(null) }
+
+    val maxHeight = (LocalConfiguration.current.screenHeightDp * 0.85f).dp
+    val participantsListMaxHeight = (LocalConfiguration.current.screenHeightDp * 0.35f).dp
+
+    Dialog(
+        onDismissRequest = {
+            onResetSearch()
+            onDismiss()
+        }
+    ) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = Color(0xFF1E293B),
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = maxHeight)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp)
+            ) {
+                Text(
+                    text = "Создать группу",
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Введите название и добавьте участников",
+                    color = Color(0xFF94A3B8),
+                    style = MaterialTheme.typography.bodySmall
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+                OutlinedTextField(
+                    value = groupName,
+                    onValueChange = {
+                        groupName = it
+                        localError = null
+                    },
+                    label = { Text("Название группы") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFF7E22CE),
+                        unfocusedBorderColor = Color(0xFF334155),
+                        focusedLabelColor = Color(0xFF7E22CE),
+                        unfocusedLabelColor = Color(0xFF64748B),
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        cursorColor = Color(0xFF7E22CE)
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = phoneInput,
+                    onValueChange = {
+                        phoneInput = it
+                        localError = null
+                        onSearchPhone(it)
+                    },
+                    label = { Text("Телефон участника") },
+                    placeholder = { Text("7...") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Phone,
+                        imeAction = ImeAction.Search
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFF7E22CE),
+                        unfocusedBorderColor = Color(0xFF334155),
+                        focusedLabelColor = Color(0xFF7E22CE),
+                        unfocusedLabelColor = Color(0xFF64748B),
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        cursorColor = Color(0xFF7E22CE)
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+                when (state.userSearchStatus) {
+                    UserSearchStatus.Idle -> Unit
+                    UserSearchStatus.TooShort -> Text(
+                        text = "Введите минимум 9 цифр",
+                        color = Color(0xFF64748B),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+
+                    UserSearchStatus.Loading -> Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            color = Color(0xFF7E22CE),
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Text(
+                            text = "Поиск...",
+                            color = Color(0xFF94A3B8),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+
+                    UserSearchStatus.Found -> {
+                        val user = state.searchedUser
+                        if (user != null) {
+                            val isAlreadyAdded = participants.any { it.id == user.id }
+                            val isSelf = user.id == state.currentUserId
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                color = Color(0xFF0F172A),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(44.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFF7E22CE)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = (user.name.firstOrNull() ?: '?').uppercase(),
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 18.sp
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = user.name,
+                                            color = Color.White,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Text(
+                                            text = user.phone,
+                                            color = Color(0xFF94A3B8),
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+
+                                    val addEnabled = !isAlreadyAdded && !isSelf
+                                    TextButton(
+                                        onClick = {
+                                            if (!addEnabled) return@TextButton
+                                            participants = participants + user
+                                            phoneInput = ""
+                                            onResetSearch()
+                                        },
+                                        enabled = addEnabled
+                                    ) {
+                                        Text(
+                                            text = when {
+                                                isSelf -> "Вы"
+                                                isAlreadyAdded -> "Добавлен"
+                                                else -> "Добавить"
+                                            },
+                                            color = if (addEnabled) Color(0xFF7E22CE) else Color(0xFF64748B),
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    UserSearchStatus.NotFound -> Text(
+                        text = "Пользователь не найден",
+                        color = Color(0xFFEF4444),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+
+                    UserSearchStatus.Error -> Text(
+                        text = "Ошибка поиска",
+                        color = Color(0xFFEF4444),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+
+                if (participants.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Участники (${participants.size})",
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = participantsListMaxHeight),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(participants, key = { it.id }) { user ->
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                color = Color(0xFF0F172A),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = user.name,
+                                        color = Color.White,
+                                        modifier = Modifier.weight(1f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    TextButton(
+                                        onClick = { participants = participants.filterNot { it.id == user.id } }
+                                    ) {
+                                        Text("Удалить", color = Color(0xFF64748B))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (localError != null) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = localError!!,
+                        color = Color(0xFFEF4444),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(
+                        onClick = {
+                            onResetSearch()
+                            onDismiss()
+                        }
+                    ) {
+                        Text("Отмена", color = Color(0xFF64748B))
+                    }
+
+                    Spacer(modifier = Modifier.width(6.dp))
+
+                    Button(
+                        onClick = {
+                            val trimmed = groupName.trim()
+                            if (trimmed.isBlank()) {
+                                localError = "Укажите название группы"
+                                return@Button
+                            }
+                            if (participants.isEmpty()) {
+                                localError = "Добавьте хотя бы одного участника"
+                                return@Button
+                            }
+                            onCreateGroup(trimmed, participants.map { it.id })
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7E22CE)),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Создать", color = Color.White)
+                    }
+                }
+            }
+        }
+    }
+}
+
 private fun resolveAvatarUrl(url: String?): String {
     if (url.isNullOrBlank()) return ""
     if (url.startsWith("http://") || url.startsWith("https://")) return url
@@ -970,9 +1350,17 @@ private fun ChatRow(
     chat: ChatPreview,
     onClick: () -> Unit
 ) {
+    val isGroup = chat.type == ChatType.GROUP
     Surface(
         modifier = Modifier
             .fillMaxWidth()
+            .then(
+                if (isGroup) {
+                    Modifier.border(1.dp, Color(0xFF7E22CE), RoundedCornerShape(12.dp))
+                } else {
+                    Modifier
+                }
+            )
             .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onClick),
         color = Color(0xFF1E293B)
@@ -983,7 +1371,10 @@ private fun ChatRow(
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            AvatarBubble(title = chat.title)
+            AvatarBubble(
+                title = chat.title,
+                background = if (isGroup) Color(0xFF7E22CE) else Color(0xFF3B82F6)
+            )
 
             Column(
                 modifier = Modifier
@@ -1039,6 +1430,7 @@ private fun ChatContent(
 ) {
     val chat = state.selectedChat ?: return
     val context = LocalContext.current
+    var showParticipantsDialog by remember(chat.id) { mutableStateOf(false) }
     var draft by remember(chat.id) { mutableStateOf("") }
     var selectedFileName by remember(chat.id) { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
@@ -1079,7 +1471,10 @@ private fun ChatContent(
             TextButton(onClick = onBack) {
                 Text("Назад")
             }
-            AvatarBubble(title = chat.title)
+            AvatarBubble(
+                title = chat.title,
+                background = if (chat.type == ChatType.GROUP) Color(0xFF7E22CE) else Color(0xFF3B82F6)
+            )
             Column(
                 modifier = Modifier
                     .weight(1f)
@@ -1102,10 +1497,21 @@ private fun ChatContent(
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
+
+                if (chat.type == ChatType.GROUP) {
+                    Text(
+                        text = "Участников: ${chat.participantCount}",
+                        color = Color(0xFF94A3B8),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (chat.type == ChatType.GROUP) {
+                    TextButton(onClick = { showParticipantsDialog = true }) {
+                        Text("👥")
+                    }
                     TextButton(onClick = { onStartGroupCall("audio") }) {
                         Text("📞")
                     }
@@ -1121,6 +1527,66 @@ private fun ChatContent(
                     }
                 }
             }
+        }
+
+        if (showParticipantsDialog) {
+            AlertDialog(
+                onDismissRequest = { showParticipantsDialog = false },
+                title = { Text("Участники") },
+                text = {
+                    when {
+                        state.isLoadingGroupParticipants -> {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                Text("Загрузка...")
+                            }
+                        }
+
+                        state.groupParticipantsErrorMessage != null -> {
+                            Text(state.groupParticipantsErrorMessage)
+                        }
+
+                        state.groupParticipants.isEmpty() -> {
+                            Text("Список участников недоступен")
+                        }
+
+                        else -> {
+                            LazyColumn(
+                                modifier = Modifier.heightIn(max = 380.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                items(state.groupParticipants, key = { it.id }) { user ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = user.name.ifBlank { user.phone },
+                                            modifier = Modifier.weight(1f),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        if (user.phone.isNotBlank()) {
+                                            Text(
+                                                text = user.phone,
+                                                color = Color(0xFF64748B)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showParticipantsDialog = false }) {
+                        Text("Закрыть")
+                    }
+                }
+            )
         }
 
         if (state.errorMessage != null) {
@@ -1303,25 +1769,199 @@ private fun PipCallContent(
     call: ActiveCallUi,
     uiState: CallUiState
 ) {
+    val compactTrack = resolveCompactCallTrack(uiState)
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = Color.Black
     ) {
-        if (call.type == "video" && uiState.remoteVideoTrack != null && uiState.eglContext != null) {
-            WebRtcVideoView(
-                track = uiState.remoteVideoTrack,
-                eglContext = uiState.eglContext,
-                mirror = false,
+        if (call.type == "video" && compactTrack != null) {
+            CallVideoView(
+                track = compactTrack.track,
+                webRtcEglContext = uiState.eglContext,
+                liveKitRoom = uiState.liveKitRoom,
+                mirror = compactTrack.isLocal,
                 modifier = Modifier.fillMaxSize()
             )
         }
     }
 }
 
+private data class CallVideoFeedItem(
+    val id: String,
+    val track: CallVideoTrack?,
+    val title: String,
+    val isLocal: Boolean,
+    val userId: String? = null,
+    val avatarUrl: String? = null
+)
+
+private data class CompactCallTrack(
+    val track: CallVideoTrack,
+    val isLocal: Boolean
+)
+
+private fun resolveCompactCallTrack(uiState: CallUiState): CompactCallTrack? {
+    val remoteTrack = uiState.remoteVideoTracks.firstOrNull() ?: uiState.remoteVideoTrack
+    if (remoteTrack != null) {
+        return CompactCallTrack(track = remoteTrack, isLocal = false)
+    }
+    val localTrack = uiState.localVideoTrack ?: return null
+    return CompactCallTrack(track = localTrack, isLocal = true)
+}
+
+private fun callVideoTrackKey(track: CallVideoTrack): String {
+    return when (track) {
+        is CallVideoTrack.WebRtc -> "webrtc-${System.identityHashCode(track.track)}"
+        is CallVideoTrack.LiveKit -> "livekit-${System.identityHashCode(track.track)}"
+    }
+}
+
+private fun buildCallVideoFeedItems(
+    uiState: CallUiState,
+    groupParticipants: List<UserProfile>,
+    currentUserProfile: UserProfile?
+): List<CallVideoFeedItem> {
+    val participantsById = groupParticipants.associateBy { it.id }
+    val room = uiState.liveKitRoom
+    if (room != null) {
+        val remoteParticipants = room.remoteParticipants.values
+            .toList()
+            .sortedBy { participant ->
+                participant.name?.takeIf { it.isNotBlank() }
+                    ?: participant.identity?.value?.takeIf { it.isNotBlank() }
+                    ?: participant.sid.value
+            }
+        val remoteItems = remoteParticipants.mapIndexed { index, participant ->
+            val participantIdentity = participant.identity?.value?.trim().orEmpty().takeIf { it.isNotBlank() }
+            val profile = participantIdentity?.let { participantsById[it] }
+            val title = profile?.name?.takeIf { it.isNotBlank() }
+                ?: resolveRemoteParticipantTitle(participant, index)
+            val participantKey = participant.sid.value.ifBlank { "${index + 1}" }
+            CallVideoFeedItem(
+                id = "remote-participant-$participantKey",
+                track = resolveRemoteLiveKitParticipantTrack(participant),
+                title = title,
+                isLocal = false,
+                userId = profile?.id ?: participantIdentity,
+                avatarUrl = profile?.avatarUrl
+            )
+        }
+        val localTitle = currentUserProfile?.name?.takeIf { it.isNotBlank() } ?: "Вы"
+        val localItem = CallVideoFeedItem(
+            id = "local-self",
+            track = uiState.localVideoTrack,
+            title = localTitle,
+            isLocal = true,
+            userId = currentUserProfile?.id,
+            avatarUrl = currentUserProfile?.avatarUrl
+        )
+        return remoteItems + localItem
+    }
+
+    val remoteTracks = buildList {
+        val seenTrackKeys = mutableSetOf<String>()
+        uiState.remoteVideoTracks.forEach { track ->
+            val key = callVideoTrackKey(track)
+            if (seenTrackKeys.add(key)) {
+                add(track)
+            }
+        }
+        uiState.remoteVideoTrack?.let { fallbackTrack ->
+            val fallbackKey = callVideoTrackKey(fallbackTrack)
+            if (seenTrackKeys.add(fallbackKey)) {
+                add(fallbackTrack)
+            }
+        }
+    }
+    val remoteItems = remoteTracks.mapIndexed { index, track ->
+        CallVideoFeedItem(
+            id = "remote-${callVideoTrackKey(track)}",
+            track = track,
+            title = "Участник ${index + 1}",
+            isLocal = false
+        )
+    }
+    val localItem = uiState.localVideoTrack?.let { localTrack ->
+        CallVideoFeedItem(
+            id = "local-${callVideoTrackKey(localTrack)}",
+            track = localTrack,
+            title = currentUserProfile?.name?.takeIf { it.isNotBlank() } ?: "Вы",
+            isLocal = true,
+            userId = currentUserProfile?.id,
+            avatarUrl = currentUserProfile?.avatarUrl
+        )
+    }
+    return if (localItem != null) remoteItems + localItem else remoteItems
+}
+
+private fun resolveRemoteParticipantTitle(participant: RemoteParticipant, index: Int): String {
+    val nameCandidate = participant.name?.trim().orEmpty()
+    if (!looksLikeTechnicalParticipantId(nameCandidate)) {
+        return nameCandidate
+    }
+    val identityCandidate = participant.identity?.value?.trim().orEmpty()
+    if (!looksLikeTechnicalParticipantId(identityCandidate)) {
+        return identityCandidate
+    }
+    return "Участник ${index + 1}"
+}
+
+private fun looksLikeTechnicalParticipantId(value: String): Boolean {
+    if (value.isBlank()) return true
+    val candidate = value.trim()
+    if (candidate.contains(' ')) return false
+    if (Regex("^[0-9a-fA-F]{24}$").matches(candidate)) return true
+    if (Regex("^[0-9a-fA-F\\-]{32,}$").matches(candidate)) return true
+    if (candidate.length >= 20 && candidate.none { it == '@' || it == '.' }) return true
+    return false
+}
+
+private fun resolveRemoteLiveKitParticipantTrack(
+    participant: RemoteParticipant
+): CallVideoTrack.LiveKit? {
+    var screenShareTrack: LiveKitMediaVideoTrack? = null
+    var cameraTrack: LiveKitMediaVideoTrack? = null
+    for (publication in extractLiveKitTrackPublications(participant.videoTrackPublications)) {
+        if (publication.muted) continue
+        val track = publication.track as? LiveKitMediaVideoTrack ?: continue
+        when (publication.source) {
+            LiveKitTrack.Source.SCREEN_SHARE -> if (screenShareTrack == null) {
+                screenShareTrack = track
+            }
+            LiveKitTrack.Source.CAMERA -> if (cameraTrack == null) {
+                cameraTrack = track
+            }
+            else -> if (cameraTrack == null) {
+                cameraTrack = track
+            }
+        }
+    }
+    val chosenTrack = screenShareTrack ?: cameraTrack ?: return null
+    return CallVideoTrack.LiveKit(chosenTrack)
+}
+
+private fun extractLiveKitTrackPublications(publications: Any?): List<LiveKitTrackPublication> {
+    return when (publications) {
+        null -> emptyList()
+        is LiveKitTrackPublication -> listOf(publications)
+        is Pair<*, *> -> listOfNotNull(
+            publications.first as? LiveKitTrackPublication,
+            publications.second as? LiveKitTrackPublication
+        )
+        is Map<*, *> -> publications.values.flatMap { extractLiveKitTrackPublications(it) }
+        is Iterable<*> -> publications.flatMap { extractLiveKitTrackPublications(it) }
+        is Array<*> -> publications.flatMap { extractLiveKitTrackPublications(it) }
+        else -> emptyList()
+    }.distinctBy { it.sid }
+}
+
 @Composable
 private fun ActiveCallOverlay(
     call: ActiveCallUi,
     uiState: CallUiState,
+    groupParticipants: List<UserProfile>,
+    currentUserProfile: UserProfile?,
+    remoteChatAvatarUrl: String?,
     onLeaveCall: () -> Unit,
     onToggleMinimize: () -> Unit,
     onInteraction: () -> Unit,
@@ -1344,6 +1984,53 @@ private fun ActiveCallOverlay(
         elapsedSeconds = elapsedSeconds
     )
     val subStatus = rememberCallSubStatus(call = call, uiState = uiState)
+    val isGroupVideoLayout = call.isGroup && call.type == "video"
+    val feedItems = remember(
+        uiState.remoteVideoTracks,
+        uiState.remoteVideoTrack,
+        uiState.localVideoTrack,
+        uiState.liveKitRoom,
+        groupParticipants,
+        currentUserProfile
+    ) {
+        buildCallVideoFeedItems(
+            uiState = uiState,
+            groupParticipants = groupParticipants,
+            currentUserProfile = currentUserProfile
+        )
+    }
+    var selectedFeedItemId by remember(call.callId) { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(feedItems) {
+        if (feedItems.none { it.id == selectedFeedItemId }) {
+            selectedFeedItemId = feedItems.firstOrNull { !it.isLocal }?.id ?: feedItems.firstOrNull()?.id
+        }
+    }
+    val selectedFeedItem = feedItems.firstOrNull { it.id == selectedFeedItemId }
+    val mainVideoItem = if (isGroupVideoLayout) {
+        selectedFeedItem ?: feedItems.firstOrNull()
+    } else {
+        val remoteTrack = uiState.remoteVideoTracks.firstOrNull() ?: uiState.remoteVideoTrack
+        when {
+            remoteTrack != null -> CallVideoFeedItem(
+                id = "remote-main-${callVideoTrackKey(remoteTrack)}",
+                track = remoteTrack,
+                title = call.chatName,
+                isLocal = false,
+                avatarUrl = remoteChatAvatarUrl
+            )
+
+            call.type == "video" -> CallVideoFeedItem(
+                id = "remote-main-missing-${call.callId}",
+                track = null,
+                title = call.chatName,
+                isLocal = false,
+                avatarUrl = remoteChatAvatarUrl
+            )
+
+            else -> null
+        }
+    }
 
     val pipWidth = 118.dp
     val pipHeight = 176.dp
@@ -1389,11 +2076,23 @@ private fun ActiveCallOverlay(
                 .background(Color(0xFF0B1220))
                 .clickable { onInteraction() }
         ) {
-            if (call.type == "video" && uiState.remoteVideoTrack != null && uiState.eglContext != null) {
-                WebRtcVideoView(
-                    track = uiState.remoteVideoTrack,
-                    eglContext = uiState.eglContext,
-                    mirror = false,
+            if (call.type == "video" && mainVideoItem?.track != null) {
+                CallVideoView(
+                    track = mainVideoItem.track,
+                    webRtcEglContext = uiState.eglContext,
+                    liveKitRoom = uiState.liveKitRoom,
+                    mirror = mainVideoItem.isLocal,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else if (call.type == "video" && mainVideoItem != null) {
+                CallParticipantVideoPlaceholder(
+                    title = mainVideoItem.title,
+                    avatarUrl = mainVideoItem.avatarUrl,
+                    subtitle = if (mainVideoItem.isLocal && !uiState.controls.isCameraEnabled) {
+                        "Камера выключена"
+                    } else {
+                        "Камера выключена"
+                    },
                     modifier = Modifier.fillMaxSize()
                 )
             } else {
@@ -1404,11 +2103,13 @@ private fun ActiveCallOverlay(
                 )
             }
 
-            if (call.type == "video" && uiState.localVideoTrack != null && uiState.eglContext != null) {
-                WebRtcVideoView(
+            if (!isGroupVideoLayout && call.type == "video" && uiState.localVideoTrack != null) {
+                CallVideoView(
                     track = uiState.localVideoTrack,
-                    eglContext = uiState.eglContext,
+                    webRtcEglContext = uiState.eglContext,
+                    liveKitRoom = uiState.liveKitRoom,
                     mirror = true,
+                    zOrderMediaOverlay = true,
                     modifier = Modifier
                         .offset { pipOffset }
                         .size(width = pipWidth, height = pipHeight)
@@ -1436,6 +2137,75 @@ private fun ActiveCallOverlay(
                         }
                         .clickable { onInteraction() }
                 )
+            }
+
+            if (isGroupVideoLayout && feedItems.isNotEmpty()) {
+                val thumbnailsBottomPadding = if (uiState.isControlsVisible) 116.dp else 20.dp
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .padding(start = 12.dp, end = 12.dp, bottom = thumbnailsBottomPadding)
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    feedItems.forEach { item ->
+                        val selected = item.id == selectedFeedItemId
+                        Surface(
+                            modifier = Modifier
+                                .size(width = 96.dp, height = 132.dp)
+                                .border(
+                                    width = if (selected) 2.dp else 1.dp,
+                                    color = if (selected) Color(0xFF60A5FA) else Color(0x66334155),
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable {
+                                    selectedFeedItemId = item.id
+                                    onInteraction()
+                                },
+                            color = Color(0xCC0F172A)
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                if (item.track != null) {
+                                    CallVideoView(
+                                        track = item.track,
+                                        webRtcEglContext = uiState.eglContext,
+                                        liveKitRoom = uiState.liveKitRoom,
+                                        mirror = item.isLocal,
+                                        zOrderMediaOverlay = true,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                } else {
+                                    CallParticipantVideoPlaceholder(
+                                        title = item.title,
+                                        avatarUrl = item.avatarUrl,
+                                        subtitle = "Камера выключена",
+                                        compact = true,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
+                                Surface(
+                                    color = Color(0xAA020617),
+                                    shape = RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp),
+                                    modifier = Modifier
+                                        .align(Alignment.BottomCenter)
+                                        .fillMaxWidth()
+                                ) {
+                                    Text(
+                                        text = item.title,
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             Surface(
@@ -1517,6 +2287,7 @@ private fun MinimizedCallWindow(
     onExpand: () -> Unit,
     onLeaveCall: () -> Unit
 ) {
+    val compactTrack = resolveCompactCallTrack(uiState)
     var offset by remember(call.callId) { mutableStateOf(androidx.compose.ui.unit.IntOffset.Zero) }
     var initialized by remember(call.callId) { mutableStateOf(false) }
 
@@ -1579,11 +2350,12 @@ private fun MinimizedCallWindow(
             color = Color(0xEE0F172A)
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
-                if (call.type == "video" && uiState.remoteVideoTrack != null && uiState.eglContext != null) {
-                    WebRtcVideoView(
-                        track = uiState.remoteVideoTrack,
-                        eglContext = uiState.eglContext,
-                        mirror = false,
+                if (call.type == "video" && compactTrack != null) {
+                    CallVideoView(
+                        track = compactTrack.track,
+                        webRtcEglContext = uiState.eglContext,
+                        liveKitRoom = uiState.liveKitRoom,
+                        mirror = compactTrack.isLocal,
                         modifier = Modifier.fillMaxSize()
                     )
                 }
@@ -1649,6 +2421,77 @@ private fun CallNoVideoPlaceholder(
                     style = MaterialTheme.typography.bodySmall
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun CallParticipantVideoPlaceholder(
+    title: String,
+    avatarUrl: String?,
+    subtitle: String,
+    compact: Boolean = false,
+    modifier: Modifier = Modifier
+) {
+    val avatarSize = if (compact) 34.dp else 56.dp
+    val titleStyle = if (compact) MaterialTheme.typography.labelSmall else MaterialTheme.typography.titleMedium
+    val subtitleStyle = if (compact) MaterialTheme.typography.labelSmall else MaterialTheme.typography.bodySmall
+    val resolvedAvatarUrl = remember(avatarUrl) { resolveAvatarUrl(avatarUrl) }
+    val avatarBitmap by produceState<ImageBitmap?>(initialValue = null, key1 = resolvedAvatarUrl) {
+        value = if (resolvedAvatarUrl == null) {
+            null
+        } else {
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    java.net.URL(resolvedAvatarUrl).openStream().use { stream ->
+                        BitmapFactory.decodeStream(stream)?.asImageBitmap()
+                    }
+                }.getOrNull()
+            }
+        }
+    }
+    Box(
+        modifier = modifier.background(Color(0xFF0F172A)),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                modifier = Modifier
+                    .size(avatarSize)
+                    .clip(CircleShape)
+                    .background(Color(0xFF334155)),
+                contentAlignment = Alignment.Center
+            ) {
+                if (avatarBitmap != null) {
+                    androidx.compose.foundation.Image(
+                        bitmap = avatarBitmap!!,
+                        contentDescription = title,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Text(
+                        text = title.firstOrNull()?.uppercase() ?: "?",
+                        color = Color.White,
+                        style = if (compact) MaterialTheme.typography.labelMedium else MaterialTheme.typography.titleLarge
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(if (compact) 4.dp else 10.dp))
+            Text(
+                text = title,
+                color = Color.White,
+                style = titleStyle,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = subtitle,
+                color = Color(0xFF94A3B8),
+                style = subtitleStyle,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }
@@ -1785,9 +2628,10 @@ private fun rememberCallSubStatus(
     uiState: CallUiState
 ): String {
     val labels = mutableListOf<String>()
+    val hasRemoteVideo = uiState.remoteVideoTracks.isNotEmpty() || uiState.remoteVideoTrack != null
     if (!uiState.controls.isMicrophoneEnabled) labels += "Микрофон выключен"
     if (call.type == "video" && !uiState.controls.isCameraEnabled) labels += "Камера выключена"
-    if (call.type == "video" && uiState.phase == CallUiPhase.Active && uiState.remoteVideoTrack == null) {
+    if (call.type == "video" && uiState.phase == CallUiPhase.Active && !hasRemoteVideo) {
         labels += "Видео собеседника недоступно"
     }
     if (uiState.phase == CallUiPhase.Reconnecting) labels += "Восстанавливаем соединение"
@@ -1813,37 +2657,74 @@ private fun clampFloatingOffset(
 }
 
 @Composable
-private fun WebRtcVideoView(
-    track: VideoTrack,
-    eglContext: EglBase.Context,
+private fun CallVideoView(
+    track: CallVideoTrack,
+    webRtcEglContext: EglBase.Context?,
+    liveKitRoom: Room?,
     mirror: Boolean,
+    zOrderMediaOverlay: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    // Use a key to force full recreation when track or eglContext changes,
-    // ensuring SurfaceViewRenderer.init() is never called twice on the same instance.
-    val trackId = remember(track) { System.identityHashCode(track) }
-    val eglId = remember(eglContext) { System.identityHashCode(eglContext) }
-    androidx.compose.runtime.key(trackId, eglId) {
-        AndroidView(
-            factory = { ctx ->
-                SurfaceViewRenderer(ctx).apply {
-                    setEnableHardwareScaler(true)
-                    setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
-                    init(eglContext, null)
-                    setMirror(mirror)
-                    setZOrderMediaOverlay(mirror)
-                    track.addSink(this)
-                }
-            },
-            update = { renderer ->
-                renderer.setMirror(mirror)
-            },
-            onRelease = { renderer ->
-                runCatching { track.removeSink(renderer) }
-                runCatching { renderer.release() }
-            },
-            modifier = modifier
-        )
+    when (track) {
+        is CallVideoTrack.WebRtc -> {
+            val eglContext = webRtcEglContext ?: return
+            val webRtcTrack = track.track
+            val trackId = remember(webRtcTrack) { System.identityHashCode(webRtcTrack) }
+            val eglId = remember(eglContext) { System.identityHashCode(eglContext) }
+            androidx.compose.runtime.key(trackId, eglId) {
+                AndroidView(
+                    factory = { ctx ->
+                        WebRtcSurfaceViewRenderer(ctx).apply {
+                            setEnableHardwareScaler(true)
+                            setScalingType(WebRtcRendererCommon.ScalingType.SCALE_ASPECT_FILL)
+                            init(eglContext, null)
+                            setMirror(mirror)
+                            setZOrderMediaOverlay(zOrderMediaOverlay)
+                            webRtcTrack.addSink(this)
+                        }
+                    },
+                    update = { renderer ->
+                        renderer.setMirror(mirror)
+                        renderer.setZOrderMediaOverlay(zOrderMediaOverlay)
+                    },
+                    onRelease = { renderer ->
+                        runCatching { webRtcTrack.removeSink(renderer) }
+                        runCatching { renderer.release() }
+                    },
+                    modifier = modifier
+                )
+            }
+        }
+
+        is CallVideoTrack.LiveKit -> {
+            val room = liveKitRoom ?: return
+            val liveKitTrack = track.track
+            val trackId = remember(liveKitTrack) { System.identityHashCode(liveKitTrack) }
+            val roomId = remember(room) { System.identityHashCode(room) }
+            androidx.compose.runtime.key(trackId, roomId) {
+                AndroidView(
+                    factory = { ctx ->
+                        LiveKitSurfaceViewRenderer(ctx).apply {
+                            setEnableHardwareScaler(true)
+                            setScalingType(LiveKitRendererCommon.ScalingType.SCALE_ASPECT_FILL)
+                            room.initVideoRenderer(this)
+                            setMirror(mirror)
+                            setZOrderMediaOverlay(zOrderMediaOverlay)
+                            liveKitTrack.addRenderer(this)
+                        }
+                    },
+                    update = { renderer ->
+                        renderer.setMirror(mirror)
+                        renderer.setZOrderMediaOverlay(zOrderMediaOverlay)
+                    },
+                    onRelease = { renderer ->
+                        runCatching { liveKitTrack.removeRenderer(renderer) }
+                        runCatching { renderer.release() }
+                    },
+                    modifier = modifier
+                )
+            }
+        }
     }
 }
 
@@ -1976,12 +2857,15 @@ private fun MessageBody(
 }
 
 @Composable
-private fun AvatarBubble(title: String) {
+private fun AvatarBubble(
+    title: String,
+    background: Color = Color(0xFF3B82F6)
+) {
     Box(
         modifier = Modifier
             .size(38.dp)
             .clip(CircleShape)
-            .background(Color(0xFF3B82F6)),
+            .background(background),
         contentAlignment = Alignment.Center
     ) {
         Text(

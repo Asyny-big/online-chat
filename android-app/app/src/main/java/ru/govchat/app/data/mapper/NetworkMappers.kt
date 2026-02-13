@@ -60,6 +60,13 @@ fun ChatDto.toDomain(): ChatPreview {
     )
 }
 
+fun ChatDto.toParticipantsDomain(): List<UserProfile> {
+    return participants
+        .mapNotNull { it.user.toUserProfileOrNull() }
+        .filter { it.id.isNotBlank() }
+        .distinctBy { it.id }
+}
+
 fun MessageDto.toDomain(chatIdFallback: String): ChatMessage {
     val senderId = sender?.id.orEmpty()
     val senderName = sender?.name.orEmpty()
@@ -144,4 +151,37 @@ private fun List<ReadByDto>.extractReadByIds(): Set<String> {
             else -> null
         }
     }.toSet()
+}
+
+private fun Any?.toUserProfileOrNull(): UserProfile? {
+    return when (this) {
+        is Map<*, *> -> {
+            val id = (this["_id"] as? String) ?: (this["id"] as? String) ?: return null
+            val name = (this["name"] as? String).orEmpty()
+            val phone = (this["phone"] as? String).orEmpty()
+            val avatarUrl = (this["avatarUrl"] as? String)
+                ?: (this["avatar"] as? String)
+            UserProfile(
+                id = id,
+                name = name,
+                phone = phone,
+                avatarUrl = avatarUrl
+            )
+        }
+
+        is JSONObject -> {
+            val id = optString("_id").takeIf { it.isNotBlank() }
+                ?: optString("id").takeIf { it.isNotBlank() }
+                ?: return null
+            UserProfile(
+                id = id,
+                name = optString("name"),
+                phone = optString("phone"),
+                avatarUrl = optString("avatarUrl").takeIf { it.isNotBlank() }
+                    ?: optString("avatar").takeIf { it.isNotBlank() }
+            )
+        }
+
+        else -> null
+    }
 }

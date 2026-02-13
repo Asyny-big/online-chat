@@ -17,6 +17,7 @@ android {
         versionName = "1.0"
         buildConfigField("String", "API_BASE_URL", "\"https://govchat.ru/api/\"")
         buildConfigField("String", "SOCKET_BASE_URL", "\"https://govchat.ru\"")
+        buildConfigField("String", "LIVEKIT_URL", "\"wss://govchat.ru/rtc\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -70,6 +71,9 @@ dependencies {
     }
     implementation(libs.firebase.messaging)
     implementation(libs.google.webrtc)
+    implementation(libs.livekit.android)
+    implementation(libs.ktor.client.okhttp)
+    implementation(libs.ktor.client.websockets)
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
