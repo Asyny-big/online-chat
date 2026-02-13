@@ -1,15 +1,15 @@
 <resources>
     <string name="app_name">GovChat</string>
-    <string name="notifications_channel_calls">Calls</string>
-    <string name="notifications_channel_calls_desc">Active and incoming GovChat calls</string>
-    <string name="notifications_channel_messages">Messages</string>
-    <string name="notifications_channel_messages_desc">New GovChat messages and events</string>
-    <string name="call_service_notification_title">GovChat call is active</string>
-    <string name="push_call_title">Incoming call</string>
-    <string name="push_group_call_title">Incoming group call</string>
-    <string name="push_call_body">Open GovChat to answer</string>
-    <string name="push_message_title">New message</string>
-    <string name="push_message_body">Open GovChat to read it</string>
-    <string name="notification_call_accept">Accept</string>
-    <string name="notification_call_decline">Decline</string>
+    <string name="notifications_channel_calls">Звонки</string>
+    <string name="notifications_channel_calls_desc">Активные и входящие звонки GovChat</string>
+    <string name="notifications_channel_messages">Сообщения</string>
+    <string name="notifications_channel_messages_desc">Новые сообщения и события GovChat</string>
+    <string name="call_service_notification_title">Звонок GovChat активен</string>
+    <string name="push_call_title">Входящий звонок</string>
+    <string name="push_group_call_title">Входящий групповой звонок</string>
+    <string name="push_call_body">Откройте GovChat, чтобы ответить</string>
+    <string name="push_message_title">Новое сообщение</string>
+    <string name="push_message_body">Откройте GovChat, чтобы прочитать</string>
+    <string name="notification_call_accept">Принять</string>
+    <string name="notification_call_decline">Отклонить</string>
 </resources>

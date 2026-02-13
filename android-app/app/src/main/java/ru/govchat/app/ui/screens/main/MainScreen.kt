@@ -24,6 +24,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -303,7 +304,6 @@ fun MainScreen(
             return@LaunchedEffect
         }
         lastIncomingCallId = incoming.callId
-        IncomingCallNotifications.show(context, incoming)
     }
 
     LaunchedEffect(state.activeCall?.callId, callUiState.controls.isScreenSharing) {
@@ -2212,11 +2212,31 @@ private fun IncomingCallBanner(
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onDecline, enabled = !isBusy) {
+                Button(
+                    onClick = onDecline,
+                    enabled = !isBusy,
+                    shape = CircleShape,
+                    contentPadding = PaddingValues(0.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFDC2626),
+                        contentColor = Color.White
+                    ),
+                    modifier = Modifier.size(40.dp)
+                ) {
                     Text("✕", color = Color.White)
                 }
-                TextButton(onClick = onAccept, enabled = !isBusy) {
-                    Text(if (incoming.type == "video") "🎥" else "📞")
+                Button(
+                    onClick = onAccept,
+                    enabled = !isBusy,
+                    shape = CircleShape,
+                    contentPadding = PaddingValues(0.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF16A34A),
+                        contentColor = Color.White
+                    ),
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Text(if (incoming.type == "video") "📹" else "📞", color = Color.White)
                 }
             }
         }

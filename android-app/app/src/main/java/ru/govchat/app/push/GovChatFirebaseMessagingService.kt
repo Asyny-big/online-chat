@@ -11,6 +11,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import ru.govchat.app.GovChatApp
 import ru.govchat.app.MainActivity
 import ru.govchat.app.R
@@ -34,6 +35,8 @@ class GovChatFirebaseMessagingService : FirebaseMessagingService() {
         if (payload.isEmpty()) return
 
         val eventType = payload.read("eventType", "event_type")
+        if (shouldSkipNotificationForCurrentUser(payload, eventType)) return
+
         val title = payload.read("title")
         val body = payload.read("body", "text", "message")
 
@@ -129,6 +132,46 @@ class GovChatFirebaseMessagingService : FirebaseMessagingService() {
     private fun Map<String, String>.readBoolean(vararg keys: String): Boolean {
         val raw = read(*keys).lowercase()
         return raw == "true" || raw == "1"
+    }
+
+    private fun shouldSkipNotificationForCurrentUser(
+        payload: Map<String, String>,
+        eventType: String
+    ): Boolean {
+        val app = application as? GovChatApp ?: return false
+        val currentUserId = runBlocking { app.container.sessionStorage.getUserId().orEmpty() }
+        if (currentUserId.isBlank()) return false
+
+        val recipientId = payload.read(
+            "recipientId",
+            "recipient_id",
+            "targetUserId",
+            "target_user_id",
+            "toUserId",
+            "to_user_id",
+            "userId",
+            "user_id"
+        )
+        if (recipientId.isNotBlank() && recipientId != currentUserId) {
+            return true
+        }
+
+        val actorId = when (eventType) {
+            "incoming_call", "incoming_group_call" -> payload.read(
+                "initiatorId",
+                "initiator_id",
+                "senderId",
+                "sender_id"
+            )
+            else -> payload.read(
+                "senderId",
+                "sender_id",
+                "fromUserId",
+                "from_user_id"
+            )
+        }
+
+        return actorId.isNotBlank() && actorId == currentUserId
     }
 
     private companion object {

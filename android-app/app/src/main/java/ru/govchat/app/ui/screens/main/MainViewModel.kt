@@ -790,6 +790,10 @@ class MainViewModel(
                     if (mutableState.value.activeCall != null) {
                         return@collect
                     }
+                    val currentUserId = mutableState.value.currentUserId
+                    if (event.initiatorId.isNotBlank() && event.initiatorId == currentUserId) {
+                        return@collect
+                    }
                     val incoming = IncomingCallUi(
                         callId = event.callId,
                         chatId = event.chatId,
@@ -799,7 +803,7 @@ class MainViewModel(
                         type = event.type.ifBlank { "audio" },
                         isGroup = event.isGroup,
                         initiatorId = event.initiatorId,
-                        initiatorName = event.initiatorName.ifBlank { "Contact" },
+                        initiatorName = event.initiatorName.ifBlank { "Контакт" },
                         participantCount = event.participantCount
                     )
                     mutableState.update {
