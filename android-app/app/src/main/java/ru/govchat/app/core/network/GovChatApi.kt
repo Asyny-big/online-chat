@@ -49,6 +49,9 @@ interface GovChatApi {
     @POST("devices/register")
     suspend fun registerDeviceToken(@Body request: DeviceRegisterRequest): ApiSuccessResponse
 
+    @POST("devices/unregister")
+    suspend fun unregisterDeviceToken(@Body request: DeviceUnregisterRequest): ApiSuccessResponse
+
     @POST("chats/private")
     suspend fun createPrivateChat(@Body request: CreateChatRequest): ChatDto
 
@@ -151,6 +154,10 @@ data class DeviceRegisterRequest(
     val token: String,
     val platform: String = "android",
     val appVersion: String = ""
+)
+
+data class DeviceUnregisterRequest(
+    val token: String
 )
 
 data class ApiSuccessResponse(

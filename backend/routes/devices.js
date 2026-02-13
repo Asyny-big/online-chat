@@ -43,4 +43,24 @@ router.post('/register', async (req, res) => {
   }
 });
 
+// POST /api/devices/unregister
+router.post('/unregister', async (req, res) => {
+  try {
+    const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+    if (!token) {
+      return res.status(400).json({ error: 'token is required' });
+    }
+
+    await UserDevice.deleteOne({
+      userId: req.userId,
+      token
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('POST /api/devices/unregister error:', error);
+    res.status(500).json({ error: 'Failed to unregister device' });
+  }
+});
+
 module.exports = router;

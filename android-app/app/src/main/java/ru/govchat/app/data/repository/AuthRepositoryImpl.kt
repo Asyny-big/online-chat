@@ -2,6 +2,7 @@ package ru.govchat.app.data.repository
 
 import retrofit2.HttpException
 import ru.govchat.app.core.network.extractMessageField
+import ru.govchat.app.core.network.DeviceUnregisterRequest
 import ru.govchat.app.core.network.GovChatApi
 import ru.govchat.app.core.network.LoginRequest
 import ru.govchat.app.core.network.RegisterRequest
@@ -78,6 +79,14 @@ class AuthRepositoryImpl(
     }
 
     override suspend fun logout() {
+        val fcmToken = sessionStorage.getCurrentFcmToken()
+        if (!fcmToken.isNullOrBlank()) {
+            runCatching {
+                api.unregisterDeviceToken(
+                    request = DeviceUnregisterRequest(token = fcmToken)
+                )
+            }
+        }
         sessionStorage.clearToken()
     }
 

@@ -22,9 +22,11 @@ class NotificationService {
       body: (text || '').trim() || 'Новое сообщение',
       data: {
         type: MESSAGE_TYPE.MESSAGE,
+        eventType: MESSAGE_TYPE.MESSAGE,
         chatId: String(chat?._id || ''),
         messageId: String(message?._id || ''),
         senderName: senderName || '',
+        senderId: String(senderId || ''),
         roomId: ''
       }
     });
@@ -39,9 +41,11 @@ class NotificationService {
       body: `${senderName || 'Участник'}: ${(text || '').trim() || 'Новое сообщение'}`,
       data: {
         type: MESSAGE_TYPE.GROUP_MESSAGE,
+        eventType: MESSAGE_TYPE.GROUP_MESSAGE,
         chatId: String(chat?._id || ''),
         messageId: String(message?._id || ''),
         senderName: senderName || '',
+        senderId: String(senderId || ''),
         roomId: ''
       }
     });
@@ -62,9 +66,11 @@ class NotificationService {
       body,
       data: {
         type: MESSAGE_TYPE.ATTACHMENT,
+        eventType: MESSAGE_TYPE.ATTACHMENT,
         chatId: String(chat?._id || ''),
         messageId: String(message?._id || ''),
         senderName: senderName || '',
+        senderId: String(senderId || ''),
         roomId: ''
       }
     });

@@ -29,6 +29,7 @@ class SessionStorage(
         val jwtToken = stringPreferencesKey("jwt_token")
         val userId = stringPreferencesKey("user_id")
         val pendingFcmToken = stringPreferencesKey("pending_fcm_token")
+        val currentFcmToken = stringPreferencesKey("current_fcm_token")
     }
 
     private val tokenState = MutableStateFlow<String?>(null)
@@ -95,5 +96,17 @@ class SessionStorage(
         appContext.sessionDataStore.edit { preferences ->
             preferences.remove(Keys.pendingFcmToken)
         }
+    }
+
+    suspend fun saveCurrentFcmToken(token: String) {
+        appContext.sessionDataStore.edit { preferences ->
+            preferences[Keys.currentFcmToken] = token
+        }
+    }
+
+    suspend fun getCurrentFcmToken(): String? {
+        return appContext.sessionDataStore.data
+            .map { it[Keys.currentFcmToken] }
+            .first()
     }
 }
