@@ -10,6 +10,8 @@ import io.livekit.android.LiveKit
 import io.livekit.android.events.collect as collectEvents
 import io.livekit.android.events.RoomEvent
 import io.livekit.android.room.Room
+import io.livekit.android.room.track.CameraPosition
+import io.livekit.android.room.track.LocalVideoTrack
 import io.livekit.android.room.track.Track
 import io.livekit.android.room.track.TrackPublication
 import io.livekit.android.room.track.screencapture.ScreenCaptureParams
@@ -139,7 +141,7 @@ class CallManager(
                     isMicrophoneEnabled = true,
                     isCameraEnabled = isVideo,
                     isUsingFrontCamera = true,
-                    canSwitchCamera = false,
+                    canSwitchCamera = isVideo,
                     isScreenShareSupported = isVideo && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP,
                     isScreenSharing = false
                 )
@@ -165,7 +167,7 @@ class CallManager(
                 controls = it.controls.copy(
                     isMicrophoneEnabled = true,
                     isCameraEnabled = type == "video",
-                    canSwitchCamera = false,
+                    canSwitchCamera = type == "video",
                     isScreenShareSupported = type == "video" && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP,
                     isScreenSharing = false
                 )
@@ -245,10 +247,11 @@ class CallManager(
     }
 
     suspend fun switchCamera(): Result<Unit> {
-        if (mediaEngine != MediaEngine.WebRtc) {
-            return Result.failure(IllegalStateException("Camera switch is unavailable"))
+        val result = when (mediaEngine) {
+            MediaEngine.WebRtc -> webRtcController.switchCamera()
+            MediaEngine.LiveKit -> liveKitController.switchCamera()
+            MediaEngine.None -> Result.failure(IllegalStateException("Camera switch is unavailable"))
         }
-        val result = webRtcController.switchCamera()
         return result.fold(
             onSuccess = { isFront ->
                 mutableState.update {
@@ -443,7 +446,7 @@ private class InternalLiveKitController(
             isMicrophoneEnabled = true,
             isCameraEnabled = isVideo,
             isUsingFrontCamera = true,
-            canSwitchCamera = false,
+            canSwitchCamera = isVideo,
             isScreenShareSupported = canScreenShare,
             isScreenSharing = false,
             localVideoTrack = null,
@@ -475,7 +478,7 @@ private class InternalLiveKitController(
                     isMicrophoneEnabled = true,
                     isCameraEnabled = isVideo,
                     isUsingFrontCamera = true,
-                    canSwitchCamera = false,
+                    canSwitchCamera = isVideo,
                     isScreenShareSupported = canScreenShare,
                     isScreenSharing = false,
                     liveKitRoom = nextRoom
@@ -519,6 +522,40 @@ private class InternalLiveKitController(
             true
         } catch (_: Throwable) {
             false
+        }
+    }
+
+    suspend fun switchCamera(): Result<Boolean> = withContext(Dispatchers.Main.immediate) {
+        val activeRoom = room ?: return@withContext Result.failure(
+            IllegalStateException("Camera switch is unavailable")
+        )
+        if (!isVideoSession) {
+            return@withContext Result.failure(IllegalStateException("Camera switch is unavailable"))
+        }
+
+        val publication = activeRoom.localParticipant.getTrackPublication(Track.Source.CAMERA)
+        val localTrack = publication?.track as? LocalVideoTrack
+            ?: return@withContext Result.failure(IllegalStateException("Local camera track is unavailable"))
+        val targetPosition = if (mutableState.value.isUsingFrontCamera) {
+            CameraPosition.BACK
+        } else {
+            CameraPosition.FRONT
+        }
+
+        return@withContext runCatching {
+            localTrack.switchCamera(position = targetPosition)
+            val isFront = targetPosition == CameraPosition.FRONT
+            mutableState.update {
+                it.copy(
+                    isUsingFrontCamera = isFront,
+                    canSwitchCamera = true
+                )
+            }
+            refreshTracks(
+                reason = "switchCamera:$targetPosition",
+                activeRoom = activeRoom
+            )
+            isFront
         }
     }
 

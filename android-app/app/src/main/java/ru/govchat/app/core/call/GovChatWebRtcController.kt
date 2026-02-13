@@ -81,6 +81,8 @@ class GovChatWebRtcController(
     private var cameraEnabled: Boolean = true
     private var usingFrontCamera: Boolean = true
     private var canSwitchCamera: Boolean = false
+    private var frontCameraDeviceName: String? = null
+    private var backCameraDeviceName: String? = null
     private var hasSentInitialOffer: Boolean = false
     private var isScreenShareSupported: Boolean = false
     private var isScreenSharing: Boolean = false
@@ -420,6 +422,14 @@ class GovChatWebRtcController(
         logStep("switchCamera:begin")
         val capturer = cameraVideoCapturer
             ?: return@withContext Result.failure(IllegalStateException("Camera switch is unavailable"))
+        val targetDeviceName = if (usingFrontCamera) {
+            backCameraDeviceName
+        } else {
+            frontCameraDeviceName
+        }
+        if (targetDeviceName.isNullOrBlank()) {
+            return@withContext Result.failure(IllegalStateException("No alternate camera is available"))
+        }
 
         suspendCancellableCoroutine { continuation ->
             capturer.switchCamera(object : CameraVideoCapturer.CameraSwitchHandler {
@@ -442,7 +452,7 @@ class GovChatWebRtcController(
                         )
                     }
                 }
-            })
+            }, targetDeviceName)
         }
     }
 
@@ -485,6 +495,8 @@ class GovChatWebRtcController(
         if (!isVideo) {
             videoTrack = null
             cameraVideoCapturer = null
+            frontCameraDeviceName = null
+            backCameraDeviceName = null
             canSwitchCamera = false
             return
         }
@@ -494,6 +506,8 @@ class GovChatWebRtcController(
             cameraEnabled = false
             videoTrack = null
             cameraVideoCapturer = null
+            frontCameraDeviceName = null
+            backCameraDeviceName = null
             canSwitchCamera = false
             return
         }
@@ -501,8 +515,10 @@ class GovChatWebRtcController(
         val capturer = capturerSetup.capturer
         videoCapturer = capturer
         cameraVideoCapturer = capturer
+        frontCameraDeviceName = capturerSetup.frontDeviceName
+        backCameraDeviceName = capturerSetup.backDeviceName
         usingFrontCamera = capturerSetup.isFrontFacing
-        canSwitchCamera = true
+        canSwitchCamera = !frontCameraDeviceName.isNullOrBlank() && !backCameraDeviceName.isNullOrBlank()
 
         if (surfaceTextureHelper == null) {
             logStep("createLocalMedia:before SurfaceTextureHelper.create(camera)")
@@ -525,6 +541,8 @@ class GovChatWebRtcController(
             videoSource = null
             videoTrack = null
             cameraEnabled = false
+            frontCameraDeviceName = null
+            backCameraDeviceName = null
             canSwitchCamera = false
             logStep("createLocalMedia:camera capture failed, video disabled")
             return
@@ -682,24 +700,37 @@ class GovChatWebRtcController(
         ensureMainThread("createVideoCapturer")
         val camera2 = Camera2Enumerator.isSupported(appContext)
         val enumerator = if (camera2) Camera2Enumerator(appContext) else Camera1Enumerator(false)
+        val deviceNames = enumerator.deviceNames.toList()
+        val frontCandidates = deviceNames.filter { enumerator.isFrontFacing(it) }
+        val backCandidates = deviceNames.filter { enumerator.isBackFacing(it) }
+        val front = selectPreferredCameraDevice(frontCandidates)
+        val back = selectPreferredCameraDevice(backCandidates)
+        val preferred = front ?: back ?: return null
 
-        val front = enumerator.deviceNames.firstOrNull { enumerator.isFrontFacing(it) }
-        if (front != null) {
-            val capturer = enumerator.createCapturer(front, null) as? CameraVideoCapturer
-            if (capturer != null) {
-                return CameraCapturerSetup(capturer = capturer, isFrontFacing = true)
-            }
+        val capturer = enumerator.createCapturer(preferred, null) as? CameraVideoCapturer
+        if (capturer != null) {
+            return CameraCapturerSetup(
+                capturer = capturer,
+                isFrontFacing = enumerator.isFrontFacing(preferred),
+                frontDeviceName = front,
+                backDeviceName = back
+            )
         }
-
-        val back = enumerator.deviceNames.firstOrNull { enumerator.isBackFacing(it) }
-        if (back != null) {
-            val capturer = enumerator.createCapturer(back, null) as? CameraVideoCapturer
-            if (capturer != null) {
-                return CameraCapturerSetup(capturer = capturer, isFrontFacing = false)
-            }
-        }
-
         return null
+    }
+
+    private fun selectPreferredCameraDevice(candidates: List<String>): String? {
+        if (candidates.isEmpty()) return null
+        return candidates
+            .sortedWith(
+                compareBy<String> { extractNumericCameraId(it) ?: Int.MAX_VALUE }
+                    .thenBy { it }
+            )
+            .firstOrNull()
+    }
+
+    private fun extractNumericCameraId(value: String): Int? {
+        return "\\d+".toRegex().find(value)?.value?.toIntOrNull()
     }
 
     private suspend fun PeerConnection.createOfferSdp(isVideo: Boolean): SessionDescription {
@@ -874,6 +905,8 @@ class GovChatWebRtcController(
         cameraEnabled = true
         usingFrontCamera = true
         canSwitchCamera = false
+        frontCameraDeviceName = null
+        backCameraDeviceName = null
         hasSentInitialOffer = false
         isScreenShareSupported = false
         isScreenSharing = false
@@ -964,7 +997,9 @@ class GovChatWebRtcController(
 
     private data class CameraCapturerSetup(
         val capturer: CameraVideoCapturer,
-        val isFrontFacing: Boolean
+        val isFrontFacing: Boolean,
+        val frontDeviceName: String?,
+        val backDeviceName: String?
     )
 
     private fun logStep(step: String) {

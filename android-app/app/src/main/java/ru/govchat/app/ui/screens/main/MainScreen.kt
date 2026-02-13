@@ -9,6 +9,7 @@ import android.os.Build
 import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
@@ -363,7 +364,6 @@ fun MainScreen(
                         onSendText = onSendText,
                         onInputChanged = onInputChanged,
                         onSendAttachment = onSendAttachment,
-                        onRequestAttach = { openPicker -> openPicker() },
                         onStartCall = { type ->
                             requestCallPermissions(type) {
                                 onStartCall(type)
@@ -1779,7 +1779,6 @@ private fun ChatContent(
     onSendText: (String) -> Unit,
     onInputChanged: (String) -> Unit,
     onSendAttachment: (Uri) -> Unit,
-    onRequestAttach: ((() -> Unit) -> Unit),
     onStartCall: (String) -> Unit,
     onStartGroupCall: (String) -> Unit,
     onAcceptIncomingCall: () -> Unit,
@@ -1793,14 +1792,19 @@ private fun ChatContent(
     var selectedFileName by remember(chat.id) { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
 
-    val openFileLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri != null) {
-            selectedFileName = context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+    val openMediaLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 20)
+    ) { uris ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        selectedFileName = if (uris.size == 1) {
+            context.contentResolver.query(uris.first(), null, null, null, null)?.use { cursor ->
                 val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                 if (cursor.moveToFirst() && index >= 0) cursor.getString(index) else null
             }
+        } else {
+            "Выбрано медиа: ${uris.size}"
+        }
+        uris.forEach { uri ->
             onSendAttachment(uri)
         }
     }
@@ -2086,9 +2090,11 @@ private fun ChatContent(
                 // Attachment button
                 IconButton(
                     onClick = {
-                        onRequestAttach {
-                            openFileLauncher.launch(arrayOf("*/*"))
-                        }
+                        openMediaLauncher.launch(
+                            PickVisualMediaRequest(
+                                ActivityResultContracts.PickVisualMedia.ImageAndVideo
+                            )
+                        )
                     },
                     modifier = Modifier.size(40.dp)
                 ) {
