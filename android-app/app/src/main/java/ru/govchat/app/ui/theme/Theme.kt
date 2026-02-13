@@ -16,7 +16,11 @@ private val DarkColorScheme = darkColorScheme(
     onSurface = GovText,
     surfaceVariant = GovSurfaceAlt,
     onSurfaceVariant = GovTextSecondary,
-    error = GovError
+    error = GovError,
+    surfaceContainer = GovHeaderBar,
+    outline = GovDivider,
+    tertiary = GovAccent,
+    tertiaryContainer = GovInputBg
 )
 
 private val LightColorScheme = lightColorScheme(
@@ -30,7 +34,11 @@ private val LightColorScheme = lightColorScheme(
     onSurface = GovText,
     surfaceVariant = GovSurfaceAlt,
     onSurfaceVariant = GovTextSecondary,
-    error = GovError
+    error = GovError,
+    surfaceContainer = GovHeaderBar,
+    outline = GovDivider,
+    tertiary = GovAccent,
+    tertiaryContainer = GovInputBg
 )
 
 @Composable
