@@ -199,6 +199,7 @@ function CallModal({
   const remoteVideoRef = useRef(null);
   const peerConnectionRef = useRef(null);
   const localStreamRef = useRef(null);
+  const remoteStreamRef = useRef(new MediaStream());
   const screenStreamRef = useRef(null);
   const timerRef = useRef(null);
   const ringtoneRef = useRef(null);
@@ -363,6 +364,18 @@ function CallModal({
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;
     }
+
+    if (remoteStreamRef.current) {
+      try {
+        remoteStreamRef.current.getTracks().forEach((track) => {
+          remoteStreamRef.current.removeTrack(track);
+        });
+      } catch (e) {}
+    }
+
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = null;
+    }
     
     pendingCandidatesRef.current = [];
     setHasLocalStream(false);
@@ -440,6 +453,25 @@ function CallModal({
         remoteVideoRef.current.srcObject = remoteStream;
         setHasRemoteStream(true);
         console.log('[CallModal] Remote video srcObject set');
+        return;
+      }
+
+      // Native clients can send streamless tracks (event.streams = []).
+      // Build a synthetic MediaStream so browser UI still renders remote media.
+      if (event.track && remoteVideoRef.current) {
+        const fallbackStream = remoteStreamRef.current || new MediaStream();
+        remoteStreamRef.current = fallbackStream;
+
+        const alreadyAdded = fallbackStream.getTracks().some((track) => track.id === event.track.id);
+        if (!alreadyAdded) {
+          fallbackStream.addTrack(event.track);
+        }
+
+        if (remoteVideoRef.current.srcObject !== fallbackStream) {
+          remoteVideoRef.current.srcObject = fallbackStream;
+        }
+        setHasRemoteStream(true);
+        console.log('[CallModal] Remote track attached via fallback stream:', event.track.kind, event.track.id);
       }
     };
     

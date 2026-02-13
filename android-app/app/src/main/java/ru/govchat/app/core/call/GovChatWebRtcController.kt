@@ -556,15 +556,19 @@ class GovChatWebRtcController(
 
         videoTrack?.let { localVideoTrack ->
             localVideoTrack.setEnabled(cameraEnabled)
-            val videoTransceiver = runCatching {
-                logStep("attachLocalTracks:before addTransceiver(video)")
-                peerConnection.addTransceiver(localVideoTrack, transceiverInit)
-            }.getOrNull()
-            if (videoTransceiver != null) {
-                videoRtpSender = videoTransceiver.sender
-            } else {
+            val videoSender = runCatching {
+                // Prefer addTrack for better browser interoperability in answer flow (P2P web <-> android).
                 logStep("attachLocalTracks:before addTrack(video)")
-                videoRtpSender = peerConnection.addTrack(localVideoTrack, localStreamIds)
+                peerConnection.addTrack(localVideoTrack, localStreamIds)
+            }.getOrNull()
+            if (videoSender != null) {
+                videoRtpSender = videoSender
+            } else {
+                val videoTransceiver = runCatching {
+                    logStep("attachLocalTracks:before addTransceiver(video)")
+                    peerConnection.addTransceiver(localVideoTrack, transceiverInit)
+                }.getOrNull()
+                videoRtpSender = videoTransceiver?.sender
             }
         }
     }

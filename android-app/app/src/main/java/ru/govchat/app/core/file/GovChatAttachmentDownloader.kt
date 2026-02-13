@@ -6,9 +6,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.net.Uri
-import android.os.Build
 import android.os.Environment
 import android.webkit.MimeTypeMap
+import androidx.core.content.ContextCompat
 import ru.govchat.app.BuildConfig
 import ru.govchat.app.domain.model.MessageAttachment
 import ru.govchat.app.domain.model.MessageType
@@ -61,12 +61,12 @@ class GovChatAttachmentDownloader(
         if (!receiverRegistered.compareAndSet(false, true)) return
 
         val filter = IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            appContext.registerReceiver(downloadReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            @Suppress("DEPRECATION")
-            appContext.registerReceiver(downloadReceiver, filter)
-        }
+        ContextCompat.registerReceiver(
+            appContext,
+            downloadReceiver,
+            filter,
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
     }
 
     private val downloadReceiver = object : BroadcastReceiver() {

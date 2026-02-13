@@ -15,6 +15,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -42,11 +44,22 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Cached
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DesktopWindows
 import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.VideocamOff
 import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.GroupAdd
@@ -74,14 +87,20 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.geometry.Offset
@@ -1464,12 +1483,33 @@ private fun ChatContent(
             modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .background(Color(0xFF1E293B))
-                .padding(horizontal = 8.dp, vertical = 10.dp),
+                .background(
+                    Brush.horizontalGradient(
+                        listOf(
+                            Color(0xFF132238),
+                            Color(0xFF1B2E48),
+                            Color(0xFF15263D)
+                        )
+                    )
+                )
+                .padding(horizontal = 10.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            TextButton(onClick = onBack) {
-                Text("Назад")
+            Surface(
+                color = Color(0x26FFFFFF),
+                shape = CircleShape,
+                modifier = Modifier
+                    .size(38.dp)
+                    .border(1.dp, Color(0x30FFFFFF), CircleShape)
+                    .clickable(onClick = onBack)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "К списку чатов",
+                        tint = Color.White
+                    )
+                }
             }
             AvatarBubble(
                 title = chat.title,
@@ -1507,24 +1547,34 @@ private fun ChatContent(
                 }
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (chat.type == ChatType.GROUP) {
-                    TextButton(onClick = { showParticipantsDialog = true }) {
-                        Text("👥")
-                    }
-                    TextButton(onClick = { onStartGroupCall("audio") }) {
-                        Text("📞")
-                    }
-                    TextButton(onClick = { onStartGroupCall("video") }) {
-                        Text("📹")
-                    }
+                    ChatHeaderActionButton(
+                        icon = Icons.Filled.People,
+                        contentDescription = "Участники",
+                        onClick = { showParticipantsDialog = true }
+                    )
+                    ChatHeaderActionButton(
+                        icon = Icons.Filled.Call,
+                        contentDescription = "Групповой аудио звонок",
+                        onClick = { onStartGroupCall("audio") }
+                    )
+                    ChatHeaderActionButton(
+                        icon = Icons.Filled.Videocam,
+                        contentDescription = "Групповой видео звонок",
+                        onClick = { onStartGroupCall("video") }
+                    )
                 } else {
-                    TextButton(onClick = { onStartCall("audio") }) {
-                        Text("📞")
-                    }
-                    TextButton(onClick = { onStartCall("video") }) {
-                        Text("📹")
-                    }
+                    ChatHeaderActionButton(
+                        icon = Icons.Filled.Call,
+                        contentDescription = "Аудио звонок",
+                        onClick = { onStartCall("audio") }
+                    )
+                    ChatHeaderActionButton(
+                        icon = Icons.Filled.Videocam,
+                        contentDescription = "Видео звонок",
+                        onClick = { onStartCall("video") }
+                    )
                 }
             }
         }
@@ -2208,51 +2258,64 @@ private fun ActiveCallOverlay(
                 }
             }
 
-            Surface(
-                color = Color(0xAA020617),
-                shape = RoundedCornerShape(12.dp),
+            Column(
                 modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(12.dp)
+                    .align(Alignment.TopCenter)
+                    .padding(top = 14.dp, start = 56.dp, end = 56.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                Text(
+                    text = call.chatName,
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleMedium,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = phaseLabel,
+                    color = Color(0xFFD3E8FF),
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center
+                )
+                if (subStatus.isNotBlank()) {
                     Text(
-                        text = call.chatName,
-                        color = Color.White,
-                        style = MaterialTheme.typography.labelLarge
+                        text = subStatus,
+                        color = Color(0xFFA8CBF3),
+                        style = MaterialTheme.typography.labelSmall,
+                        textAlign = TextAlign.Center
                     )
+                }
+                if (!uiState.statusMessage.isNullOrBlank()) {
                     Text(
-                        text = phaseLabel,
-                        color = Color(0xFFBFDBFE),
-                        style = MaterialTheme.typography.bodySmall
+                        text = uiState.statusMessage,
+                        color = Color(0xFFFBBF24),
+                        style = MaterialTheme.typography.labelSmall,
+                        textAlign = TextAlign.Center
                     )
-                    if (subStatus.isNotBlank()) {
-                        Text(
-                            text = subStatus,
-                            color = Color(0xFF93C5FD),
-                            style = MaterialTheme.typography.labelSmall
-                        )
-                    }
-                    if (!uiState.statusMessage.isNullOrBlank()) {
-                        Text(
-                            text = uiState.statusMessage,
-                            color = Color(0xFFFBBF24),
-                            style = MaterialTheme.typography.labelSmall
-                        )
-                    }
                 }
             }
 
-            TextButton(
-                onClick = {
-                    onInteraction()
-                    onToggleMinimize()
-                },
+            Surface(
+                color = Color(0x7A101E35),
+                shape = CircleShape,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(8.dp)
+                    .padding(10.dp)
+                    .size(44.dp)
+                    .border(1.dp, Color(0x40FFFFFF), CircleShape)
+                    .clickable {
+                        onInteraction()
+                        onToggleMinimize()
+                    }
             ) {
-                Text("↗")
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Filled.Fullscreen,
+                        contentDescription = "Свернуть",
+                        tint = Color.White
+                    )
+                }
             }
 
             androidx.compose.animation.AnimatedVisibility(
@@ -2378,11 +2441,39 @@ private fun MinimizedCallWindow(
                 Row(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        .padding(6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    TextButton(onClick = onExpand) { Text("⤢") }
-                    TextButton(onClick = onLeaveCall) { Text("✕", color = Color(0xFFF87171)) }
+                    Surface(
+                        color = Color(0xA3112239),
+                        shape = CircleShape,
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clickable(onClick = onExpand)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Filled.Fullscreen,
+                                contentDescription = "Развернуть",
+                                tint = Color.White
+                            )
+                        }
+                    }
+                    Surface(
+                        color = Color(0xE84141),
+                        shape = CircleShape,
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clickable(onClick = onLeaveCall)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Filled.Close,
+                                contentDescription = "Завершить звонок",
+                                tint = Color.White
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -2497,6 +2588,31 @@ private fun CallParticipantVideoPlaceholder(
 }
 
 @Composable
+private fun ChatHeaderActionButton(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit
+) {
+    Surface(
+        color = Color(0x1FFFFFFF),
+        shape = CircleShape,
+        modifier = Modifier
+            .size(38.dp)
+            .border(1.dp, Color(0x2DFFFFFF), CircleShape)
+            .clickable(onClick = onClick)
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                tint = Color(0xFFE5F0FF),
+                modifier = Modifier.size(20.dp)
+            )
+        }
+    }
+}
+
+@Composable
 private fun CallControlsBar(
     call: ActiveCallUi,
     controls: CallControlsState,
@@ -2508,18 +2624,32 @@ private fun CallControlsBar(
     onLeaveCall: () -> Unit
 ) {
     Surface(
-        color = Color(0xB3122239),
-        shape = RoundedCornerShape(24.dp),
-        modifier = Modifier.padding(horizontal = 8.dp)
+        color = Color.Transparent,
+        shape = RoundedCornerShape(32.dp),
+        modifier = Modifier
+            .padding(horizontal = 10.dp)
+            .shadow(22.dp, RoundedCornerShape(32.dp))
+            .border(1.dp, Color(0x2EFFFFFF), RoundedCornerShape(32.dp))
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .background(
+                    Brush.horizontalGradient(
+                        listOf(
+                            Color(0xCE2A384F),
+                            Color(0xCF244742),
+                            Color(0xCE2B3C59)
+                        )
+                    )
+                )
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             CallControlButton(
-                icon = if (controls.isMicrophoneEnabled) "🎤" else "🔇",
-                active = !controls.isMicrophoneEnabled,
+                icon = if (controls.isMicrophoneEnabled) Icons.Filled.Mic else Icons.Filled.MicOff,
+                contentDescription = if (controls.isMicrophoneEnabled) "Выключить микрофон" else "Включить микрофон",
+                selected = !controls.isMicrophoneEnabled,
                 onClick = {
                     onInteraction()
                     onToggleMicrophone()
@@ -2528,16 +2658,18 @@ private fun CallControlsBar(
 
             if (call.type == "video") {
                 CallControlButton(
-                    icon = if (controls.isCameraEnabled) "🎥" else "🚫",
-                    active = !controls.isCameraEnabled,
+                    icon = if (controls.isCameraEnabled) Icons.Filled.Videocam else Icons.Filled.VideocamOff,
+                    contentDescription = if (controls.isCameraEnabled) "Выключить камеру" else "Включить камеру",
+                    selected = !controls.isCameraEnabled,
                     onClick = {
                         onInteraction()
                         onToggleCamera()
                     }
                 )
                 CallControlButton(
-                    icon = "🔄",
-                    active = false,
+                    icon = Icons.Filled.Cached,
+                    contentDescription = "Сменить камеру",
+                    selected = false,
                     enabled = controls.canSwitchCamera,
                     onClick = {
                         onInteraction()
@@ -2545,8 +2677,13 @@ private fun CallControlsBar(
                     }
                 )
                 CallControlButton(
-                    icon = "🖥",
-                    active = controls.isScreenSharing,
+                    icon = Icons.Filled.DesktopWindows,
+                    contentDescription = if (controls.isScreenSharing) {
+                        "Остановить демонстрацию экрана"
+                    } else {
+                        "Начать демонстрацию экрана"
+                    },
+                    selected = controls.isScreenSharing,
                     enabled = controls.isScreenSharing || controls.isScreenShareSupported,
                     onClick = {
                         onInteraction()
@@ -2556,8 +2693,9 @@ private fun CallControlsBar(
             }
 
             CallControlButton(
-                icon = "📞",
-                active = true,
+                icon = Icons.Filled.CallEnd,
+                contentDescription = "Завершить звонок",
+                selected = true,
                 danger = true,
                 onClick = {
                     onInteraction()
@@ -2570,31 +2708,81 @@ private fun CallControlsBar(
 
 @Composable
 private fun CallControlButton(
-    icon: String,
-    active: Boolean,
+    icon: ImageVector,
+    contentDescription: String,
+    selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     danger: Boolean = false
 ) {
-    val background = when {
-        !enabled -> Color(0x332B3648)
-        danger -> Color(0xFFD92D20)
-        active -> Color(0xFF334155)
-        else -> Color(0x660B1220)
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed && enabled) 0.92f else 1f,
+        animationSpec = spring(dampingRatio = 0.72f, stiffness = 520f),
+        label = "callControlScale"
+    )
+
+    val backgroundTarget = when {
+        !enabled -> Color(0x17FFFFFF)
+        danger -> Color(0xFFE34D4D)
+        selected -> Color(0x7A2563EB)
+        else -> Color(0x1EFFFFFF)
     }
+    val borderTarget = when {
+        !enabled -> Color(0x18FFFFFF)
+        danger -> Color(0x00FFFFFF)
+        selected -> Color(0xFF8BB5FF)
+        else -> Color(0x2AFFFFFF)
+    }
+    val iconTarget = when {
+        !enabled -> Color(0xFF75839A)
+        selected -> Color(0xFFEFF6FF)
+        else -> Color.White
+    }
+
+    val background by animateColorAsState(
+        targetValue = backgroundTarget,
+        animationSpec = tween(durationMillis = 180),
+        label = "callControlBg"
+    )
+    val borderColor by animateColorAsState(
+        targetValue = borderTarget,
+        animationSpec = tween(durationMillis = 180),
+        label = "callControlBorder"
+    )
+    val iconColor by animateColorAsState(
+        targetValue = iconTarget,
+        animationSpec = tween(durationMillis = 150),
+        label = "callControlIcon"
+    )
+
+    val buttonSize = if (danger) 64.dp else 56.dp
     Surface(
         modifier = modifier
-            .size(50.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .size(buttonSize)
             .clip(CircleShape)
-            .clickable(enabled = enabled, onClick = onClick),
+            .border(1.dp, borderColor, CircleShape)
+            .clickable(
+                enabled = enabled,
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick
+            ),
         shape = CircleShape,
         color = background
     ) {
         Box(contentAlignment = Alignment.Center) {
-            Text(
-                text = icon,
-                color = if (enabled) Color.White else Color(0xFF64748B)
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                tint = iconColor,
+                modifier = Modifier.size(if (danger) 24.dp else 23.dp)
             )
         }
     }
