@@ -2,7 +2,8 @@ package ru.govchat.app.data.repository
 
 import android.util.Log
 import retrofit2.HttpException
-import ru.govchat.app.core.network.DeviceTokenRequest
+import ru.govchat.app.BuildConfig
+import ru.govchat.app.core.network.DeviceRegisterRequest
 import ru.govchat.app.core.network.GovChatApi
 import ru.govchat.app.core.storage.SessionStorage
 import ru.govchat.app.domain.repository.DeviceRepository
@@ -24,9 +25,10 @@ class DeviceRepositoryImpl(
 
         runCatching {
             api.registerDeviceToken(
-                request = DeviceTokenRequest(
+                request = DeviceRegisterRequest(
                     token = pendingToken,
-                    platform = "android"
+                    platform = "android",
+                    appVersion = BuildConfig.VERSION_NAME
                 )
             )
         }.onSuccess {

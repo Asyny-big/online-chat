@@ -21,6 +21,7 @@ firebaseMessaging = "24.1.0"
 webrtcSdk = "137.7151.05"
 livekit = "2.21.0"
 ktor = "2.3.11"
+googleServices = "4.4.2"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -62,3 +63,4 @@ ktor-client-websockets = { group = "io.ktor", name = "ktor-client-websockets", v
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+google-services = { id = "com.google.gms.google-services", version.ref = "googleServices" }

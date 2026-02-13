@@ -5,6 +5,7 @@ const Message = require('../models/Message');
 const Call = require('../models/Call');
 const config = require('../config.local');
 const { maybeRewardMessage, maybeRewardCallStart } = require('../economy/rewardsService');
+const { NotificationService } = require('../services/notificationService');
 
 const userSockets = new Map();
 const activeCalls = new Map();
@@ -76,6 +77,7 @@ async function forceLeaveUserFromCall({ io, userId, call }) {
 }
 
 module.exports = function (io) {
+  const notificationService = new NotificationService({ userSockets });
   // Авторизация сокетов
   io.use(async (socket, next) => {
     try {
@@ -180,6 +182,43 @@ module.exports = function (io) {
         });
 
         callback?.({ success: true, message: message.toObject() });
+
+        Promise.resolve().then(async () => {
+          const messageType = String(type || '').toLowerCase();
+          const isAttachment = !!attachment || ['audio', 'image', 'video', 'file'].includes(messageType);
+
+          if (isAttachment) {
+            await notificationService.sendAttachmentNotification({
+              chat,
+              message,
+              senderId: userId,
+              senderName: socket.user.name,
+              attachmentName: attachment?.originalName || attachment?.name || ''
+            });
+            return;
+          }
+
+          if (chat.type === 'group') {
+            await notificationService.sendGroupNotification({
+              chat,
+              message,
+              senderId: userId,
+              senderName: socket.user.name,
+              text: text || ''
+            });
+            return;
+          }
+
+          await notificationService.sendMessageNotification({
+            chat,
+            message,
+            senderId: userId,
+            senderName: socket.user.name,
+            text: text || ''
+          });
+        }).catch((error) => {
+          console.warn('[Push] message notification failed:', error?.message || error);
+        });
 
         // Earn: сообщения (best-effort, не блокируем чат).
         try {
@@ -321,6 +360,19 @@ module.exports = function (io) {
 
         callback?.({ success: true, callId: call._id });
 
+        Promise.resolve(
+          notificationService.sendIncomingCallNotification({
+            chat,
+            callId: call._id.toString(),
+            senderId: userId,
+            senderName: socket.user.name,
+            callType: type,
+            isGroup: false
+          })
+        ).catch((error) => {
+          console.warn('[Push] incoming_call notification failed:', error?.message || error);
+        });
+
         // Earn: факт начала звонка (инициатор).
         try {
           const r = await maybeRewardCallStart({
@@ -398,6 +450,19 @@ module.exports = function (io) {
         });
 
         callback?.({ success: true, callId: call._id.toString() });
+
+        Promise.resolve(
+          notificationService.sendIncomingCallNotification({
+            chat,
+            callId: call._id.toString(),
+            senderId: userId,
+            senderName: socket.user.name,
+            callType: type,
+            isGroup: true
+          })
+        ).catch((error) => {
+          console.warn('[Push] incoming_group_call notification failed:', error?.message || error);
+        });
 
         // Earn: факт начала группового звонка (инициатор).
         try {

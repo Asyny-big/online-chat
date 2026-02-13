@@ -46,8 +46,8 @@ interface GovChatApi {
     @GET("users/search")
     suspend fun searchByPhone(@Query("phone") phone: String): UserDto?
 
-    @POST("me/device-token")
-    suspend fun registerDeviceToken(@Body request: DeviceTokenRequest): ApiSuccessResponse
+    @POST("devices/register")
+    suspend fun registerDeviceToken(@Body request: DeviceRegisterRequest): ApiSuccessResponse
 
     @POST("chats/private")
     suspend fun createPrivateChat(@Body request: CreateChatRequest): ChatDto
@@ -146,9 +146,10 @@ data class UploadResponse(
     val size: Long? = null
 )
 
-data class DeviceTokenRequest(
+data class DeviceRegisterRequest(
     val token: String,
-    val platform: String = "android"
+    val platform: String = "android",
+    val appVersion: String = ""
 )
 
 data class ApiSuccessResponse(

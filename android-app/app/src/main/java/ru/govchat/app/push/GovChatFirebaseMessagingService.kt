@@ -34,15 +34,21 @@ class GovChatFirebaseMessagingService : FirebaseMessagingService() {
         val payload = message.data
         if (payload.isEmpty()) return
 
-        val eventType = payload.read("eventType", "event_type")
+        val eventTypeRaw = payload.read("eventType", "event_type")
+        val eventType = eventTypeRaw.lowercase()
+        val isIncomingCallEvent = eventType == "incoming_call" ||
+            eventType == "incoming_group_call" ||
+            eventType == "incoming_call_notification" ||
+            eventTypeRaw.equals("INCOMING_CALL", ignoreCase = true)
+
         if (shouldSkipNotificationForCurrentUser(payload, eventType)) return
 
         val title = payload.read("title")
         val body = payload.read("body", "text", "message")
 
-        when (eventType) {
-            "incoming_call", "incoming_group_call" -> {
-                val callId = payload.read("callId", "call_id").ifBlank {
+        when {
+            isIncomingCallEvent -> {
+                val callId = payload.read("callId", "call_id", "roomId", "room_id").ifBlank {
                     "call-${System.currentTimeMillis()}"
                 }
                 val chatId = payload.read("chatId", "chat_id")
@@ -51,8 +57,12 @@ class GovChatFirebaseMessagingService : FirebaseMessagingService() {
                     .ifBlank { body }
                     .ifBlank { getString(R.string.push_call_body) }
                 val initiatorId = payload.read("initiatorId", "initiator_id", "senderId", "sender_id")
-                val callType = payload.read("type", "callType", "call_type").ifBlank { "audio" }
-                val isGroup = eventType == "incoming_group_call" || payload.readBoolean("isGroup", "is_group")
+                val callType = payload.read("callType", "call_type").ifBlank {
+                    val rawType = payload.read("type").lowercase()
+                    if (rawType == "audio" || rawType == "video") rawType else "audio"
+                }
+                val isGroup = eventType == "incoming_group_call" ||
+                    payload.readBoolean("isGroup", "is_group", "isGroupCall", "is_group_call")
 
                 IncomingCallNotifications.show(
                     context = this,
@@ -157,7 +167,7 @@ class GovChatFirebaseMessagingService : FirebaseMessagingService() {
         }
 
         val actorId = when (eventType) {
-            "incoming_call", "incoming_group_call" -> payload.read(
+            "incoming_call", "incoming_group_call", "incoming_call_notification" -> payload.read(
                 "initiatorId",
                 "initiator_id",
                 "senderId",

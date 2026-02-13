@@ -8,6 +8,7 @@ import CallModal from '../components/CallModal';
 import GroupCallModalLiveKit from '../components/GroupCallModalLiveKit';
 import { HrumToastProvider, useHrumToast } from '../components/HrumToast';
 import { getTransactions } from '../economy/api';
+import { consumePendingPushAction, pushEvents } from '../mobile/pushNotifications';
 
 function ChatPageInner({ token, onLogout }) {
   const { showEarn } = useHrumToast();
@@ -49,6 +50,107 @@ function ChatPageInner({ token, onLogout }) {
   useEffect(() => { currentUserIdRef.current = currentUserId; }, [currentUserId]);
   useEffect(() => { groupCallStateRef.current = groupCallState; }, [groupCallState]);
   useEffect(() => { groupCallDataRef.current = groupCallData; }, [groupCallData]);
+
+  const ensureChatSelected = useCallback(async (chatId, chatName = '') => {
+    if (!chatId || !token) return null;
+
+    let nextChat = chatsRef.current.find((chat) => chat._id === chatId) || null;
+    if (!nextChat) {
+      try {
+        const res = await axios.get(`${API_URL}/chats/${chatId}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        nextChat = res.data || null;
+      } catch (_) {
+        // fallback below
+      }
+
+      if (!nextChat && chatName) {
+        nextChat = {
+          _id: chatId,
+          type: 'private',
+          name: chatName,
+          displayName: chatName,
+          participants: []
+        };
+      }
+
+      if (nextChat) {
+        setChats((prev) => {
+          const existingIndex = prev.findIndex((chat) => chat._id === nextChat._id);
+          if (existingIndex >= 0) {
+            const copy = [...prev];
+            copy[existingIndex] = { ...copy[existingIndex], ...nextChat };
+            return copy;
+          }
+          return [nextChat, ...prev];
+        });
+      }
+    }
+
+    if (nextChat) {
+      setSelectedChat(nextChat);
+    }
+
+    return nextChat;
+  }, [token]);
+
+  const handlePushOpen = useCallback(async (payloadRaw) => {
+    const payload = payloadRaw || {};
+    const type = String(payload.type || '').toUpperCase();
+    const chatId = String(payload.chatId || '').trim();
+    const chatName = String(payload.chatName || '').trim();
+    const senderName = String(payload.senderName || '').trim() || 'Контакт';
+    const callType = String(payload.callType || '').toLowerCase() === 'video' ? 'video' : 'audio';
+    const callIdFromPush = String(payload.callId || payload.roomId || '').trim();
+    const callId = callIdFromPush || `push-${Date.now()}`;
+    const isGroupCall = payload.isGroupCall === true || String(payload.isGroupCall || '').toLowerCase() === 'true';
+
+    if (chatId) {
+      await ensureChatSelected(chatId, chatName);
+    }
+
+    if (type !== 'INCOMING_CALL') {
+      return;
+    }
+
+    if (callStateRef.current !== 'idle' || groupCallStateRef.current !== 'idle') {
+      return;
+    }
+
+    if (isGroupCall) {
+      setGroupCallState('incoming');
+      setGroupCallData({
+        callId,
+        chatId,
+        chatName: chatName || (chatsRef.current.find((chat) => chat._id === chatId)?.name || 'Групповой чат'),
+        initiator: {
+          _id: String(payload.senderId || '').trim(),
+          name: senderName
+        },
+        type: callType,
+        participantCount: 1
+      });
+      return;
+    }
+
+    setIncomingCallData({
+      callId,
+      chatId,
+      initiator: {
+        _id: String(payload.senderId || '').trim(),
+        name: senderName
+      },
+      type: callType
+    });
+    setCallState('incoming');
+    setCallType(callType);
+    setCallId(callId);
+    setRemoteUser({
+      _id: String(payload.senderId || '').trim(),
+      name: senderName
+    });
+  }, [ensureChatSelected]);
 
   const economyProbe = useCallback(
     async (expectedReasonCode) => {
@@ -350,6 +452,26 @@ function ChatPageInner({ token, onLogout }) {
       socket.disconnect();
     };
   }, [token]); // ТОЛЬКО token - сокет создаётся один раз
+
+  useEffect(() => {
+    if (!token) return;
+
+    const onPushOpen = (event) => {
+      const data = event?.detail || {};
+      void handlePushOpen(data);
+    };
+
+    window.addEventListener(pushEvents.OPEN_EVENT, onPushOpen);
+
+    const pending = consumePendingPushAction();
+    if (pending) {
+      void handlePushOpen(pending);
+    }
+
+    return () => {
+      window.removeEventListener(pushEvents.OPEN_EVENT, onPushOpen);
+    };
+  }, [token, handlePushOpen]);
 
   // Загрузка сообщений при выборе чата
   useEffect(() => {
@@ -758,3 +880,4 @@ function ChatPageWithToasts(props) {
 }
 
 export default ChatPageWithToasts;
+

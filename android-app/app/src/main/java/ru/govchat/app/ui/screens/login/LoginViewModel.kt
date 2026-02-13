@@ -10,12 +10,14 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import ru.govchat.app.core.ui.viewModelFactory
+import ru.govchat.app.domain.repository.DeviceRepository
 import ru.govchat.app.domain.usecase.LoginUseCase
 import ru.govchat.app.domain.usecase.RegisterUseCase
 
 class LoginViewModel(
     private val loginUseCase: LoginUseCase,
-    private val registerUseCase: RegisterUseCase
+    private val registerUseCase: RegisterUseCase,
+    private val deviceRepository: DeviceRepository
 ) : ViewModel() {
 
     private val mutableState = MutableStateFlow(LoginUiState())
@@ -75,6 +77,7 @@ class LoginViewModel(
 
             authResult
                 .onSuccess {
+                    runCatching { deviceRepository.syncPendingToken() }
                     mutableState.value = mutableState.value.copy(isSubmitting = false)
                     mutableEffect.emit(LoginEffect.NavigateMain)
                 }
@@ -90,9 +93,10 @@ class LoginViewModel(
     companion object {
         fun factory(
             loginUseCase: LoginUseCase,
-            registerUseCase: RegisterUseCase
+            registerUseCase: RegisterUseCase,
+            deviceRepository: DeviceRepository
         ) = viewModelFactory {
-            LoginViewModel(loginUseCase, registerUseCase)
+            LoginViewModel(loginUseCase, registerUseCase, deviceRepository)
         }
     }
 }

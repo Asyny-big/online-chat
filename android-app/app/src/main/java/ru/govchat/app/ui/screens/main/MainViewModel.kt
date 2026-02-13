@@ -1181,7 +1181,7 @@ class MainViewModel(
                     type = command.callType.orEmpty().ifBlank { "audio" },
                     isGroup = command.isGroupCall,
                     initiatorId = command.initiatorId.orEmpty(),
-                    initiatorName = command.initiatorName.orEmpty().ifBlank { "Contact" },
+                    initiatorName = command.initiatorName.orEmpty().ifBlank { "Контакт" },
                     participantCount = 0
                 ),
                 callErrorMessage = null,

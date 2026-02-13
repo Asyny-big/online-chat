@@ -65,7 +65,8 @@ fun GovChatNavGraph(
             val viewModel: LoginViewModel = viewModel(
                 factory = LoginViewModel.factory(
                     loginUseCase = container.loginUseCase,
-                    registerUseCase = container.registerUseCase
+                    registerUseCase = container.registerUseCase,
+                    deviceRepository = container.deviceRepository
                 )
             )
             val uiState = viewModel.state.collectAsStateWithLifecycle().value

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
+const UserDevice = require('../models/UserDevice');
 const authMiddleware = require('../middleware/auth');
 
 router.use(authMiddleware);
@@ -138,6 +139,24 @@ router.post('/device-token', async (req, res) => {
 
     user.fcmToken = token;
     await user.save();
+
+    await UserDevice.findOneAndUpdate(
+      { token },
+      {
+        $set: {
+          userId: req.userId,
+          token,
+          platform: 'android',
+          appVersion: '',
+          lastSeen: new Date()
+        }
+      },
+      {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true
+      }
+    );
 
     res.json({ success: true });
   } catch (e) {

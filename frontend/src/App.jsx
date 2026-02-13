@@ -4,6 +4,7 @@ import { API_URL } from './config';
 import ChatPage from './pages/ChatPage';
 import AdminPage from './pages/AdminPage';
 import { authStyles as styles } from './styles/authStyles';
+import { initPushNotifications } from './mobile/pushNotifications';
 
 function App() {
   const [token, setToken] = useState(localStorage.getItem('token'));
@@ -17,6 +18,12 @@ function App() {
 
   useEffect(() => {
     if (token) localStorage.setItem('token', token);
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+    const cleanup = initPushNotifications({ token });
+    return cleanup;
   }, [token]);
 
   useEffect(() => {

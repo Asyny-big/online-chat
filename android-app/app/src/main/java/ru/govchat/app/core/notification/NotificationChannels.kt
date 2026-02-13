@@ -104,7 +104,7 @@ object NotificationIntents {
         if (explicitAction.isBlank() && !hasPushData) return null
         val action = explicitAction.ifBlank {
             when (fallbackEventType) {
-                "incoming_call", "incoming_group_call" -> ACTION_OPEN_CALL
+                "incoming_call", "incoming_group_call", "INCOMING_CALL" -> ACTION_OPEN_CALL
                 else -> ACTION_OPEN_CHAT
             }
         }
@@ -121,6 +121,8 @@ object NotificationIntents {
             callType = readExtra(intent, EXTRA_CALL_TYPE, "type", "callType", "call_type").ifBlank { null },
             isGroupCall = intent.getBooleanExtra(EXTRA_IS_GROUP_CALL, false) ||
                 fallbackEventType == "incoming_group_call" ||
+                fallbackEventType == "INCOMING_CALL" &&
+                (readExtra(intent, "isGroupCall", "is_group_call", "isGroup", "is_group").lowercase() in setOf("true", "1")) ||
                 rawGroup == "true" || rawGroup == "1",
             initiatorId = readExtra(intent, EXTRA_INITIATOR_ID, "initiatorId", "initiator_id").ifBlank { null },
             initiatorName = readExtra(
