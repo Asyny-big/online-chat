@@ -40,7 +40,10 @@ module.exports = {
     // },
 
     // 2) ЛИБО путь к json файлу с сервис-аккаунтом:
-    // serviceAccountPath: require('path').join(__dirname, 'firebase-service-account.json'),
+    serviceAccountPath: require('path').join(
+      __dirname,
+      'govchat-5d799-firebase-adminsdk-fbsvc-edbb99bd8a.json'
+    ),
 
     // 3) ЛИБО base64 от JSON с сервис-аккаунтом:
     // serviceAccountJsonBase64: ''
