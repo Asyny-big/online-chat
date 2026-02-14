@@ -641,6 +641,7 @@ class MainViewModel(
             if (!incoming.isGroup) {
                 declineCallUseCase(callId = incoming.callId)
             }
+            IncomingCallNotifications.cancel(applicationContext, incoming.callId)
             mutableState.update { it.copy(incomingCall = null, isCallActionInProgress = false) }
         }
     }
@@ -867,6 +868,7 @@ class MainViewModel(
 
                 is RealtimeEvent.CallParticipantLeft -> {
                     if (!event.callEnded) return@collect
+                    IncomingCallNotifications.cancel(applicationContext, event.callId)
                     try {
                         callManager.close()
                     } catch (_: Throwable) {
@@ -882,6 +884,7 @@ class MainViewModel(
                 }
 
                 is RealtimeEvent.CallEnded -> {
+                    IncomingCallNotifications.cancel(applicationContext, event.callId)
                     try {
                         callManager.close()
                     } catch (_: Throwable) {
@@ -909,6 +912,7 @@ class MainViewModel(
                 }
 
                 is RealtimeEvent.GroupCallEnded -> {
+                    IncomingCallNotifications.cancel(applicationContext, event.callId)
                     try {
                         callManager.close()
                     } catch (_: Throwable) {

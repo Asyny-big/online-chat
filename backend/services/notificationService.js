@@ -5,7 +5,8 @@ const MESSAGE_TYPE = {
   MESSAGE: 'MESSAGE',
   GROUP_MESSAGE: 'GROUP_MESSAGE',
   ATTACHMENT: 'ATTACHMENT',
-  INCOMING_CALL: 'INCOMING_CALL'
+  INCOMING_CALL: 'INCOMING_CALL',
+  CALL_CANCELLED: 'CALL_CANCELLED'
 };
 
 class NotificationService {
@@ -109,6 +110,43 @@ class NotificationService {
         initiatorId: String(senderId || ''),
         callType: String(callType || 'audio'),
         isGroupCall: isGroup ? 'true' : 'false',
+        messageId: ''
+      },
+      forceWakeup: true
+    });
+  }
+
+  async sendCallCancelledNotification({
+    chat,
+    callId,
+    senderId,
+    senderName,
+    callType = 'audio',
+    isGroup = false,
+    reason = 'cancelled'
+  }) {
+    const recipients = this.resolveRecipients(chat, senderId);
+    if (!recipients.length) return { sent: 0, skipped: 'empty_recipients' };
+
+    return this.sendToRecipients({
+      userIds: recipients,
+      payloadType: MESSAGE_TYPE.CALL_CANCELLED,
+      title: 'Call ended',
+      body: 'Incoming call was cancelled',
+      data: {
+        type: MESSAGE_TYPE.CALL_CANCELLED,
+        eventType: MESSAGE_TYPE.CALL_CANCELLED,
+        chatId: String(chat?._id || ''),
+        chatName: String(chat?.name || ''),
+        callId: String(callId || ''),
+        roomId: String(callId || ''),
+        senderName: senderName || '',
+        senderId: String(senderId || ''),
+        initiatorName: senderName || '',
+        initiatorId: String(senderId || ''),
+        callType: String(callType || 'audio'),
+        isGroupCall: isGroup ? 'true' : 'false',
+        reason: String(reason || 'cancelled'),
         messageId: ''
       },
       forceWakeup: true

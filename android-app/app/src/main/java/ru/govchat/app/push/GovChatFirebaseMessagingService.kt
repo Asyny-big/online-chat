@@ -34,12 +34,21 @@ class GovChatFirebaseMessagingService : FirebaseMessagingService() {
         val payload = message.data
         if (payload.isEmpty()) return
 
-        val eventTypeRaw = payload.read("eventType", "event_type")
+        val eventTypeRaw = payload.read("eventType", "event_type", "type")
         val eventType = eventTypeRaw.lowercase()
         val isIncomingCallEvent = eventType == "incoming_call" ||
             eventType == "incoming_group_call" ||
             eventType == "incoming_call_notification" ||
             eventTypeRaw.equals("INCOMING_CALL", ignoreCase = true)
+        val isCallCancellationEvent = eventType == "call_cancelled" ||
+            eventType == "call_canceled" ||
+            eventType == "call_ended" ||
+            eventType == "call_end" ||
+            eventType == "cancel_call" ||
+            eventType == "call_declined" ||
+            eventType == "group_call_ended" ||
+            eventTypeRaw.equals("CALL_CANCELLED", ignoreCase = true) ||
+            eventTypeRaw.equals("CALL_ENDED", ignoreCase = true)
 
         if (shouldSkipNotificationForCurrentUser(payload, eventType)) return
 
@@ -47,6 +56,13 @@ class GovChatFirebaseMessagingService : FirebaseMessagingService() {
         val body = payload.read("body", "text", "message")
 
         when {
+            isCallCancellationEvent -> {
+                val callId = payload.read("callId", "call_id", "roomId", "room_id")
+                if (callId.isNotBlank()) {
+                    IncomingCallNotifications.cancel(this, callId)
+                }
+            }
+
             isIncomingCallEvent -> {
                 val callId = payload.read("callId", "call_id", "roomId", "room_id").ifBlank {
                     "call-${System.currentTimeMillis()}"

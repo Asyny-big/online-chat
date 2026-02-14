@@ -12,7 +12,7 @@ import java.util.UUID
 
 object NotificationChannels {
     const val CALLS_CHANNEL_ID = "govchat_calls_active"
-    const val INCOMING_CALLS_CHANNEL_ID = "govchat_calls_incoming_v2"
+    const val INCOMING_CALLS_CHANNEL_ID = "govchat_calls_incoming_v3"
     const val MESSAGES_CHANNEL_ID = "govchat_messages"
 
     fun ensureCreated(context: Context) {
@@ -41,6 +41,7 @@ object NotificationChannels {
             setShowBadge(false)
             lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
             enableVibration(true)
+            vibrationPattern = longArrayOf(0L, 1000L, 700L, 1000L)
             val ringtoneUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
             val audioAttributes = AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)

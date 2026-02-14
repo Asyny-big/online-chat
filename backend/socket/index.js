@@ -12,7 +12,7 @@ const activeCalls = new Map();
 const activeGroupCalls = new Map(); // chatId -> { callId, type, participants:Set<userId> }
 const activeGroupCallStreams = new Map(); // callId -> Map<userId, streamId>
 
-async function forceLeaveUserFromCall({ io, userId, call }) {
+async function forceLeaveUserFromCall({ io, userId, call, notificationService, senderName = '' }) {
   // Помечаем пользователя вышедшим из звонка (на случай закрытия вкладки/потери сети)
   let changed = false;
   call.participants.forEach((p) => {
@@ -23,7 +23,7 @@ async function forceLeaveUserFromCall({ io, userId, call }) {
   });
   if (!changed) return;
 
-  const chat = await Chat.findById(call.chat).select('_id type');
+  const chat = await Chat.findById(call.chat).select('_id type name participants.user');
   if (!chat) {
     await call.save();
     return;
@@ -52,6 +52,19 @@ async function forceLeaveUserFromCall({ io, userId, call }) {
         chatId: chat._id.toString(),
         reason: 'completed'
       });
+      Promise.resolve(
+        notificationService?.sendCallCancelledNotification?.({
+          chat,
+          callId: call._id.toString(),
+          senderId: userId,
+          senderName,
+          callType: String(call.type || 'audio'),
+          isGroup: true,
+          reason: 'completed'
+        })
+      ).catch((error) => {
+        console.warn('[Push] group_call_cancelled notification failed:', error?.message || error);
+      });
     } else {
       io.to(`chat:${chat._id}`).emit('group-call:updated', {
         callId: call._id.toString(),
@@ -73,6 +86,21 @@ async function forceLeaveUserFromCall({ io, userId, call }) {
       userId,
       callEnded: call.status === 'ended'
     });
+    if (call.status === 'ended') {
+      Promise.resolve(
+        notificationService?.sendCallCancelledNotification?.({
+          chat,
+          callId: call._id.toString(),
+          senderId: userId,
+          senderName,
+          callType: String(call.type || 'audio'),
+          isGroup: false,
+          reason: 'completed'
+        })
+      ).catch((error) => {
+        console.warn('[Push] call_cancelled notification failed:', error?.message || error);
+      });
+    }
   }
 }
 
@@ -647,6 +675,23 @@ module.exports = function (io) {
             chatId: chat._id.toString(),
             reason: 'completed'
           });
+          Promise.resolve(
+            notificationService.sendCallCancelledNotification({
+              chat,
+              callId: call._id.toString(),
+              senderId: userId,
+              senderName: socket.user?.name || '',
+              callType: String(call.type || 'audio'),
+              isGroup: true,
+              reason: 'completed'
+            })
+          ).then((pushResult) => {
+            if (pushResult?.skipped) {
+              console.log('[Push] group_call_cancelled skipped:', pushResult);
+            }
+          }).catch((error) => {
+            console.warn('[Push] group_call_cancelled notification failed:', error?.message || error);
+          });
         } else {
           io.to(`chat:${chat._id}`).emit('group-call:updated', {
             callId: call._id.toString(),
@@ -760,6 +805,8 @@ module.exports = function (io) {
       try {
         const call = await Call.findById(callId);
         if (!call) return callback?.({ error: 'Звонок не найден' });
+        const chat = await Chat.findById(call.chat).select('_id name type participants');
+        if (!chat) return callback?.({ error: 'Чат не найден' });
 
         const participant = call.participants.find(
           p => p.user.toString() === userId && !p.leftAt
@@ -774,16 +821,35 @@ module.exports = function (io) {
           call.status = 'ended';
           call.endedAt = new Date();
           call.endReason = 'completed';
-          activeCalls.delete(call.chat.toString());
+          activeCalls.delete(chat._id.toString());
         }
 
         await call.save();
 
-        io.to(`chat:${call.chat}`).emit('call:participant_left', {
+        io.to(`chat:${chat._id}`).emit('call:participant_left', {
           callId,
           userId,
           callEnded: call.status === 'ended'
         });
+        if (call.status === 'ended') {
+          Promise.resolve(
+            notificationService.sendCallCancelledNotification({
+              chat,
+              callId: call._id.toString(),
+              senderId: userId,
+              senderName: socket.user?.name || '',
+              callType: String(call.type || 'audio'),
+              isGroup: false,
+              reason: String(call.endReason || 'completed')
+            })
+          ).then((pushResult) => {
+            if (pushResult?.skipped) {
+              console.log('[Push] call_cancelled skipped:', pushResult);
+            }
+          }).catch((error) => {
+            console.warn('[Push] call_cancelled notification failed:', error?.message || error);
+          });
+        }
 
         callback?.({ success: true });
       } catch (error) {
@@ -796,7 +862,7 @@ module.exports = function (io) {
       const call = await Call.findById(callId);
       if (!call) return;
 
-      const chat = await Chat.findById(call.chat);
+      const chat = await Chat.findById(call.chat).select('_id name type participants');
       if (!chat || !chat.isParticipant(userId)) return;
 
       if (chat.type === 'private') {
@@ -810,6 +876,24 @@ module.exports = function (io) {
           callId,
           reason: 'declined',
           declinedBy: userId
+        });
+
+        Promise.resolve(
+          notificationService.sendCallCancelledNotification({
+            chat,
+            callId: call._id.toString(),
+            senderId: userId,
+            senderName: socket.user?.name || '',
+            callType: String(call.type || 'audio'),
+            isGroup: false,
+            reason: 'declined'
+          })
+        ).then((pushResult) => {
+          if (pushResult?.skipped) {
+            console.log('[Push] call_declined skipped:', pushResult);
+          }
+        }).catch((error) => {
+          console.warn('[Push] call_declined notification failed:', error?.message || error);
         });
       }
     });
@@ -842,7 +926,13 @@ module.exports = function (io) {
             });
 
             for (const call of activeUserCalls) {
-              await forceLeaveUserFromCall({ io, userId, call });
+              await forceLeaveUserFromCall({
+                io,
+                userId,
+                call,
+                notificationService,
+                senderName: socket.user?.name || ''
+              });
             }
           } catch (err) {
             console.error('[Socket] disconnect cleanup error:', err);

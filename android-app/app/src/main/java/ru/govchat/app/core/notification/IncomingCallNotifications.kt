@@ -1,9 +1,11 @@
 package ru.govchat.app.core.notification
 
 import android.annotation.SuppressLint
+import android.app.Notification
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.RingtoneManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
@@ -114,10 +116,16 @@ object IncomingCallNotifications {
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setAutoCancel(true)
+            .setAutoCancel(false)
             .setOngoing(true)
+            .setOnlyAlertOnce(false)
+            .setSilent(false)
+            .setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE))
+            .setVibrate(longArrayOf(0L, 1000L, 700L, 1000L))
+            .setDefaults(Notification.DEFAULT_VIBRATE or Notification.DEFAULT_LIGHTS)
             .setColorized(true)
             .setColor(0xFF1B5E20.toInt())
+            .setTimeoutAfter(INCOMING_CALL_TIMEOUT_MS)
             .setStyle(
                 NotificationCompat.CallStyle.forIncomingCall(
                     Person.Builder()
@@ -150,4 +158,5 @@ object IncomingCallNotifications {
     const val EXTRA_CHAT_ID = NotificationIntents.EXTRA_CHAT_ID
     const val EXTRA_CALL_ID = NotificationIntents.EXTRA_CALL_ID
     private const val CALL_NOTIFICATION_BASE_ID = 30_000
+    private const val INCOMING_CALL_TIMEOUT_MS = 60_000L
 }
