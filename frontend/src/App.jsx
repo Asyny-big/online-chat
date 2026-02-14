@@ -5,6 +5,7 @@ import ChatPage from './pages/ChatPage';
 import AdminPage from './pages/AdminPage';
 import { authStyles as styles } from './styles/authStyles';
 import { initPushNotifications } from './mobile/pushNotifications';
+import AndroidAppDownloadModal from './components/AndroidAppDownloadModal';
 
 function App() {
   const [token, setToken] = useState(localStorage.getItem('token'));
@@ -56,83 +57,89 @@ function App() {
     setName('');
   };
 
-  if (token) {
-    if (route === '#/admin') {
-      return <AdminPage token={token} onBack={() => { window.location.hash = ''; }} />;
-    }
-    return <ChatPage token={token} onLogout={handleLogout} />;
-  }
+  const pageContent = token
+    ? (
+      route === '#/admin'
+        ? <AdminPage token={token} onBack={() => { window.location.hash = ''; }} />
+        : <ChatPage token={token} onLogout={handleLogout} />
+    )
+    : (
+      <div style={styles.authContainer}>
+        <div style={styles.authBox}>
+          <h1 style={styles.title}>
+            <span>🦆</span>
+            GovChat
+          </h1>
+          <p style={styles.subtitle}>Современный мессенджер</p>
 
-  return (
-    <div style={styles.authContainer}>
-      <div style={styles.authBox}>
-        <h1 style={styles.title}>
-          <span>🦆</span>
-          GovChat
-        </h1>
-        <p style={styles.subtitle}>Современный мессенджер</p>
+          <div style={styles.tabs}>
+            <button
+              onClick={() => setAuthMode('login')}
+              style={{ ...styles.tab, ...(authMode === 'login' ? styles.tabActive : {}) }}
+            >
+              Вход
+            </button>
+            <button
+              onClick={() => setAuthMode('register')}
+              style={{ ...styles.tab, ...(authMode === 'register' ? styles.tabActive : {}) }}
+            >
+              Регистрация
+            </button>
+          </div>
 
-        <div style={styles.tabs}>
-          <button
-            onClick={() => setAuthMode('login')}
-            style={{ ...styles.tab, ...(authMode === 'login' ? styles.tabActive : {}) }}
-          >
-            Вход
-          </button>
-          <button
-            onClick={() => setAuthMode('register')}
-            style={{ ...styles.tab, ...(authMode === 'register' ? styles.tabActive : {}) }}
-          >
-            Регистрация
-          </button>
-        </div>
+          <form onSubmit={handleAuth} style={styles.form}>
+            {authMode === 'register' && (
+              <input
+                type="text"
+                placeholder="Ваше имя"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                style={styles.input}
+                required
+              />
+            )}
 
-        <form onSubmit={handleAuth} style={styles.form}>
-          {authMode === 'register' && (
             <input
-              type="text"
-              placeholder="Ваше имя"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
+              type="tel"
+              placeholder="Номер телефона"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
               style={styles.input}
               required
             />
-          )}
 
-          <input
-            type="tel"
-            placeholder="Номер телефона"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            style={styles.input}
-            required
-          />
+            <input
+              type="password"
+              placeholder="Пароль"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              style={styles.input}
+              required
+            />
 
-          <input
-            type="password"
-            placeholder="Пароль"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            style={styles.input}
-            required
-          />
+            {error && <div style={styles.error}>{error}</div>}
 
-          {error && <div style={styles.error}>{error}</div>}
-
-          <button
-            type="submit"
-            style={{
-              ...styles.button,
-              opacity: loading ? 0.7 : 1,
-              cursor: loading ? 'not-allowed' : 'pointer'
-            }}
-            disabled={loading}
-          >
-            {loading ? 'Загрузка...' : (authMode === 'login' ? 'Войти' : 'Зарегистрироваться')}
-          </button>
-        </form>
+            <button
+              type="submit"
+              style={{
+                ...styles.button,
+                opacity: loading ? 0.7 : 1,
+                cursor: loading ? 'not-allowed' : 'pointer'
+              }}
+              disabled={loading}
+            >
+              {loading ? 'Загрузка...' : (authMode === 'login' ? 'Войти' : 'Зарегистрироваться')}
+            </button>
+          </form>
+        </div>
       </div>
-    </div>
+    );
+
+  return (
+    <>
+      {pageContent}
+      <AndroidAppDownloadModal />
+    </>
   );
 }
 

@@ -21,3 +21,6 @@ export const SOCKET_URL = (() => {
 })();
 
 export const LIVEKIT_URL = 'wss://govchat.ru/rtc';
+
+// Public endpoint that returns the newest Android APK from the server.
+export const ANDROID_APK_DOWNLOAD_URL = '/api/app/android-apk/latest';
