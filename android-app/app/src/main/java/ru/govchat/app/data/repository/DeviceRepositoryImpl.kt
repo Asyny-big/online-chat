@@ -24,11 +24,18 @@ class DeviceRepositoryImpl(
     }
 
     override suspend fun syncPendingToken() {
-        val pendingToken = sessionStorage.getPendingFcmToken()
-        val tokenToSync = pendingToken
-            ?: sessionStorage.getCurrentFcmToken()
-            ?: runCatching { fetchCurrentFirebaseToken() }.getOrNull()
-            ?: return
+        val pendingToken = sessionStorage.getPendingFcmToken()?.takeIf { it.isNotBlank() }
+        val currentToken = sessionStorage.getCurrentFcmToken()?.takeIf { it.isNotBlank() }
+        val firebaseToken = runCatching { fetchCurrentFirebaseToken() }.getOrNull()?.takeIf { it.isNotBlank() }
+        val tokenToSync = firebaseToken ?: pendingToken ?: currentToken ?: return
+
+        // Prefer fresh token from Firebase so we can recover from stale/invalid tokens
+        // that backend may have deleted after "registration-token-not-registered" errors.
+        if (firebaseToken != null && firebaseToken != currentToken) {
+            sessionStorage.saveCurrentFcmToken(firebaseToken)
+            sessionStorage.savePendingFcmToken(firebaseToken)
+        }
+
         val authToken = sessionStorage.currentToken() ?: sessionStorage.awaitToken()
         if (authToken.isNullOrBlank()) return
 
