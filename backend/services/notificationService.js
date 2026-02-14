@@ -112,7 +112,8 @@ class NotificationService {
         isGroupCall: isGroup ? 'true' : 'false',
         messageId: ''
       },
-      forceWakeup: true
+      forceWakeup: true,
+      sendToOnlineUsers: true
     });
   }
 
@@ -149,7 +150,8 @@ class NotificationService {
         reason: String(reason || 'cancelled'),
         messageId: ''
       },
-      forceWakeup: true
+      forceWakeup: true,
+      sendToOnlineUsers: true
     });
   }
 
@@ -190,7 +192,15 @@ class NotificationService {
     return aliveSocketIds.length > 0;
   }
 
-  async sendToRecipients({ userIds, payloadType, title, body, data, forceWakeup = false }) {
+  async sendToRecipients({
+    userIds,
+    payloadType,
+    title,
+    body,
+    data,
+    forceWakeup = false,
+    sendToOnlineUsers = false
+  }) {
     const messaging = getMessaging();
     if (!messaging) {
       return { sent: 0, skipped: 'firebase_not_initialized' };
@@ -199,8 +209,11 @@ class NotificationService {
     const normalizedIds = Array.from(new Set((userIds || []).map((id) => String(id)).filter(Boolean)));
     if (!normalizedIds.length) return { sent: 0, skipped: 'empty_recipients' };
 
-    const offlineUserIds = normalizedIds.filter((userId) => !this.isUserOnline(userId));
-    if (!offlineUserIds.length) {
+    const targetUserIds = sendToOnlineUsers
+      ? normalizedIds
+      : normalizedIds.filter((userId) => !this.isUserOnline(userId));
+
+    if (!targetUserIds.length) {
       return {
         sent: 0,
         skipped: 'all_recipients_online',
@@ -209,7 +222,7 @@ class NotificationService {
     }
 
     const devices = await UserDevice.find(
-      { userId: { $in: offlineUserIds } },
+      { userId: { $in: targetUserIds } },
       { token: 1, userId: 1, _id: 0 }
     ).lean();
 
@@ -284,7 +297,7 @@ class NotificationService {
     return {
       sent: response.successCount,
       failed: response.failureCount,
-      offlineRecipients: offlineUserIds.length,
+      targetRecipients: targetUserIds.length,
       tokens: tokenRows.length
     };
   }
