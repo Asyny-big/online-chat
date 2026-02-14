@@ -1920,7 +1920,8 @@ private fun ChatContent(
                     val subtitle = when {
                         typingInCurrentChat.isNotBlank() -> "$typingInCurrentChat печатает..."
                         chat.type == ChatType.GROUP -> "Участников: ${chat.participantCount}"
-                        else -> "в сети"
+                        chat.isOnline -> "в сети"
+                        else -> "не в сети"
                     }
                     val subtitleColor = when {
                         typingInCurrentChat.isNotBlank() -> Color(0xFF5EB5F7)

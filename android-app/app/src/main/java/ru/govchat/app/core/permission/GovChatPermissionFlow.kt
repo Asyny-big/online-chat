@@ -67,17 +67,20 @@ class GovChatPermissionFlow internal constructor(
             false
         }
 
-        callback?.invoke(
+        // Clear current request state before invoking callback.
+        // Callback may immediately start the next permission request in a chain.
+        val currentCallback = callback
+        pendingFeature = null
+        pendingPermissions = emptyList()
+        callback = null
+
+        currentCallback?.invoke(
             GovChatPermissionResult(
                 granted = granted,
                 permanentlyDenied = permanentlyDenied,
                 deniedPermissions = denied
             )
         )
-
-        pendingFeature = null
-        pendingPermissions = emptyList()
-        callback = null
     }
 }
 
