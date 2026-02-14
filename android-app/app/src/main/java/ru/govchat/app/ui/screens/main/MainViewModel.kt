@@ -874,12 +874,12 @@ class MainViewModel(
                     } catch (_: Throwable) {
                     }
                     mutableState.update { current ->
+                        val incoming = current.incomingCall
                         val active = current.activeCall
-                        if (active == null || active.callId != event.callId) {
-                            current
-                        } else {
-                            current.copy(activeCall = null)
-                        }
+                        current.copy(
+                            incomingCall = if (incoming?.callId == event.callId) null else incoming,
+                            activeCall = if (active?.callId == event.callId) null else active
+                        )
                     }
                 }
 

@@ -98,9 +98,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -412,13 +416,6 @@ fun MainScreen(
                                 onStartGroupCall(type)
                             }
                         },
-                        onAcceptIncomingCall = {
-                            val incomingType = state.incomingCall?.type ?: "audio"
-                            requestCallPermissions(incomingType) {
-                                onAcceptIncomingCall()
-                            }
-                        },
-                        onDeclineIncomingCall = onDeclineIncomingCall,
                         onAttachmentClick = { type, attachment ->
                             if (attachment == null) return@ChatContent
                             downloader.download(type, attachment)
@@ -440,6 +437,21 @@ fun MainScreen(
                         }
                     )
                 }
+            }
+
+            val incoming = state.incomingCall
+            if (incoming != null && state.activeCall == null && !isInPictureInPictureMode) {
+                IncomingCallFullScreenOverlay(
+                    incoming = incoming,
+                    avatarUrl = state.chats.firstOrNull { it.id == incoming.chatId }?.avatarUrl,
+                    isBusy = state.isCallActionInProgress,
+                    onDecline = onDeclineIncomingCall,
+                    onAccept = {
+                        requestCallPermissions(incoming.type.ifBlank { "audio" }) {
+                            onAcceptIncomingCall()
+                        }
+                    }
+                )
             }
 
             if (state.activeCall != null && !callUiState.isMinimized) {
@@ -1819,8 +1831,6 @@ private fun ChatContent(
     onSendAttachment: (Uri) -> Unit,
     onStartCall: (String) -> Unit,
     onStartGroupCall: (String) -> Unit,
-    onAcceptIncomingCall: () -> Unit,
-    onDeclineIncomingCall: () -> Unit,
     onAttachmentClick: (MessageType, MessageAttachment?) -> Unit
 ) {
     val chat = state.selectedChat ?: return
@@ -2055,16 +2065,6 @@ private fun ChatContent(
             )
         }
 
-        val incoming = state.incomingCall
-        if (incoming != null && incoming.chatId == chat.id) {
-            IncomingCallBanner(
-                incoming = incoming,
-                isBusy = state.isCallActionInProgress,
-                onAccept = onAcceptIncomingCall,
-                onDecline = onDeclineIncomingCall
-            )
-        }
-
         if (state.isLoadingMessages) {
             Box(
                 modifier = Modifier
@@ -2211,70 +2211,190 @@ private fun ChatContent(
 }
 
 @Composable
-private fun IncomingCallBanner(
+private fun IncomingCallFullScreenOverlay(
     incoming: IncomingCallUi,
+    avatarUrl: String?,
     isBusy: Boolean,
     onAccept: () -> Unit,
     onDecline: () -> Unit
 ) {
-    val background = if (incoming.isGroup) Color(0xFF7E22CE) else Color(0xFF16A34A)
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        shape = RoundedCornerShape(12.dp),
-        color = background
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = if (incoming.isGroup) "Групповой звонок" else "Входящий звонок",
-                    color = Color.White,
-                    style = MaterialTheme.typography.labelLarge
-                )
-                Text(
-                    text = if (incoming.isGroup) {
-                        "${incoming.initiatorName} начал звонок"
-                    } else {
-                        "${incoming.initiatorName} звонит вам"
-                    },
-                    color = Color(0xE6FFFFFF),
-                    style = MaterialTheme.typography.bodySmall
-                )
+    val resolvedAvatarUrl = remember(avatarUrl) { resolveAvatarUrl(avatarUrl) }
+    val avatarBitmap by produceState<ImageBitmap?>(initialValue = null, key1 = resolvedAvatarUrl) {
+        value = if (resolvedAvatarUrl == null) {
+            null
+        } else {
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    java.net.URL(resolvedAvatarUrl).openStream().use { stream ->
+                        BitmapFactory.decodeStream(stream)?.asImageBitmap()
+                    }
+                }.getOrNull()
             }
+        }
+    }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = onDecline,
-                    enabled = !isBusy,
-                    shape = CircleShape,
-                    contentPadding = PaddingValues(0.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFFDC2626),
-                        contentColor = Color.White
-                    ),
-                    modifier = Modifier.size(40.dp)
+    val pulseTransition = rememberInfiniteTransition(label = "incomingCallPulse")
+    val pulseScale by pulseTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.2f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1500),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "incomingCallPulseScale"
+    )
+    val pulseAlpha by pulseTransition.animateFloat(
+        initialValue = 0.30f,
+        targetValue = 0.10f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1500),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "incomingCallPulseAlpha"
+    )
+
+    val peerName = if (incoming.isGroup) {
+        incoming.chatName.ifBlank { "Групповой звонок" }
+    } else {
+        incoming.initiatorName.ifBlank { incoming.chatName }.ifBlank { "Контакт" }
+    }
+    val topSubtitle = if (incoming.isGroup) {
+        "${incoming.initiatorName.ifBlank { "Контакт" }} приглашает в звонок"
+    } else {
+        "Входящий звонок..."
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = Color(0xE6010B1A)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(
+                            Color(0x99256D85),
+                            Color(0xCC0B1636),
+                            Color(0xFF040915)
+                        ),
+                        radius = 1200f
+                    )
+                )
+                .padding(horizontal = 24.dp, vertical = 20.dp)
+        ) {
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Spacer(modifier = Modifier.height(36.dp))
+                Text(
+                    text = peerName,
+                    color = Color.White,
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = topSubtitle,
+                    color = Color(0xFFBFDBFE),
+                    style = MaterialTheme.typography.bodyLarge,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = if (incoming.type == "video") "Видеозвонок" else "Аудиозвонок",
+                    color = Color(0xFF60A5FA),
+                    style = MaterialTheme.typography.titleSmall
+                )
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                Box(
+                    modifier = Modifier.size(240.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Text("✕", color = Color.White)
+                    Box(
+                        modifier = Modifier
+                            .size(188.dp * pulseScale)
+                            .clip(CircleShape)
+                            .background(Color(0xFF10B981).copy(alpha = pulseAlpha))
+                    )
+                    Box(
+                        modifier = Modifier
+                            .size(132.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF1E293B))
+                            .border(width = 2.dp, color = Color(0xFF334155), shape = CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (avatarBitmap != null) {
+                            androidx.compose.foundation.Image(
+                                bitmap = avatarBitmap!!,
+                                contentDescription = peerName,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Text(
+                                text = peerName.firstOrNull()?.uppercase() ?: "?",
+                                color = Color.White,
+                                style = MaterialTheme.typography.headlineLarge
+                            )
+                        }
+                    }
                 }
-                Button(
-                    onClick = onAccept,
-                    enabled = !isBusy,
-                    shape = CircleShape,
-                    contentPadding = PaddingValues(0.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF16A34A),
-                        contentColor = Color.White
-                    ),
-                    modifier = Modifier.size(40.dp)
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(28.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(if (incoming.type == "video") "📹" else "📞", color = Color.White)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Button(
+                            onClick = onDecline,
+                            enabled = !isBusy,
+                            shape = CircleShape,
+                            contentPadding = PaddingValues(0.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFEF4444),
+                                contentColor = Color.White
+                            ),
+                            modifier = Modifier.size(74.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.CallEnd,
+                                contentDescription = "Отклонить",
+                                tint = Color.White
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Отклонить", color = Color(0xFFFFCDD2), style = MaterialTheme.typography.bodySmall)
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Button(
+                            onClick = onAccept,
+                            enabled = !isBusy,
+                            shape = CircleShape,
+                            contentPadding = PaddingValues(0.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF22C55E),
+                                contentColor = Color.White
+                            ),
+                            modifier = Modifier.size(74.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Call,
+                                contentDescription = "Принять",
+                                tint = Color.White
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Принять", color = Color(0xFFBBF7D0), style = MaterialTheme.typography.bodySmall)
+                    }
                 }
             }
         }
