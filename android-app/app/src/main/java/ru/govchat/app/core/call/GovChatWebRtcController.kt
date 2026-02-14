@@ -44,6 +44,7 @@ import ru.govchat.app.domain.model.CallSignalPayload
 import ru.govchat.app.domain.model.WebRtcConfig
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import kotlin.math.min
 
 class GovChatWebRtcController(
     private val appContext: Context
@@ -337,10 +338,10 @@ class GovChatWebRtcController(
                 }
             }
 
-            val metrics = appContext.resources.displayMetrics
-            val width = metrics.widthPixels.coerceAtLeast(640)
-            val height = metrics.heightPixels.coerceAtLeast(360)
-            val fps = 15
+            val captureProfile = resolveScreenShareCaptureProfile()
+            val width = captureProfile.width
+            val height = captureProfile.height
+            val fps = captureProfile.fps
 
             logStep("startScreenShare:before create ScreenCapturerAndroid")
             screenCapturer = ScreenCapturerAndroid(permissionData, projectionCallback)
@@ -366,6 +367,7 @@ class GovChatWebRtcController(
 
             logStep("startScreenShare:before sender.setTrack(screen)")
             sender.setTrack(screenVideoTrack, false)
+            applyVideoSenderParameters(sender = sender, mode = VideoSenderMode.ScreenShare)
             isScreenSharing = true
             mutableState.value = mutableState.value.copy(
                 localVideoTrack = screenVideoTrack?.let(CallVideoTrack::WebRtc),
@@ -397,6 +399,7 @@ class GovChatWebRtcController(
             val restoreCameraTrack = videoTrack?.takeIf { cameraEnabled }
             logStep("stopScreenShare:before sender.setTrack(camera)")
             sender.setTrack(restoreCameraTrack, false)
+            applyVideoSenderParameters(sender = sender, mode = VideoSenderMode.Camera)
             disposeScreenCapture()
             isScreenSharing = false
             mutableState.value = mutableState.value.copy(
@@ -884,6 +887,62 @@ class GovChatWebRtcController(
             .firstOrNull()
     }
 
+    private fun resolveScreenShareCaptureProfile(): ScreenShareCaptureProfile {
+        val metrics = appContext.resources.displayMetrics
+        val rawWidth = metrics.widthPixels.coerceAtLeast(1)
+        val rawHeight = metrics.heightPixels.coerceAtLeast(1)
+        val isLandscape = rawWidth >= rawHeight
+        val sourceLongSide = if (isLandscape) rawWidth else rawHeight
+        val sourceShortSide = if (isLandscape) rawHeight else rawWidth
+
+        val scale = min(
+            1.0,
+            min(
+                SCREEN_SHARE_MAX_LONG_SIDE_PX.toDouble() / sourceLongSide.toDouble(),
+                SCREEN_SHARE_MAX_SHORT_SIDE_PX.toDouble() / sourceShortSide.toDouble()
+            )
+        )
+        val targetLongSide = toEven((sourceLongSide * scale).toInt().coerceAtLeast(2))
+        val targetShortSide = toEven((sourceShortSide * scale).toInt().coerceAtLeast(2))
+        val width = if (isLandscape) targetLongSide else targetShortSide
+        val height = if (isLandscape) targetShortSide else targetLongSide
+        return ScreenShareCaptureProfile(
+            width = width,
+            height = height,
+            fps = SCREEN_SHARE_MAX_FPS
+        )
+    }
+
+    private fun toEven(value: Int): Int {
+        return if (value % 2 == 0) value else value - 1
+    }
+
+    private fun applyVideoSenderParameters(sender: RtpSender, mode: VideoSenderMode) {
+        runCatching {
+            val parameters = sender.parameters ?: return@runCatching
+            val encodings = parameters.encodings ?: return@runCatching
+            if (encodings.isEmpty()) return@runCatching
+            encodings.forEach { encoding ->
+                when (mode) {
+                    VideoSenderMode.ScreenShare -> {
+                        encoding.maxBitrateBps = SCREEN_SHARE_MAX_BITRATE_BPS
+                        encoding.maxFramerate = SCREEN_SHARE_MAX_FPS
+                        encoding.scaleResolutionDownBy = 1.0
+                    }
+                    VideoSenderMode.Camera -> {
+                        encoding.maxBitrateBps = CAMERA_MAX_BITRATE_BPS
+                        encoding.maxFramerate = CAMERA_MAX_FPS
+                        encoding.scaleResolutionDownBy = 1.0
+                    }
+                }
+            }
+            val updated = sender.setParameters(parameters)
+            logStep("applyVideoSenderParameters:mode=$mode updated=$updated")
+        }.onFailure { error ->
+            logStep("applyVideoSenderParameters:failed ${error.message}")
+        }
+    }
+
     private fun closeInternal() {
         ensureMainThread("closeInternal")
         logStep("closeInternal:begin")
@@ -1002,6 +1061,17 @@ class GovChatWebRtcController(
         val backDeviceName: String?
     )
 
+    private data class ScreenShareCaptureProfile(
+        val width: Int,
+        val height: Int,
+        val fps: Int
+    )
+
+    private enum class VideoSenderMode {
+        Camera,
+        ScreenShare
+    }
+
     private fun logStep(step: String) {
         Log.e(WEBRTC_STEP_TAG, "$step | thread=${Thread.currentThread().name}")
     }
@@ -1020,6 +1090,12 @@ class GovChatWebRtcController(
     private companion object {
         private const val LOCAL_MEDIA_STREAM_ID = "govchat-local-stream"
         private const val WEBRTC_STEP_TAG = "WEBRTC_STEP"
+        private const val SCREEN_SHARE_MAX_LONG_SIDE_PX = 1280
+        private const val SCREEN_SHARE_MAX_SHORT_SIDE_PX = 720
+        private const val SCREEN_SHARE_MAX_FPS = 15
+        private const val SCREEN_SHARE_MAX_BITRATE_BPS = 1_600_000
+        private const val CAMERA_MAX_FPS = 30
+        private const val CAMERA_MAX_BITRATE_BPS = 2_500_000
     }
 }
 
