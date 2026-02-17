@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { API_URL } from '../config';
 import { resolveAssetUrl } from '../utils/resolveAssetUrl';
 import { EconomyStoreProvider } from '../economy/EconomyStore';
@@ -6,19 +6,6 @@ import HrumOverview from './profile/HrumOverview';
 import TasksPanel from './profile/TasksPanel';
 import ShopPanel from './profile/ShopPanel';
 import WalletHistoryPanel from './profile/WalletHistoryPanel';
-
-function ensureProfilePageStyles() {
-  if (typeof document === 'undefined') return;
-  const id = 'govchat-profile-page-styles';
-  if (document.getElementById(id)) return;
-  const style = document.createElement('style');
-  style.id = id;
-  style.textContent = `
-    @keyframes ppFadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-    @keyframes ppShimmer { 0% { background-position: 0% 50%; } 100% { background-position: 140% 50%; } }
-  `;
-  document.head.appendChild(style);
-}
 
 function SkeletonLine({ w = 160 }) {
   return (
@@ -39,18 +26,14 @@ export default function ProfilePage({ token, onClose, onLogout }) {
   const [view, setView] = useState('home'); // home | tasks | shop | history
   const [profile, setProfile] = useState(null);
   const [avatarBroken, setAvatarBroken] = useState(false);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileError, setProfileError] = useState('');
+
+  const resolvedAvatarUrl = useMemo(() => resolveAssetUrl(profile?.avatar || ''), [profile?.avatar]);
 
   useEffect(() => {
     setAvatarBroken(false);
   }, [profile?.avatar]);
-
-  const resolvedAvatarUrl = useMemo(() => resolveAssetUrl(profile?.avatar || ''), [profile?.avatar]);
-  const [profileLoading, setProfileLoading] = useState(false);
-  const [profileError, setProfileError] = useState('');
-
-  useEffect(() => {
-    ensureProfilePageStyles();
-  }, []);
 
   const fetchProfile = useCallback(async () => {
     if (!token) return;
@@ -75,217 +58,261 @@ export default function ProfilePage({ token, onClose, onLogout }) {
   const headerTitle = useMemo(() => {
     if (view === 'tasks') return 'Задания';
     if (view === 'shop') return 'Магазин';
-    if (view === 'history') return 'История Хрумов';
+    if (view === 'history') return 'История';
     return 'Профиль';
   }, [view]);
 
-  const showBack = view !== 'home';
-
   return (
     <EconomyStoreProvider token={token}>
-      <div style={styles.overlay}>
-        <div style={styles.bg} />
-        <div style={styles.content}>
-          <div style={styles.topBar}>
-            <div style={styles.topLeft}>
-              {showBack ? (
-                <button type="button" onClick={() => setView('home')} style={styles.iconBtn} title="Назад">
-                  ←
-                </button>
-              ) : (
-                <div style={{ width: 40 }} />
-              )}
-              <div style={styles.topTitle}>{headerTitle}</div>
-            </div>
+      <div className="profile-page">
+        {/* Banner/Cover Area */}
+        <div className="profile-cover">
+          <div className="cover-gradient"></div>
+        </div>
 
-            <div style={styles.topRight}>
-              <button type="button" onClick={fetchProfile} style={styles.ghostBtn} disabled={profileLoading}>
-                Обновить
-              </button>
-              <button type="button" onClick={onLogout} style={styles.dangerBtn}>
-                Выйти
-              </button>
-              <button type="button" onClick={onClose} style={styles.iconBtn} title="Закрыть">
-                ✕
-              </button>
+        <div className="profile-container">
+          {/* Header / Navigation */}
+          <div className="profile-nav-header">
+            {view !== 'home' && (
+              <button onClick={() => setView('home')} className="icon-btn back-btn">←</button>
+            )}
+            <h2 className="page-title">{headerTitle}</h2>
+            <div className="actions">
+              <button onClick={onLogout} className="btn btn-ghost danger-text">Выйти</button>
             </div>
           </div>
 
-          <div style={styles.headerCard}>
-            <div style={styles.headerInner}>
-              <div style={styles.avatar}>
-                  {resolvedAvatarUrl && !avatarBroken ? (
-                    <img
-                      alt=""
-                      src={resolvedAvatarUrl}
-                      style={styles.avatarImg}
-                      onError={() => setAvatarBroken(true)}
-                    />
+          {/* User Info Card */}
+          <div className="profile-header-card">
+            <div className="profile-header-content">
+              <div className="profile-avatar-wrapper">
+                {resolvedAvatarUrl && !avatarBroken ? (
+                  <img
+                    alt={profile?.name}
+                    src={resolvedAvatarUrl}
+                    className="profile-avatar"
+                    onError={() => setAvatarBroken(true)}
+                  />
                 ) : (
-                  <div style={styles.avatarFallback}>
-                    {String(profile?.name || 'U')
-                      .trim()
-                      .slice(0, 1)
-                      .toUpperCase()}
+                  <div className="profile-avatar-fallback">
+                    {String(profile?.name || 'U').charAt(0).toUpperCase()}
                   </div>
                 )}
               </div>
 
-              <div style={styles.headerText}>
-                <div style={styles.nameRow}>
-                  {profileLoading ? <SkeletonLine w={220} /> : <div style={styles.name}>{profile?.name || '—'}</div>}
-                  <div style={styles.badge}>GovChat</div>
+              <div className="profile-info">
+                <div className="profile-name-row">
+                  {profileLoading ? (
+                    <SkeletonLine w={180} />
+                  ) : (
+                    <h1 className="profile-name">{profile?.name || 'Пользователь'}</h1>
+                  )}
+                  <span className="badge">GovChat</span>
                 </div>
-                <div style={styles.subRow}>
-                  {profileLoading ? <SkeletonLine w={160} /> : <div style={styles.subText}>{profile?.phone || '—'}</div>}
-                  {profile?.createdAt ? <div style={styles.subMuted}>с {new Date(profile.createdAt).toLocaleDateString()}</div> : null}
+
+                <div className="profile-details">
+                  {profileLoading ? <SkeletonLine w={120} /> : <span className="profile-phone">{profile?.phone}</span>}
+                  {profile?.createdAt && (
+                    <span className="profile-date">с {new Date(profile.createdAt).toLocaleDateString()}</span>
+                  )}
                 </div>
-                {profileError ? <div style={styles.errorText}>{profileError}</div> : null}
+
+                {profileError && <div className="error-text">{profileError}</div>}
               </div>
             </div>
           </div>
 
-          {view === 'home' && (
-            <div style={styles.grid}>
-              <div style={styles.colSpan12}>
-                <HrumOverview onOpenHistory={() => setView('history')} onOpenShop={() => setView('shop')} onOpenTasks={() => setView('tasks')} />
+          {/* Content Views */}
+          <div className="profile-content">
+            {view === 'home' && (
+              <div className="dashboard-grid">
+                <div className="full-width">
+                  <HrumOverview
+                    onOpenHistory={() => setView('history')}
+                    onOpenShop={() => setView('shop')}
+                    onOpenTasks={() => setView('tasks')}
+                  />
+                </div>
+                <div className="half-width">
+                  <TasksPanel mode="preview" onOpenAll={() => setView('tasks')} />
+                </div>
+                <div className="half-width">
+                  <ShopPanel mode="preview" onOpenAll={() => setView('shop')} />
+                </div>
               </div>
-              <div style={styles.colSpan6}>
-                <TasksPanel mode="preview" onOpenAll={() => setView('tasks')} />
-              </div>
-              <div style={styles.colSpan6}>
-                <ShopPanel mode="preview" onOpenAll={() => setView('shop')} />
-              </div>
-            </div>
-          )}
+            )}
 
-          {view === 'tasks' && <TasksPanel mode="full" />}
-          {view === 'shop' && <ShopPanel mode="full" />}
-          {view === 'history' && <WalletHistoryPanel />}
+            {view === 'tasks' && <TasksPanel mode="full" />}
+            {view === 'shop' && <ShopPanel mode="full" />}
+            {view === 'history' && <WalletHistoryPanel />}
+          </div>
         </div>
+
+        <style>{`
+            .profile-page {
+                position: relative;
+                min-height: 100%;
+                background-color: var(--bg-primary);
+            }
+
+            .profile-cover {
+                height: 180px;
+                background: linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%);
+                position: relative;
+            }
+
+            .cover-gradient {
+                position: absolute;
+                inset: 0;
+                background: linear-gradient(to bottom, transparent, var(--bg-primary));
+                opacity: 0.8;
+            }
+
+            .profile-container {
+                max-width: 900px;
+                margin: 0 auto;
+                padding: 0 20px 40px;
+                position: relative;
+                margin-top: -60px; /* Overlap cover */
+                z-index: 10;
+            }
+
+            .profile-nav-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                margin-bottom: 20px;
+                height: 48px;
+            }
+
+            .page-title {
+                font-size: 20px;
+                font-weight: 700;
+                display: none; /* Hidden on desktop primarily */
+            }
+
+            .profile-header-card {
+                background-color: var(--bg-card);
+                border-radius: var(--radius-card);
+                padding: 24px;
+                border: 1px solid var(--border-light);
+                margin-bottom: 24px;
+                box-shadow: var(--shadow-lg);
+            }
+
+            .profile-header-content {
+                display: flex;
+                align-items: flex-end;
+                gap: 24px;
+            }
+
+            .profile-avatar-wrapper {
+                width: 100px;
+                height: 100px;
+                border-radius: 50%;
+                padding: 4px;
+                background-color: var(--bg-card);
+                margin-top: -50px; /* Pull up */
+                position: relative;
+            }
+
+            .profile-avatar, .profile-avatar-fallback {
+                width: 100%;
+                height: 100%;
+                border-radius: 50%;
+                object-fit: cover;
+                background-color: var(--bg-surface);
+            }
+
+            .profile-avatar-fallback {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 32px;
+                font-weight: 700;
+                color: var(--text-secondary);
+            }
+
+            .profile-info {
+                flex: 1;
+                padding-bottom: 8px;
+            }
+
+            .profile-name-row {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                margin-bottom: 4px;
+            }
+
+            .profile-name {
+                font-size: 24px;
+                font-weight: 800;
+                color: var(--text-primary);
+                margin: 0;
+            }
+
+            .badge {
+                background-color: rgba(139, 92, 246, 0.2);
+                color: var(--accent);
+                font-size: 12px;
+                font-weight: 700;
+                padding: 2px 8px;
+                border-radius: 999px;
+            }
+
+            .profile-details {
+                display: flex;
+                gap: 16px;
+                color: var(--text-muted);
+                font-size: 14px;
+                font-weight: 500;
+            }
+
+            .dashboard-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 16px;
+            }
+
+            .full-width {
+                grid-column: span 2;
+            }
+
+            .danger-text {
+                color: var(--danger);
+            }
+            .danger-text:hover {
+                background-color: rgba(239, 68, 68, 0.1);
+            }
+
+            @media (max-width: 768px) {
+                .dashboard-grid {
+                    grid-template-columns: 1fr;
+                }
+                .full-width, .half-width {
+                    grid-column: span 1;
+                }
+                .profile-header-content {
+                    flex-direction: column;
+                    align-items: center;
+                    text-align: center;
+                    gap: 12px;
+                }
+                .profile-avatar-wrapper {
+                    margin-top: -60px;
+                }
+                .profile-name-row {
+                    justify-content: center;
+                }
+                .profile-details {
+                    justify-content: center;
+                }
+            }
+        `}</style>
       </div>
     </EconomyStoreProvider>
   );
 }
 
-const styles = {
-  overlay: {
-    position: 'fixed',
-    inset: 0,
-    zIndex: 9999,
-    overflow: 'auto',
-    background: '#0b1220'
-  },
-  bg: {
-    position: 'fixed',
-    inset: 0,
-    background:
-      'radial-gradient(1200px 800px at 10% 10%, rgba(99,102,241,0.22), rgba(0,0,0,0) 60%), radial-gradient(900px 700px at 70% 20%, rgba(168,85,247,0.18), rgba(0,0,0,0) 55%), radial-gradient(900px 700px at 40% 90%, rgba(34,197,94,0.10), rgba(0,0,0,0) 55%)',
-    filter: 'saturate(1.05)'
-  },
-  content: {
-    position: 'relative',
-    maxWidth: 1200,
-    margin: '0 auto',
-    padding: 22,
-    animation: 'ppFadeUp 0.24s ease-out'
-  },
-  topBar: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    marginBottom: 16
-  },
-  topLeft: { display: 'flex', alignItems: 'center', gap: 10, minWidth: 240 },
-  topRight: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end' },
-  topTitle: { color: '#e2e8f0', fontWeight: 900, fontSize: 18, letterSpacing: 0.2 },
-
-  iconBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    border: '1px solid rgba(148,163,184,0.16)',
-    background: 'rgba(2,6,23,0.45)',
-    color: '#e2e8f0',
-    cursor: 'pointer',
-    fontWeight: 900
-  },
-  ghostBtn: {
-    height: 40,
-    padding: '0 12px',
-    borderRadius: 12,
-    border: '1px solid rgba(148,163,184,0.16)',
-    background: 'rgba(2,6,23,0.35)',
-    color: '#e2e8f0',
-    cursor: 'pointer',
-    fontWeight: 900
-  },
-  dangerBtn: {
-    height: 40,
-    padding: '0 12px',
-    borderRadius: 12,
-    border: '1px solid rgba(244,63,94,0.28)',
-    background: 'rgba(244,63,94,0.12)',
-    color: '#fecdd3',
-    cursor: 'pointer',
-    fontWeight: 900
-  },
-
-  headerCard: {
-    borderRadius: 22,
-    border: '1px solid rgba(148,163,184,0.16)',
-    background: 'rgba(15,23,42,0.55)',
-    boxShadow: '0 14px 40px rgba(0,0,0,0.38)',
-    backdropFilter: 'blur(10px)',
-    padding: 18
-  },
-  headerInner: { display: 'flex', alignItems: 'center', gap: 16 },
-  avatar: {
-    width: 72,
-    height: 72,
-    borderRadius: 20,
-    border: '1px solid rgba(148,163,184,0.18)',
-    background: 'linear-gradient(135deg, rgba(99,102,241,0.25), rgba(168,85,247,0.2))',
-    overflow: 'hidden',
-    flexShrink: 0
-  },
-  avatarImg: { width: '100%', height: '100%', objectFit: 'cover' },
-  avatarFallback: {
-    width: '100%',
-    height: '100%',
-    display: 'grid',
-    placeItems: 'center',
-    color: '#e2e8f0',
-    fontWeight: 900,
-    fontSize: 22,
-    letterSpacing: 0.3
-  },
-  headerText: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 },
-  avatarActions: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 6 },
-  nameRow: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
-  name: { color: '#e2e8f0', fontWeight: 950, fontSize: 26, letterSpacing: 0.2 },
-  badge: {
-    padding: '6px 10px',
-    borderRadius: 999,
-    border: '1px solid rgba(168,85,247,0.28)',
-    background: 'rgba(168,85,247,0.12)',
-    color: '#ddd6fe',
-    fontWeight: 900,
-    fontSize: 12
-  },
-  subRow: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
-  subText: { color: '#cbd5e1', fontWeight: 800 },
-  subMuted: { color: '#94a3b8', fontWeight: 800, fontSize: 12 },
-  errorText: { color: '#fca5a5', fontWeight: 900, fontSize: 12 },
-
-  grid: {
-    marginTop: 16,
-    display: 'grid',
-    gridTemplateColumns: 'repeat(12, minmax(0, 1fr))',
-    gap: 14
-  },
-  colSpan12: { gridColumn: 'span 12' },
-  colSpan6: { gridColumn: 'span 6' }
-};
 

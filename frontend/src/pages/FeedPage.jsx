@@ -76,23 +76,35 @@ export default function FeedPage({ token }) {
   };
 
   return (
-    <div style={styles.page}>
-      <h1 style={styles.title}>Лента</h1>
+    <div className="feed-page">
+      <div className="feed-header">
+        <h1 className="feed-title">Главная</h1>
+        <div className="feed-tabs">
+          <button className="feed-tab active">Популярное</button>
+          <button className="feed-tab">Подписки</button>
+        </div>
+      </div>
+
       <PostComposer token={token} onCreated={handlePostCreated} />
 
-      {error ? <div style={styles.error}>{error}</div> : null}
-      {!loading && items.length === 0 ? <div style={styles.empty}>Постов пока нет</div> : null}
+      {error ? <div className="error-message">{error}</div> : null}
 
-      <div style={styles.list}>
+      {!loading && items.length === 0 ? (
+        <div className="empty-state">
+          <p>Пока нет постов</p>
+        </div>
+      ) : null}
+
+      <div className="feed-list">
         {items.map((item) => (
           <PostCard key={item._id} item={item} onOpenComments={setActivePostId} />
         ))}
       </div>
 
-      <div style={styles.loadMoreWrap}>
+      <div className="load-more-container">
         <button
           type="button"
-          style={styles.loadMore}
+          className="btn btn-secondary load-more-btn"
           disabled={loading || !cursor}
           onClick={handleLoadMore}
         >
@@ -103,47 +115,88 @@ export default function FeedPage({ token }) {
       {activePostId ? (
         <CommentsModal token={token} postId={activePostId} onClose={() => setActivePostId(null)} />
       ) : null}
+
+      <style>{`
+        .feed-page {
+          max-width: 680px;
+          margin: 0 auto;
+          padding: 20px 0;
+        }
+
+        .feed-header {
+            margin-bottom: 24px;
+            padding: 0 16px;
+        }
+
+        .feed-title {
+            font-size: 24px;
+            font-weight: 800;
+            margin-bottom: 16px;
+            display: none; /* Hidden on desktop to look more like social feed, visible on mobile if needed */
+        }
+
+        .feed-tabs {
+            display: flex;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .feed-tab {
+            flex: 1;
+            padding: 16px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            border-bottom: 2px solid transparent;
+            transition: var(--transition-fast);
+        }
+
+        .feed-tab:hover {
+            background-color: var(--bg-surface);
+            color: var(--text-primary);
+        }
+
+        .feed-tab.active {
+            color: var(--text-primary);
+            border-bottom-color: var(--accent);
+        }
+
+        .error-message {
+            background-color: rgba(239, 68, 68, 0.1);
+            color: var(--danger);
+            padding: 12px;
+            border-radius: var(--radius-card);
+            margin: 0 16px 16px;
+            text-align: center;
+        }
+
+        .empty-state {
+            padding: 40px;
+            text-align: center;
+            color: var(--text-muted);
+        }
+
+        .feed-list {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .load-more-container {
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }
+
+        .load-more-btn {
+            width: 100%;
+            padding: 12px;
+        }
+
+        @media (max-width: 768px) {
+            .feed-title {
+                display: block;
+            }
+        }
+      `}</style>
     </div>
   );
 }
 
-const styles = {
-  page: {
-    padding: 18,
-    maxWidth: 840,
-    margin: '0 auto'
-  },
-  title: {
-    margin: '0 0 14px 0',
-    color: '#f8fafc',
-    fontSize: 28
-  },
-  error: {
-    marginBottom: 12,
-    color: '#fca5a5'
-  },
-  empty: {
-    border: '1px dashed #334155',
-    borderRadius: 14,
-    padding: 18,
-    color: '#94a3b8'
-  },
-  list: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 12
-  },
-  loadMoreWrap: {
-    marginTop: 14,
-    display: 'flex',
-    justifyContent: 'center'
-  },
-  loadMore: {
-    border: '1px solid #334155',
-    background: '#020617',
-    color: '#cbd5e1',
-    borderRadius: 999,
-    padding: '9px 14px',
-    cursor: 'pointer'
-  }
-};

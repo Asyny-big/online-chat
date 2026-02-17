@@ -8,6 +8,7 @@ import SearchPage from './pages/SearchPage';
 import NotificationsPage from './pages/NotificationsPage';
 import ProfileRoutePage from './pages/ProfileRoutePage';
 import AppNavSidebar from './components/AppNavSidebar';
+import RightPanel from './components/RightPanel';
 import { authStyles as styles } from './styles/authStyles';
 import { initPushNotifications } from './mobile/pushNotifications';
 import AndroidAppDownloadModal from './components/AndroidAppDownloadModal';
@@ -99,21 +100,23 @@ function App() {
       return <AdminPage token={token} onBack={() => navigateTo('#/')} />;
     }
 
+    // Messages layout (2 columns)
     if (key === 'messages') {
       return (
-        <div style={appStyles.appShell}>
+        <div className="app-layout messages-layout">
           <AppNavSidebar activeKey="messages" onNavigate={navigateTo} onLogout={handleLogout} />
-          <main style={appStyles.contentMessages}>
+          <main className="main-content">
             <ChatPage token={token} onLogout={handleLogout} />
           </main>
         </div>
       );
     }
 
+    // Standard Social Layout (3 columns)
     return (
-      <div style={appStyles.appShell}>
+      <div className="app-layout">
         <AppNavSidebar activeKey={key} onNavigate={navigateTo} onLogout={handleLogout} />
-        <main style={appStyles.content}>
+        <main className="main-content">
           {key === 'feed' ? <FeedPage token={token} /> : null}
           {key === 'search' ? <SearchPage token={token} onOpenMessages={() => navigateTo('#/messages')} /> : null}
           {key === 'notifications' ? <NotificationsPage token={token} /> : null}
@@ -121,6 +124,7 @@ function App() {
             <ProfileRoutePage token={token} onLogout={handleLogout} onClose={() => navigateTo('#/')} />
           ) : null}
         </main>
+        <RightPanel />
       </div>
     );
   };
@@ -203,29 +207,34 @@ function App() {
     <>
       {pageContent}
       <AndroidAppDownloadModal />
+      <style>{`
+        .app-layout {
+          display: grid;
+          grid-template-columns: var(--sidebar-width) 1fr var(--right-panel-width);
+          min-height: 100vh;
+        }
+
+        .messages-layout {
+            grid-template-columns: var(--sidebar-width) 1fr;
+        }
+
+        .main-content {
+            border-right: 1px solid var(--border-color);
+            border-left: 1px solid var(--border-color);
+        }
+
+        @media (max-width: 1024px) {
+            .app-layout {
+                grid-template-columns: var(--sidebar-width) 1fr;
+            }
+            .right-panel {
+                display: none;
+            }
+        }
+      `}</style>
     </>
   );
 }
 
-const appStyles = {
-  appShell: {
-    display: 'flex',
-    minHeight: '100vh',
-    background: '#020617'
-  },
-  content: {
-    flex: 1,
-    minWidth: 0,
-    height: '100vh',
-    overflowY: 'auto',
-    overflowX: 'hidden'
-  },
-  contentMessages: {
-    flex: 1,
-    minWidth: 0,
-    height: '100vh',
-    overflow: 'hidden'
-  }
-};
-
 export default App;
+

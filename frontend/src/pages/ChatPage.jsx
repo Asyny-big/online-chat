@@ -17,22 +17,22 @@ function ChatPageInner({ token, onLogout }) {
   const [messages, setMessages] = useState([]);
   const [currentUserId, setCurrentUserId] = useState(null);
   const [typingUsers, setTypingUsers] = useState([]);
-  
+
   // Состояние звонка (для 1-to-1)
   const [callState, setCallState] = useState('idle'); // idle | incoming | outgoing | active
   const [callType, setCallType] = useState(null);     // audio | video
   const [callId, setCallId] = useState(null);
   const [remoteUser, setRemoteUser] = useState(null);
-  
+
   // Данные входящего звонка для отображения в UI (баннер и индикатор)
   const [incomingCallData, setIncomingCallData] = useState(null);
 
   // Состояние группового звонка
   const [groupCallState, setGroupCallState] = useState('idle'); // idle | incoming | active
   const [groupCallData, setGroupCallData] = useState(null);
-  
+
   const socketRef = useRef(null);
-  
+
   // Refs для использования актуальных значений в обработчиках сокета
   const chatsRef = useRef(chats);
   const selectedChatRef = useRef(selectedChat);
@@ -41,7 +41,7 @@ function ChatPageInner({ token, onLogout }) {
   const currentUserIdRef = useRef(currentUserId);
   const groupCallStateRef = useRef(groupCallState);
   const groupCallDataRef = useRef(groupCallData);
-  
+
   // Обновляем refs при изменении состояния
   useEffect(() => { chatsRef.current = chats; }, [chats]);
   useEffect(() => { selectedChatRef.current = selectedChat; }, [selectedChat]);
@@ -163,7 +163,7 @@ function ChatPageInner({ token, onLogout }) {
         if (!raw) return;
         const abs = raw.startsWith('-') ? raw.slice(1) : raw.startsWith('+') ? raw.slice(1) : raw;
         showEarn({ amountHrum: abs, txId: t.id });
-      } catch (_) {}
+      } catch (_) { }
     },
     [token, showEarn]
   );
@@ -173,13 +173,10 @@ function ChatPageInner({ token, onLogout }) {
     setTimeout(() => economyProbe('earn:call_start'), 2200);
   }, [economyProbe]);
 
-  // Daily login intentionally остается только по явному действию пользователя в профиле (HrumPanel),
-  // чтобы не спамить сеть/консоль при нестабильном backend.
-
   // Получение текущего пользователя
   useEffect(() => {
     if (!token) return;
-    
+
     axios
       .get(`${API_URL}/users/me`, {
         headers: { Authorization: `Bearer ${token}` }
@@ -268,7 +265,7 @@ function ChatPageInner({ token, onLogout }) {
         if (prev.some(c => c._id === newChat._id)) return prev;
         return [newChat, ...prev];
       });
-      
+
       // Присоединяемся к комнате нового чата
       socket.emit('chat:join', { chatId: newChat._id });
     });
@@ -277,7 +274,7 @@ function ChatPageInner({ token, onLogout }) {
     socket.on('message:deleted', ({ chatId, messageId }) => {
       console.log('[ChatPage] Message deleted:', messageId);
       setMessages((prev) => prev.filter(m => m._id !== messageId));
-      
+
       // Обновляем lastMessage в списке чатов если удалено последнее сообщение
       setChats((prev) => prev.map(chat => {
         if (chat._id === chatId && chat.lastMessage?._id === messageId) {
@@ -291,7 +288,7 @@ function ChatPageInner({ token, onLogout }) {
     socket.on('chat:deleted', ({ chatId }) => {
       console.log('[ChatPage] Chat deleted:', chatId);
       setChats((prev) => prev.filter(c => c._id !== chatId));
-      
+
       // Если удалён текущий выбранный чат - сбрасываем выбор
       if (selectedChatRef.current?._id === chatId) {
         setSelectedChat(null);
@@ -302,10 +299,10 @@ function ChatPageInner({ token, onLogout }) {
     // === ЗВОНКИ ===
     socket.on('call:incoming', ({ callId: incomingCallId, chatId: incomingChatId, chatName, initiator, type }) => {
       console.log('[ChatPage] Incoming call:', { incomingCallId, incomingChatId, initiator, type });
-      
+
       // Ищем чат для отображения
       const chat = chatsRef.current.find(c => c._id === incomingChatId);
-      
+
       // Сохраняем данные входящего звонка для UI
       setIncomingCallData({
         callId: incomingCallId,
@@ -317,7 +314,7 @@ function ChatPageInner({ token, onLogout }) {
         },
         type
       });
-      
+
       setCallState('incoming');
       setCallType(type);
       setCallId(incomingCallId);
@@ -326,7 +323,7 @@ function ChatPageInner({ token, onLogout }) {
         name: initiator.name || chatName || 'Пользователь',
         avatarUrl: initiator.avatarUrl
       });
-      
+
       // Если мы не в этом чате - переключаемся
       if (!selectedChatRef.current || selectedChatRef.current._id !== incomingChatId) {
         if (chat) {
@@ -337,13 +334,13 @@ function ChatPageInner({ token, onLogout }) {
 
     socket.on('call:participant_joined', ({ callId: cId, userId: joinedUserId, userName }) => {
       console.log('[ChatPage] Participant joined:', { cId, joinedUserId, userName, currentCallId: callIdRef.current, currentCallState: callStateRef.current, currentUserId: currentUserIdRef.current });
-      
+
       // Игнорируем если это мы сами
       if (joinedUserId === currentUserIdRef.current) {
         console.log('[ChatPage] Ignoring self participant_joined');
         return;
       }
-      
+
       // Если это наш звонок и мы инициатор (outgoing)
       if (callStateRef.current === 'outgoing') {
         setCallState('active');
@@ -367,7 +364,7 @@ function ChatPageInner({ token, onLogout }) {
     // === ГРУППОВЫЕ ЗВОНКИ ===
     socket.on('group-call:incoming', ({ callId, chatId, chatName, initiator, type, participantCount }) => {
       console.log('[ChatPage] Incoming group call:', { callId, chatId, chatName, initiator });
-      
+
       // Если уже в звонке - игнорируем
       if (callStateRef.current !== 'idle' || groupCallStateRef.current !== 'idle') {
         console.log('[ChatPage] Already in call, ignoring incoming group call');
@@ -532,7 +529,7 @@ function ChatPageInner({ token, onLogout }) {
   // === Удаление ===
   const handleDeleteMessage = useCallback(async (messageId) => {
     if (!selectedChat || !token) return;
-    
+
     try {
       await axios.delete(
         `${API_URL}/messages/${selectedChat._id}/${messageId}`,
@@ -547,7 +544,7 @@ function ChatPageInner({ token, onLogout }) {
 
   const handleDeleteChat = useCallback(async () => {
     if (!selectedChat || !token) return;
-    
+
     try {
       await axios.delete(
         `${API_URL}/chats/${selectedChat._id}`,
@@ -568,9 +565,9 @@ function ChatPageInner({ token, onLogout }) {
     const otherParticipant = selectedChat.participants?.find(
       p => (p.user?._id || p.user) !== currentUserId
     );
-    
+
     const targetUser = otherParticipant?.user || otherParticipant;
-    
+
     setRemoteUser({
       _id: targetUser?._id || targetUser,
       name: selectedChat.displayName || selectedChat.name || 'Пользователь'
@@ -610,7 +607,6 @@ function ChatPageInner({ token, onLogout }) {
     if (!selectedChat || !socketRef.current || selectedChat.type !== 'group') return;
 
     // Если мы уже знаем, что в чате идёт групповой звонок — просто присоединяемся.
-    // Почему так: пользователь может выйти/войти в звонок в любое время.
     const knownActiveCallId = selectedChat.activeGroupCall?.callId;
     const knownActiveType = selectedChat.activeGroupCall?.type;
     if (knownActiveCallId) {
@@ -662,7 +658,6 @@ function ChatPageInner({ token, onLogout }) {
 
   const handleJoinGroupCall = useCallback((callIdFromUi, typeFromUi) => {
     // Присоединение может происходить из баннера входящего звонка.
-    // В этом кейсе важно сделать autoJoin, чтобы GroupCallModal отправил group-call:join.
     const data = groupCallDataRef.current;
     if (!data && (!callIdFromUi || !selectedChatRef.current?._id)) return;
 
@@ -703,7 +698,7 @@ function ChatPageInner({ token, onLogout }) {
     }
     resetCallState();
   }, []);
-  
+
   // Колбэк когда звонок принят в CallModal
   const handleCallAccepted = useCallback(() => {
     console.log('[ChatPage] Call accepted in modal');
@@ -712,12 +707,9 @@ function ChatPageInner({ token, onLogout }) {
   }, []);
 
   return (
-    <div style={styles.container}>
+    <div className="chat-page-layout">
       {/* Сайдбар с чатами */}
-      <div 
-        className={`sidebar-wrapper ${selectedChat ? 'hidden' : ''}`}
-        style={styles.sidebarWrapper}
-      >
+      <div className={`chat-sidebar-wrapper ${selectedChat ? 'hidden' : ''}`}>
         <Sidebar
           token={token}
           chats={chats}
@@ -731,10 +723,7 @@ function ChatPageInner({ token, onLogout }) {
       </div>
 
       {/* Окно чата */}
-      <div 
-        className={`chat-window-wrapper ${selectedChat ? 'active' : ''}`}
-        style={styles.chatWindowWrapper}
-      >
+      <div className={`chat-window-wrapper ${selectedChat ? 'active' : ''}`}>
         <ChatWindow
           token={token}
           chat={selectedChat}
@@ -790,85 +779,64 @@ function ChatPageInner({ token, onLogout }) {
           onJoin={handleJoinGroupCall}
         />
       )}
+
+      <style>{`
+        .chat-page-layout {
+            display: flex;
+            height: 100vh;
+            height: 100dvh;
+            overflow: hidden;
+            background: var(--bg-primary);
+            position: relative;
+        }
+
+        .chat-sidebar-wrapper {
+            width: 320px;
+            flex-shrink: 0;
+            height: 100%;
+            transition: transform 0.3s ease;
+            border-right: 1px solid var(--border-color);
+        }
+
+        .chat-window-wrapper {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            min-width: 0;
+        }
+
+        @media (max-width: 768px) {
+            .chat-sidebar-wrapper {
+                position: absolute;
+                top: 0; left: 0;
+                width: 100%; height: 100%;
+                z-index: 10;
+                background-color: var(--bg-primary);
+                transform: translateX(0);
+            }
+            
+            .chat-sidebar-wrapper.hidden {
+                transform: translateX(-100%);
+                pointer-events: none;
+            }
+
+            .chat-window-wrapper {
+                position: absolute;
+                top: 0; left: 0; right: 0; bottom: 0;
+                z-index: 20;
+                background-color: var(--bg-primary);
+                transform: translateX(100%);
+                transition: transform 0.3s ease;
+            }
+
+            .chat-window-wrapper.active {
+                transform: translateX(0);
+            }
+        }
+      `}</style>
     </div>
   );
-}
-
-const styles = {
-  container: {
-    display: 'flex',
-    height: '100vh',
-    height: '100dvh', // для мобильных браузеров
-    overflow: 'hidden',
-    background: '#0f172a',
-    position: 'relative',
-  },
-  sidebarWrapper: {
-    width: '320px',
-    flexShrink: 0,
-    height: '100%',
-    transition: 'transform 0.3s ease',
-  },
-  chatWindowWrapper: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-    height: '100%',
-    minWidth: 0,
-  },
-};
-
-// Добавляем медиа-запросы через CSS-in-JS
-if (typeof window !== 'undefined') {
-  const styleSheet = document.createElement('style');
-  styleSheet.textContent = `
-    @media (max-width: 768px) {
-      .mobile-menu-btn {
-        display: none !important;
-      }
-      .sidebar-wrapper {
-        position: absolute !important;
-        top: 0;
-        left: 0;
-        height: 100% !important;
-        z-index: 100;
-        width: 100% !important;
-        transform: translateX(0);
-        transition: transform 0.3s ease;
-      }
-      .sidebar-wrapper.hidden {
-        transform: translateX(-100%);
-        pointer-events: none;
-      }
-      .chat-window-wrapper {
-        position: absolute !important;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        z-index: 99;
-        transform: translateX(100%);
-        transition: transform 0.3s ease;
-      }
-      .chat-window-wrapper.active {
-        transform: translateX(0);
-      }
-      .overlay {
-        display: block !important;
-      }
-    }
-    
-    @keyframes blink {
-      0%, 50%, 100% { opacity: 1; }
-      25%, 75% { opacity: 0.3; }
-    }
-    
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
-    }
-  `;
-  document.head.appendChild(styleSheet);
 }
 
 function ChatPageWithToasts(props) {
@@ -880,4 +848,3 @@ function ChatPageWithToasts(props) {
 }
 
 export default ChatPageWithToasts;
-

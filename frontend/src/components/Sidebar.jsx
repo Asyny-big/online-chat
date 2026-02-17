@@ -10,18 +10,19 @@ function Sidebar({ token, chats, selectedChat, onSelectChat, onCreateChat, onAdd
   const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const isDesktop = useMediaQuery('(min-width: 769px)', { defaultValue: true });
+
   return (
-    <div style={styles.sidebar}>
+    <div className="chat-sidebar">
       {/* Заголовок и кнопки */}
-      <div style={styles.header}>
-        <h2 style={styles.title}>
-          <span style={styles.logo}>🦆</span>
+      <div className="sidebar-header">
+        <h2 className="sidebar-title">
+          <span className="logo-emoji">🦆</span>
           GovChat
         </h2>
-        <div style={styles.headerActions}>
-          <button 
-            onClick={() => setShowCreateGroupModal(true)} 
-            style={styles.groupChatBtn} 
+        <div className="header-actions">
+          <button
+            onClick={() => setShowCreateGroupModal(true)}
+            className="icon-btn-outline group-btn"
             title="Создать групповой чат"
           >
             👥
@@ -41,10 +42,10 @@ function Sidebar({ token, chats, selectedChat, onSelectChat, onCreateChat, onAdd
       />
 
       {/* Внизу списка чатов */}
-      <div style={styles.bottomBar}>
-        <button style={styles.profileBtn} onClick={() => setShowProfile(true)}>
-          <span style={styles.profileIcon}>👤</span>
-          <span style={styles.profileText}>Профиль</span>
+      <div className="sidebar-footer">
+        <button className="profile-btn-full" onClick={() => setShowProfile(true)}>
+          <span className="profile-icon">👤</span>
+          <span className="profile-text">Профиль</span>
         </button>
       </div>
 
@@ -68,92 +69,117 @@ function Sidebar({ token, chats, selectedChat, onSelectChat, onCreateChat, onAdd
           <ProfileDrawer token={token} onClose={() => setShowProfile(false)} onLogout={onLogout} />
         )
       )}
+
+      <style>{`
+        .chat-sidebar {
+            width: 100%;
+            height: 100%;
+            background-color: var(--bg-secondary);
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid var(--border-color);
+            overflow: hidden;
+        }
+
+        .sidebar-header {
+            padding: 16px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+            background-color: var(--bg-surface);
+        }
+
+        .sidebar-title {
+            margin: 0;
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .logo-emoji {
+            font-size: 24px;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .icon-btn-outline {
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: transparent;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: var(--transition-fast);
+            color: var(--text-secondary);
+        }
+
+        .group-btn {
+            color: var(--accent);
+            border-color: var(--accent);
+        }
+
+        .group-btn:hover {
+            background-color: rgba(168, 85, 247, 0.1);
+        }
+
+        .sidebar-footer {
+            margin-top: auto;
+            padding: 12px;
+            border-top: 1px solid var(--border-color);
+            background-color: var(--bg-surface);
+        }
+
+        .profile-btn-full {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 14px;
+            border-radius: 14px;
+            border: 1px solid var(--border-light);
+            background-color: var(--bg-input);
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: var(--transition-fast);
+        }
+
+        .profile-btn-full:hover {
+            background-color: var(--bg-hover);
+        }
+
+        .profile-icon {
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            flex-shrink: 0;
+            font-size: 18px;
+        }
+
+        .profile-text {
+            font-size: 14px;
+            font-weight: 700;
+            letter-spacing: 0.1px;
+        }
+      `}</style>
     </div>
   );
 }
 
-const styles = {
-  sidebar: {
-    width: '100%',
-    height: '100%',
-    background: '#1e293b',
-    display: 'flex',
-    flexDirection: 'column',
-    borderRight: '1px solid #334155',
-    overflow: 'hidden',
-  },
-  header: {
-    padding: '16px',
-    borderBottom: '1px solid #334155',
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    flexShrink: 0,
-  },
-  headerActions: {
-    display: 'flex',
-    gap: '8px',
-  },
-  title: {
-    margin: 0,
-    fontSize: '20px',
-    fontWeight: '700',
-    color: '#fff',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-  },
-  logo: {
-    fontSize: '24px',
-  },
-  groupChatBtn: {
-    width: '36px',
-    height: '36px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: 'transparent',
-    color: '#a855f7',
-    border: '1px solid #a855f7',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    fontSize: '16px',
-    transition: 'all 0.2s',
-  },
-  bottomBar: {
-    marginTop: 'auto',
-    padding: '12px',
-    borderTop: '1px solid #334155',
-    background: 'rgba(15,23,42,0.35)',
-  },
-  profileBtn: {
-    width: '100%',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-    padding: '12px 14px',
-    borderRadius: '14px',
-    border: '1px solid rgba(148,163,184,0.18)',
-    background: 'rgba(2,6,23,0.35)',
-    color: '#fff',
-    cursor: 'pointer',
-    transition: 'transform 0.15s ease, background 0.15s ease',
-  },
-  profileIcon: {
-    width: '34px',
-    height: '34px',
-    borderRadius: '50%',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-    flexShrink: 0,
-  },
-  profileText: {
-    fontSize: '14px',
-    fontWeight: '700',
-    letterSpacing: 0.1,
-  },
-};
-
 export default Sidebar;
+

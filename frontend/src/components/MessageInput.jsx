@@ -289,17 +289,14 @@ function MessageInput({ chatId, socket, token, onTyping }) {
 
   return (
     <div
-      style={{
-        ...styles.container,
-        ...(isDragging ? styles.dragging : {})
-      }}
+      className={`message-input-container ${isDragging ? 'dragging' : ''}`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
       {isDragging && (
-        <div style={styles.dropOverlay}>
-          <span style={styles.dropText}>📎 Отпустите для загрузки</span>
+        <div className="drop-overlay">
+          <span className="drop-text">📎 Отпустите для загрузки</span>
         </div>
       )}
 
@@ -313,25 +310,25 @@ function MessageInput({ chatId, socket, token, onTyping }) {
 
       {isRecording ? (
         // Режим записи
-        <div style={styles.recordingRow}>
-          <div style={styles.recordingIndicator}>
-            <span style={styles.recordingDot} />
-            <span style={styles.recordingTime}>{formatTime(recordingTime)}</span>
+        <div className="recording-row">
+          <div className="recording-indicator">
+            <span className="recording-dot" />
+            <span className="recording-time">{formatTime(recordingTime)}</span>
           </div>
-          <button onClick={cancelRecording} style={styles.cancelBtn} title="Отмена">
+          <button onClick={cancelRecording} className="icon-btn-circle cancel" title="Отмена">
             ✕
           </button>
-          <button onClick={stopRecording} style={styles.sendVoiceBtn} title="Отправить">
+          <button onClick={stopRecording} className="icon-btn-circle send-voice" title="Отправить">
             ➤
           </button>
         </div>
       ) : (
         // Обычный режим
-        <form onSubmit={handleSend} style={styles.form}>
+        <form onSubmit={handleSend} className="input-form">
           <button
             type="button"
             onClick={handleFileSelect}
-            style={styles.iconBtn}
+            className="icon-btn-circle attachment"
             disabled={uploading}
             title="Прикрепить файл"
           >
@@ -343,7 +340,7 @@ function MessageInput({ chatId, socket, token, onTyping }) {
             value={input}
             onChange={handleInputChange}
             placeholder={uploading ? 'Загрузка...' : 'Введите сообщение...'}
-            style={styles.input}
+            className="message-input-field"
             disabled={uploading}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
@@ -356,10 +353,7 @@ function MessageInput({ chatId, socket, token, onTyping }) {
           {input.trim() ? (
             <button
               type="submit"
-              style={{
-                ...styles.sendBtn,
-                ...(canSend ? {} : styles.sendBtnDisabled)
-              }}
+              className={`icon-btn-circle send ${!canSend ? 'disabled' : ''}`}
               disabled={!canSend}
             >
               ➤
@@ -368,7 +362,7 @@ function MessageInput({ chatId, socket, token, onTyping }) {
             <button
               type="button"
               onClick={startRecording}
-              style={styles.micBtn}
+              className="icon-btn-circle mic"
               disabled={uploading}
               title="Голосовое сообщение"
             >
@@ -377,151 +371,74 @@ function MessageInput({ chatId, socket, token, onTyping }) {
           )}
         </form>
       )}
+
+      <style>{`
+        .message-input-container {
+            padding: 12px 16px;
+            border-top: 1px solid var(--border-color);
+            background-color: var(--bg-surface);
+            position: relative;
+        }
+
+        .message-input-container.dragging {
+            background-color: rgba(59, 130, 246, 0.1);
+            border: 2px dashed var(--accent);
+        }
+
+        .drop-overlay {
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            display: flex; align-items: center; justify-content: center;
+            background: rgba(30, 64, 175, 0.9); border-radius: 8px; z-index: 10;
+        }
+        .drop-text { color: white; font-size: 16px; font-weight: 600; }
+
+        .input-form { display: flex; align-items: center; gap: 8px; }
+
+        .message-input-field {
+            flex: 1; padding: 12px 16px; background-color: var(--bg-input);
+            border: 1px solid var(--border-input); borderRadius: 24px;
+            color: var(--text-primary); fontSize: 14px; outline: none; transition: border-color 0.2s;
+        }
+        .message-input-field:focus { border-color: var(--accent); }
+
+        .icon-btn-circle {
+            width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;
+            background: transparent; border: none; borderRadius: 50%; fontSize: 20px;
+            cursor: pointer; transition: background 0.2s; color: var(--text-secondary);
+        }
+        .icon-btn-circle:hover { background-color: var(--bg-hover); color: var(--text-primary); }
+
+        .icon-btn-circle.send { background-color: var(--accent); color: white; fontSize: 16px; }
+        .icon-btn-circle.send:hover { background-color: var(--accent-hover); }
+        .icon-btn-circle.send.disabled { background-color: var(--bg-disabled); cursor: not-allowed; opacity: 0.7; }
+
+        .icon-btn-circle.mic { background-color: var(--bg-surface); color: var(--text-secondary); border: 1px solid var(--border-color); }
+        .icon-btn-circle.mic:hover { background-color: var(--bg-hover); color: var(--accent); border-color: var(--accent); }
+        
+        .icon-btn-circle.attachment:hover { color: var(--accent); }
+
+        /* Recording */
+        .recording-row { display: flex; align-items: center; gap: 12px; }
+        .recording-indicator {
+            flex: 1; display: flex; align-items: center; gap: 10px; padding: 12px 16px;
+            background-color: var(--bg-input); borderRadius: 24px;
+        }
+        .recording-dot {
+            width: 10px; height: 10px; background-color: var(--danger); borderRadius: 50%;
+            animation: pulse 1s infinite;
+        }
+        .recording-time { color: var(--text-primary); fontSize: 14px; fontWeight: 500; }
+
+        .icon-btn-circle.cancel { background-color: rgba(239, 68, 68, 0.1); color: var(--danger); border: 1px solid var(--danger); }
+        .icon-btn-circle.cancel:hover { background-color: var(--danger); color: white; }
+
+        .icon-btn-circle.send-voice { background-color: var(--success); color: white; border: none; }
+        .icon-btn-circle.send-voice:hover { opacity: 0.9; }
+
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+      `}</style>
     </div>
   );
 }
-
-const styles = {
-  container: {
-    padding: '12px 16px',
-    borderTop: '1px solid #334155',
-    background: '#1e293b',
-    position: 'relative',
-  },
-  dragging: {
-    background: '#1e40af',
-  },
-  dropOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: 'rgba(30, 64, 175, 0.9)',
-    borderRadius: '8px',
-    zIndex: 10,
-  },
-  dropText: {
-    color: '#fff',
-    fontSize: '16px',
-    fontWeight: '600',
-  },
-  form: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-  },
-  input: {
-    flex: 1,
-    padding: '12px 16px',
-    background: '#0f172a',
-    border: '1px solid #334155',
-    borderRadius: '24px',
-    color: '#fff',
-    fontSize: '14px',
-    outline: 'none',
-    transition: 'border-color 0.2s',
-  },
-  iconBtn: {
-    width: '40px',
-    height: '40px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: 'transparent',
-    border: 'none',
-    borderRadius: '50%',
-    fontSize: '20px',
-    cursor: 'pointer',
-    transition: 'background 0.2s',
-  },
-  sendBtn: {
-    width: '40px',
-    height: '40px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: '#3b82f6',
-    border: 'none',
-    borderRadius: '50%',
-    fontSize: '16px',
-    color: '#fff',
-    cursor: 'pointer',
-    transition: 'all 0.2s',
-  },
-  sendBtnDisabled: {
-    background: '#334155',
-    cursor: 'not-allowed',
-  },
-  micBtn: {
-    width: '40px',
-    height: '40px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: '#3b82f6',
-    border: 'none',
-    borderRadius: '50%',
-    fontSize: '18px',
-    cursor: 'pointer',
-    transition: 'all 0.2s',
-  },
-  // Запись
-  recordingRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-  },
-  recordingIndicator: {
-    flex: 1,
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-    padding: '12px 16px',
-    background: '#0f172a',
-    borderRadius: '24px',
-  },
-  recordingDot: {
-    width: '10px',
-    height: '10px',
-    background: '#ef4444',
-    borderRadius: '50%',
-    animation: 'pulse 1s infinite',
-  },
-  recordingTime: {
-    color: '#fff',
-    fontSize: '14px',
-    fontWeight: '500',
-  },
-  cancelBtn: {
-    width: '40px',
-    height: '40px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: '#ef4444',
-    border: 'none',
-    borderRadius: '50%',
-    fontSize: '16px',
-    color: '#fff',
-    cursor: 'pointer',
-  },
-  sendVoiceBtn: {
-    width: '40px',
-    height: '40px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: '#22c55e',
-    border: 'none',
-    borderRadius: '50%',
-    fontSize: '16px',
-    color: '#fff',
-    cursor: 'pointer',
-  },
-};
 
 export default MessageInput;

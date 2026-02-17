@@ -32,78 +32,145 @@ export default function PostComposer({ token, onCreated }) {
   };
 
   return (
-    <form onSubmit={handleSubmit} style={styles.wrap}>
-      <textarea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        placeholder="Что у вас нового?"
-        style={styles.textarea}
-        rows={3}
-      />
-      <div style={styles.bottom}>
-        <select
-          value={visibility}
-          onChange={(e) => setVisibility(e.target.value)}
-          style={styles.select}
-        >
-          <option value="public">Публично</option>
-          <option value="friends">Только друзья</option>
-        </select>
-        <button type="submit" disabled={loading || !text.trim()} style={styles.submit}>
-          {loading ? 'Публикация...' : 'Опубликовать'}
-        </button>
+    <div className="composer-container">
+      <div className="composer-avatar">
+        {/* Placeholder for current user avatar */}
+        <div className="avatar-placeholder">😎</div>
       </div>
-      {error ? <div style={styles.error}>{error}</div> : null}
-    </form>
+      <form onSubmit={handleSubmit} className="composer-form">
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="Что нового?"
+          className="composer-input"
+          rows={2}
+        />
+
+        {error ? <div className="composer-error">{error}</div> : null}
+
+        <div className="composer-footer">
+          <div className="composer-actions">
+            <button type="button" className="action-btn" title="Добавить фото">📎</button>
+            <button type="button" className="action-btn" title="Опрос">📊</button>
+            <button type="button" className="action-btn" title="Эмодзи">🎨</button>
+          </div>
+
+          <div className="composer-submit-area">
+            <select
+              value={visibility}
+              onChange={(e) => setVisibility(e.target.value)}
+              className="visibility-select"
+            >
+              <option value="public">🌎 Все</option>
+              <option value="friends">👥 Друзья</option>
+            </select>
+            <button type="submit" disabled={loading || !text.trim()} className="btn btn-primary btn-sm">
+              {loading ? '...' : 'Опубликовать'}
+            </button>
+          </div>
+        </div>
+      </form>
+
+      <style>{`
+        .composer-container {
+            display: flex;
+            gap: 16px;
+            padding: 16px;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 20px;
+        }
+
+        .composer-avatar {
+            flex-shrink: 0;
+        }
+
+        .avatar-placeholder {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background-color: var(--bg-card);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+
+        .composer-form {
+            flex: 1;
+        }
+
+        .composer-input {
+            width: 100%;
+            background: transparent;
+            border: none;
+            color: var(--text-primary);
+            font-size: 16px;
+            resize: none;
+            min-height: 60px;
+            padding: 10px 0;
+        }
+
+        .composer-input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .composer-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid var(--border-light);
+        }
+
+        .composer-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .action-btn {
+            color: var(--accent);
+            font-size: 18px;
+            padding: 6px;
+            border-radius: 50%;
+            transition: var(--transition-fast);
+        }
+
+        .action-btn:hover {
+            background-color: var(--accent-light);
+        }
+
+        .composer-submit-area {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .visibility-select {
+            background: transparent;
+            color: var(--text-secondary);
+            border: none;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .visibility-select:hover {
+            color: var(--text-primary);
+        }
+
+        .composer-error {
+            color: var(--danger);
+            font-size: 13px;
+            margin-bottom: 8px;
+        }
+
+        .btn-sm {
+            padding: 6px 16px;
+            font-size: 14px;
+        }
+      `}</style>
+    </div>
   );
 }
 
-const styles = {
-  wrap: {
-    border: '1px solid #1f2937',
-    background: '#0f172a',
-    borderRadius: 16,
-    padding: 14,
-    marginBottom: 14
-  },
-  textarea: {
-    width: '100%',
-    background: '#020617',
-    color: '#e2e8f0',
-    border: '1px solid #334155',
-    borderRadius: 12,
-    padding: 12,
-    outline: 'none',
-    resize: 'vertical',
-    boxSizing: 'border-box',
-    fontSize: 15
-  },
-  bottom: {
-    marginTop: 10,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10
-  },
-  select: {
-    background: '#020617',
-    color: '#cbd5e1',
-    border: '1px solid #334155',
-    borderRadius: 10,
-    padding: '8px 10px'
-  },
-  submit: {
-    background: '#0284c7',
-    color: '#f8fafc',
-    border: 'none',
-    borderRadius: 999,
-    padding: '10px 16px',
-    fontWeight: 700,
-    cursor: 'pointer'
-  },
-  error: {
-    marginTop: 8,
-    color: '#fca5a5',
-    fontSize: 13
-  }
-};

@@ -1,0 +1,44 @@
+:root {
+  /* Colors */
+  --bg-primary: #020617;   /* Slate 950 */
+  --bg-surface: #0f172a;   /* Slate 900 */
+  --bg-card: #1e293b;      /* Slate 800 */
+  
+  --text-primary: #f8fafc; /* Slate 50 */
+  --text-secondary: #94a3b8; /* Slate 400 */
+  --text-muted: #64748b;   /* Slate 500 */
+
+  --accent: #8b5cf6;       /* Violet 500 */
+  --accent-hover: #7c3aed; /* Violet 600 */
+  --accent-light: rgba(139, 92, 246, 0.1);
+
+  --danger: #ef4444;       /* Red 500 */
+  --success: #22c55e;      /* Green 500 */
+  --warning: #eab308;      /* Yellow 500 */
+
+  /* Borders */
+  --border-color: #334155; /* Slate 700 */
+  --border-light: rgba(255, 255, 255, 0.08);
+
+  /* Radii */
+  --radius-xs: 8px;
+  --radius-card: 12px;
+  --radius-modal: 20px;
+  --radius-pill: 999px;
+  --radius-round: 50%;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  --shadow-glow: 0 0 15px rgba(139, 92, 246, 0.3);
+
+  /* Transitions */
+  --transition-fast: 150ms ease;
+  --transition-normal: 250ms ease;
+
+  /* Spacing */
+  --header-height: 60px;
+  --sidebar-width: 80px;
+  --right-panel-width: 350px;
+}
