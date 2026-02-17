@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+﻿import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { API_URL } from '../config';
 import PostComposer from '../components/PostComposer';
@@ -12,31 +12,55 @@ export default function FeedPage({ token }) {
   const [error, setError] = useState('');
   const [activePostId, setActivePostId] = useState(null);
 
-  const loadFeed = useCallback(async ({ reset = false } = {}) => {
-    if (loading) return;
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadInitial = async () => {
+      setItems([]);
+      setCursor(null);
+      setLoading(true);
+      setError('');
+      try {
+        const res = await axios.get(`${API_URL}/social/feed`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (cancelled) return;
+
+        const nextItems = Array.isArray(res.data?.items) ? res.data.items : [];
+        setItems(nextItems);
+        setCursor(res.data?.nextCursor || null);
+      } catch (err) {
+        if (cancelled) return;
+        setError(err.response?.data?.error || 'Не удалось загрузить ленту');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    loadInitial();
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
+  const handleLoadMore = async () => {
+    if (loading || !cursor) return;
 
     setLoading(true);
     setError('');
     try {
-      const query = reset || !cursor ? '' : `?cursor=${encodeURIComponent(cursor)}`;
-      const res = await axios.get(`${API_URL}/social/feed${query}`, {
+      const res = await axios.get(`${API_URL}/social/feed?cursor=${encodeURIComponent(cursor)}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const nextItems = Array.isArray(res.data?.items) ? res.data.items : [];
-      setItems((prev) => (reset ? nextItems : [...prev, ...nextItems]));
+      setItems((prev) => [...prev, ...nextItems]);
       setCursor(res.data?.nextCursor || null);
     } catch (err) {
       setError(err.response?.data?.error || 'Не удалось загрузить ленту');
     } finally {
       setLoading(false);
     }
-  }, [cursor, loading, token]);
-
-  useEffect(() => {
-    setItems([]);
-    setCursor(null);
-    loadFeed({ reset: true });
-  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+  };
 
   const handlePostCreated = (post) => {
     if (!post?._id) return;
@@ -70,7 +94,7 @@ export default function FeedPage({ token }) {
           type="button"
           style={styles.loadMore}
           disabled={loading || !cursor}
-          onClick={() => loadFeed({ reset: false })}
+          onClick={handleLoadMore}
         >
           {loading ? 'Загрузка...' : cursor ? 'Показать ещё' : 'Конец ленты'}
         </button>

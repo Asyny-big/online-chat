@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+﻿import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { API_URL } from '../config';
 
@@ -17,31 +17,55 @@ export default function NotificationsPage({ token }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const loadNotifications = useCallback(async ({ reset = false } = {}) => {
-    if (loading) return;
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadInitial = async () => {
+      setItems([]);
+      setCursor(null);
+      setLoading(true);
+      setError('');
+      try {
+        const res = await axios.get(`${API_URL}/social/notifications`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (cancelled) return;
+
+        const nextItems = Array.isArray(res.data?.items) ? res.data.items : [];
+        setItems(nextItems);
+        setCursor(res.data?.nextCursor || null);
+      } catch (err) {
+        if (cancelled) return;
+        setError(err.response?.data?.error || 'Не удалось загрузить уведомления');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    loadInitial();
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
+  const handleLoadMore = async () => {
+    if (loading || !cursor) return;
 
     setLoading(true);
     setError('');
     try {
-      const query = reset || !cursor ? '' : `?cursor=${encodeURIComponent(cursor)}`;
-      const res = await axios.get(`${API_URL}/social/notifications${query}`, {
+      const res = await axios.get(`${API_URL}/social/notifications?cursor=${encodeURIComponent(cursor)}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const nextItems = Array.isArray(res.data?.items) ? res.data.items : [];
-      setItems((prev) => (reset ? nextItems : [...prev, ...nextItems]));
+      setItems((prev) => [...prev, ...nextItems]);
       setCursor(res.data?.nextCursor || null);
     } catch (err) {
       setError(err.response?.data?.error || 'Не удалось загрузить уведомления');
     } finally {
       setLoading(false);
     }
-  }, [cursor, loading, token]);
-
-  useEffect(() => {
-    setItems([]);
-    setCursor(null);
-    loadNotifications({ reset: true });
-  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+  };
 
   return (
     <div style={styles.page}>
@@ -69,7 +93,7 @@ export default function NotificationsPage({ token }) {
           type="button"
           style={styles.loadMore}
           disabled={loading || !cursor}
-          onClick={() => loadNotifications({ reset: false })}
+          onClick={handleLoadMore}
         >
           {loading ? 'Загрузка...' : cursor ? 'Показать ещё' : 'Конец списка'}
         </button>
