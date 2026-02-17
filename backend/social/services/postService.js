@@ -1,10 +1,12 @@
 const mongoose = require('mongoose');
 const Post = require('../../models/Post');
 const Media = require('../../models/Media');
-const Comment = require('../../models/Comment');
-const Reaction = require('../../models/Reaction');
 const { incrementUserCounters } = require('./userCounterService');
-const { fanOutPostOnWrite, rebuildPostFeed, removePostFromFeed } = require('./feedService');
+const {
+  enqueueFeedFanoutPost,
+  enqueueFeedRebuildPost,
+  enqueuePostCleanup
+} = require('./queueService');
 const { isFriend } = require('./accessService');
 const {
   decodeCursor,
@@ -49,12 +51,12 @@ async function assertMediaOwnership(mediaIds, ownerId) {
     throw httpError(400, 'Invalid media id');
   }
 
-  const ownedCount = await Media.countDocuments({
+  const ownedMedia = await Media.find({
     _id: { $in: validObjectIds },
     ownerId
-  });
+  }).select('_id').lean();
 
-  if (ownedCount !== mediaIds.length) {
+  if (ownedMedia.length !== mediaIds.length) {
     throw httpError(403, 'Media item does not belong to user');
   }
 }
@@ -93,10 +95,8 @@ async function createPost({ authorId, text, media, visibility }) {
 
   await incrementUserCounters(authorObjectId, { posts: 1 });
 
-  setImmediate(() => {
-    fanOutPostOnWrite(post.toObject()).catch((error) => {
-      console.error('[Social][Feed] fan-out failed:', error);
-    });
+  enqueueFeedFanoutPost(post._id).catch((error) => {
+    console.error('[Social][Feed] enqueue fan-out failed:', error?.message || error);
   });
 
   return hydratePost(post._id);
@@ -134,10 +134,8 @@ async function updatePost({ postId, authorId, text, media, visibility }) {
   await post.save();
 
   if (visibilityChanged) {
-    setImmediate(() => {
-      rebuildPostFeed(post.toObject()).catch((error) => {
-        console.error('[Social][Feed] rebuild failed:', error);
-      });
+    enqueueFeedRebuildPost(post._id).catch((error) => {
+      console.error('[Social][Feed] enqueue rebuild failed:', error?.message || error);
     });
   }
 
@@ -148,7 +146,9 @@ async function deletePost({ postId, authorId }) {
   const postObjectId = toObjectIdOrFail(postId, 'postId');
   const authorObjectId = toObjectIdOrFail(authorId, 'authorId');
 
-  const post = await Post.findOne({ _id: postObjectId, authorId: authorObjectId }).lean();
+  const post = await Post.findOne({ _id: postObjectId, authorId: authorObjectId })
+    .select('_id authorId')
+    .lean();
   if (!post) {
     throw httpError(404, 'Post not found');
   }
@@ -156,18 +156,9 @@ async function deletePost({ postId, authorId }) {
   await Post.deleteOne({ _id: postObjectId, authorId: authorObjectId });
   await incrementUserCounters(authorObjectId, { posts: -1 });
 
-  const comments = await Comment.find({ postId: postObjectId }).select('_id').lean();
-  const commentIds = comments.map((comment) => comment._id);
-
-  await Comment.deleteMany({ postId: postObjectId });
-  await Reaction.deleteMany({ targetType: 'post', targetId: postObjectId });
-  if (commentIds.length) {
-    await Reaction.deleteMany({
-      targetType: 'comment',
-      targetId: { $in: commentIds }
-    });
-  }
-  await removePostFromFeed(postObjectId);
+  enqueuePostCleanup({ postId: postObjectId }).catch((error) => {
+    console.error('[Social][Post] enqueue cleanup failed:', error?.message || error);
+  });
 
   return { success: true };
 }

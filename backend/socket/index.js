@@ -3,10 +3,14 @@ const User = require('../models/User');
 const Chat = require('../models/Chat');
 const Message = require('../models/Message');
 const Call = require('../models/Call');
-const SocialNotification = require('../models/SocialNotification');
 const config = require('../config.local');
 const { maybeRewardMessage, maybeRewardCallStart } = require('../economy/rewardsService');
 const { NotificationService } = require('../services/notificationService');
+const {
+  createBulkNotifications,
+  getUndeliveredNotifications,
+  markNotificationsDelivered
+} = require('../social/services/notificationService');
 
 const userSockets = new Map();
 const activeCalls = new Map();
@@ -163,6 +167,38 @@ module.exports = function (io) {
 
     broadcastUserStatus(io, userId, 'online');
 
+    Promise.resolve().then(async () => {
+      const pending = await getUndeliveredNotifications({
+        userId,
+        limit: 300
+      });
+      if (!pending.length) return;
+
+      const deliveredIds = [];
+      pending.forEach((notification) => {
+        io.to(socket.id).emit('notification:new', {
+          _id: notification._id,
+          userId: notification.userId,
+          type: notification.type,
+          actorId: notification.actorId,
+          targetId: notification.targetId,
+          read: notification.read,
+          delivered: true,
+          meta: notification.meta || {},
+          createdAt: notification.createdAt,
+          actor: notification.actor || null
+        });
+        deliveredIds.push(String(notification._id));
+      });
+
+      await markNotificationsDelivered({
+        userId,
+        notificationIds: deliveredIds
+      });
+    }).catch((error) => {
+      console.warn('[Social][Notification] undelivered sync failed:', error?.message || error);
+    });
+
     // === ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ ===
     // ИСПРАВЛЕНО: Проверка доступа к чату перед любым действием
     const verifyAccess = async (chatId) => {
@@ -219,44 +255,18 @@ module.exports = function (io) {
 
           if (!recipientIds.length) return;
 
-          const notifications = recipientIds.map((recipientId) => ({
-            userId: recipientId,
+          createBulkNotifications({
+            userIds: recipientIds,
             type: 'message',
             actorId: userId,
             targetId: message._id,
-            read: false,
             meta: {
               chatId: String(chatId),
               messageType: String(type || 'text')
             }
-          }));
-
-          await SocialNotification.insertMany(notifications, { ordered: false });
-
-          recipientIds.forEach((recipientId) => {
-            const recipientSocketIds = userSockets.get(recipientId);
-            if (!recipientSocketIds || recipientSocketIds.size === 0) return;
-            recipientSocketIds.forEach((socketId) => {
-              io.to(socketId).emit('notification:new', {
-                type: 'message',
-                actorId: userId,
-                targetId: message._id,
-                read: false,
-                createdAt: new Date(),
-                meta: {
-                  chatId: String(chatId),
-                  messageType: String(type || 'text')
-                },
-                actor: {
-                  _id: userId,
-                  name: socket.user?.name || '',
-                  avatarUrl: socket.user?.avatarUrl || ''
-                }
-              });
-            });
           });
         }).catch((error) => {
-          console.warn('[Social] message notification persist failed:', error?.message || error);
+          console.warn('[Social] message notification queue failed:', error?.message || error);
         });
 
         Promise.resolve().then(async () => {

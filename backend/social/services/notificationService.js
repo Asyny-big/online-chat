@@ -1,41 +1,137 @@
-const SocialNotification = require('../../models/SocialNotification');
-const User = require('../../models/User');
-const { emitToUserSockets } = require('./socketService');
+﻿const SocialNotification = require('../../models/SocialNotification');
 const {
   decodeCursor,
   normalizeLimit,
   buildObjectIdCursor,
   applyObjectIdCursorFilter
 } = require('../utils/cursor');
+const {
+  enqueueNotificationCreate,
+  enqueueNotificationBulkCreate
+} = require('./queueService');
 
-async function createNotification({ app, userId, type, actorId, targetId, meta = {} }) {
+function normalizeNotificationPayload({ userId, type, actorId, targetId, meta = {} }) {
   if (!userId || !actorId || !type || !targetId) return null;
   if (String(userId) === String(actorId)) return null;
 
-  const notification = await SocialNotification.create({
+  return {
     userId,
     type,
     actorId,
     targetId,
     read: false,
+    delivered: false,
+    meta: meta || {}
+  };
+}
+
+function createNotification({ userId, type, actorId, targetId, meta = {} }) {
+  const payload = normalizeNotificationPayload({ userId, type, actorId, targetId, meta });
+  if (!payload) return null;
+
+  // Fire-and-forget enqueue to keep HTTP handlers non-blocking.
+  enqueueNotificationCreate(payload)
+    .then((ok) => {
+      if (!ok) {
+        setImmediate(() => {
+          persistNotification(payload).catch((error) => {
+            console.error('[Social][Notification] fallback persist failed:', error?.message || error);
+          });
+        });
+      }
+    })
+    .catch((error) => {
+      console.error('[Social][Notification] enqueue failed:', error?.message || error);
+    });
+
+  return { queued: true };
+}
+
+function createBulkNotifications({ userIds, type, actorId, targetId, meta = {} }) {
+  const normalizedUserIds = Array.from(new Set((userIds || []).map((id) => String(id)).filter(Boolean)));
+  if (!normalizedUserIds.length || !type || !actorId || !targetId) {
+    return { queued: false, accepted: 0 };
+  }
+
+  enqueueNotificationBulkCreate({
+    userIds: normalizedUserIds,
+    type,
+    actorId,
+    targetId,
     meta
+  }).then((ok) => {
+    if (!ok) {
+      setImmediate(() => {
+        persistBulkNotifications({
+          userIds: normalizedUserIds,
+          type,
+          actorId,
+          targetId,
+          meta
+        }).catch((error) => {
+          console.error('[Social][Notification] fallback bulk persist failed:', error?.message || error);
+        });
+      });
+    }
+  }).catch((error) => {
+    console.error('[Social][Notification] enqueue bulk failed:', error?.message || error);
   });
 
-  const actor = await User.findById(actorId).select('_id name avatarUrl').lean();
+  return { queued: true, accepted: normalizedUserIds.length };
+}
 
-  emitToUserSockets(app, userId, 'notification:new', {
-    _id: notification._id,
-    userId: notification.userId,
-    type: notification.type,
-    actorId: notification.actorId,
-    targetId: notification.targetId,
-    read: notification.read,
-    meta: notification.meta || {},
-    createdAt: notification.createdAt,
-    actor: actor || null
-  });
+async function persistNotification(payload) {
+  const normalized = normalizeNotificationPayload(payload || {});
+  if (!normalized) return null;
 
-  return notification;
+  const notification = await SocialNotification.create(normalized);
+  return notification.toObject();
+}
+
+async function persistBulkNotifications({ userIds, type, actorId, targetId, meta = {} }) {
+  const docs = (userIds || [])
+    .map((userId) => normalizeNotificationPayload({ userId, type, actorId, targetId, meta }))
+    .filter(Boolean);
+
+  if (!docs.length) {
+    return { inserted: 0 };
+  }
+
+  await SocialNotification.insertMany(docs, { ordered: false });
+  return { inserted: docs.length };
+}
+
+async function getUndeliveredNotifications({ userId, limit = 200 }) {
+  const normalizedLimit = normalizeLimit(limit, 100, 500);
+  const rows = await SocialNotification.find({
+    userId,
+    $or: [{ delivered: false }, { delivered: { $exists: false } }]
+  })
+    .sort({ _id: 1 })
+    .limit(normalizedLimit)
+    .populate('actorId', '_id name avatarUrl')
+    .lean();
+
+  return rows.map((item) => ({
+    ...item,
+    actor: item.actorId || null
+  }));
+}
+
+async function markNotificationsDelivered({ userId, notificationIds }) {
+  const ids = Array.from(new Set((notificationIds || []).map((id) => String(id)).filter(Boolean)));
+  if (!ids.length) {
+    return { modifiedCount: 0 };
+  }
+
+  return SocialNotification.updateMany(
+    {
+      _id: { $in: ids },
+      userId,
+      $or: [{ delivered: false }, { delivered: { $exists: false } }]
+    },
+    { $set: { delivered: true } }
+  );
 }
 
 async function markNotificationRead({ userId, notificationId }) {
@@ -80,6 +176,11 @@ async function listNotifications({ userId, cursor, limit }) {
 
 module.exports = {
   createNotification,
+  createBulkNotifications,
+  persistNotification,
+  persistBulkNotifications,
+  getUndeliveredNotifications,
+  markNotificationsDelivered,
   markNotificationRead,
   markAllNotificationsRead,
   listNotifications

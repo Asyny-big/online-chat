@@ -24,6 +24,10 @@ const socialNotificationSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
+  delivered: {
+    type: Boolean,
+    default: false
+  },
   meta: {
     type: mongoose.Schema.Types.Mixed,
     default: {}
@@ -41,6 +45,10 @@ socialNotificationSchema.index(
 socialNotificationSchema.index(
   { userId: 1, _id: -1 },
   { name: 'notification_user_cursor' }
+);
+socialNotificationSchema.index(
+  { userId: 1, delivered: 1, _id: 1 },
+  { name: 'notification_user_delivered_cursor' }
 );
 
 module.exports = mongoose.model('SocialNotification', socialNotificationSchema);

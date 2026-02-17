@@ -1,7 +1,8 @@
-const mongoose = require('mongoose');
+﻿const mongoose = require('mongoose');
 const Feed = require('../../models/Feed');
 const Post = require('../../models/Post');
 const Relationship = require('../../models/Relationship');
+const { enqueueFeedRebuildAll } = require('./queueService');
 const {
   decodeCursor,
   encodeCursor,
@@ -12,6 +13,17 @@ const { canUserViewPost } = require('./accessService');
 function toObjectIdOrNull(value) {
   if (!mongoose.Types.ObjectId.isValid(value)) return null;
   return new mongoose.Types.ObjectId(value);
+}
+
+function normalizeRankBoost(value) {
+  const parsed = Number(value || 0);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.trunc(parsed);
+}
+
+function computeImmutableFeedScore({ createdAt, rankBoost = 0 }) {
+  const createdAtMs = Number(new Date(createdAt || Date.now()).getTime());
+  return createdAtMs + normalizeRankBoost(rankBoost);
 }
 
 async function resolveFanOutRecipients({ authorId, visibility }) {
@@ -36,13 +48,20 @@ async function fanOutPostOnWrite(post) {
   });
   if (!recipients.length) return { inserted: 0 };
 
-  const score = Date.now();
   const createdAt = post.createdAt ? new Date(post.createdAt) : new Date();
+  const score = computeImmutableFeedScore({
+    createdAt,
+    rankBoost: post.rankBoost || 0
+  });
+
   const ops = recipients.map((recipientId) => ({
     updateOne: {
-      filter: { userId: recipientId, postId: post._id },
+      filter: {
+        userId: new mongoose.Types.ObjectId(String(recipientId)),
+        postId: new mongoose.Types.ObjectId(String(post._id))
+      },
       update: {
-        $set: {
+        $setOnInsert: {
           score,
           createdAt
         }
@@ -60,15 +79,83 @@ async function fanOutPostOnWrite(post) {
   return { inserted: recipients.length };
 }
 
-async function removePostFromFeed(postId) {
-  return Feed.deleteMany({ postId });
+async function fanOutPostById(postId) {
+  if (!mongoose.Types.ObjectId.isValid(postId)) return { inserted: 0 };
+
+  const post = await Post.findById(postId)
+    .select('_id authorId visibility createdAt rankBoost')
+    .lean();
+  if (!post) return { inserted: 0 };
+
+  return fanOutPostOnWrite(post);
 }
 
-async function rebuildPostFeed(post) {
-  if (!post?._id) return { success: false };
-  await removePostFromFeed(post._id);
+async function removePostFromFeed(postId) {
+  if (!postId || !mongoose.Types.ObjectId.isValid(postId)) return { deletedCount: 0 };
+  return Feed.deleteMany({ postId: new mongoose.Types.ObjectId(String(postId)) });
+}
+
+async function rebuildPostFeedById(postId) {
+  if (!postId || !mongoose.Types.ObjectId.isValid(postId)) return { success: false };
+
+  const objectId = new mongoose.Types.ObjectId(String(postId));
+  const post = await Post.findById(objectId)
+    .select('_id authorId visibility createdAt rankBoost')
+    .lean();
+
+  if (!post) {
+    await removePostFromFeed(objectId);
+    return { success: false, reason: 'post_not_found' };
+  }
+
+  await removePostFromFeed(objectId);
   await fanOutPostOnWrite(post);
   return { success: true };
+}
+
+async function rebuildFeedInBatches({ batchSize = 200 } = {}) {
+  const limit = Math.max(1, Math.min(Number(batchSize) || 200, 1000));
+  let lastId = null;
+  let processed = 0;
+
+  // Rebuild is isolated to worker and runs in bounded batches.
+  await Feed.deleteMany({});
+
+  while (true) {
+    const query = {};
+    if (lastId) {
+      query._id = { $gt: lastId };
+    }
+
+    // eslint-disable-next-line no-await-in-loop
+    const posts = await Post.find(query)
+      .select('_id authorId visibility createdAt rankBoost')
+      .sort({ _id: 1 })
+      .limit(limit)
+      .lean();
+
+    if (!posts.length) break;
+
+    for (const post of posts) {
+      // eslint-disable-next-line no-await-in-loop
+      await fanOutPostOnWrite(post);
+      processed += 1;
+    }
+
+    lastId = posts[posts.length - 1]._id;
+    // Yield to event loop between batches.
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  return { processed };
+}
+
+function scheduleFeedRebuildAll({ batchSize = 200 } = {}) {
+  enqueueFeedRebuildAll({ batchSize }).catch((error) => {
+    console.error('[Social][Feed] enqueue full rebuild failed:', error?.message || error);
+  });
+  return { queued: true, batchSize };
 }
 
 async function getUserFeedPage({ userId, cursor, limit }) {
@@ -134,8 +221,12 @@ async function getUserFeedPage({ userId, cursor, limit }) {
 }
 
 module.exports = {
+  computeImmutableFeedScore,
   fanOutPostOnWrite,
+  fanOutPostById,
   removePostFromFeed,
-  rebuildPostFeed,
+  rebuildPostFeedById,
+  rebuildFeedInBatches,
+  scheduleFeedRebuildAll,
   getUserFeedPage
 };

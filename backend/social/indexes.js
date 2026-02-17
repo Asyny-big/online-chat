@@ -6,6 +6,7 @@ async function ensureSocialIndexes(db) {
   const reactions = db.collection('reactions');
   const feeds = db.collection('feeds');
   const notifications = db.collection('notifications');
+  const postCommentCounters = db.collection('postcommentcounters');
   const users = db.collection('users');
 
   await relationships.createIndex(
@@ -57,6 +58,19 @@ async function ensureSocialIndexes(db) {
   await notifications.createIndex(
     { userId: 1, _id: -1 },
     { name: 'notification_user_cursor' }
+  );
+  await notifications.createIndex(
+    { userId: 1, delivered: 1, _id: 1 },
+    { name: 'notification_user_delivered_cursor' }
+  );
+
+  await postCommentCounters.createIndex(
+    { postId: 1 },
+    { unique: true, name: 'uniq_post_comment_counter' }
+  );
+  await postCommentCounters.createIndex(
+    { updatedAt: -1 },
+    { name: 'post_comment_counter_updatedAt' }
   );
 
   await users.createIndex({ followers: 1 }, { name: 'user_followers' });

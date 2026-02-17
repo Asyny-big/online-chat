@@ -3,6 +3,7 @@ const Comment = require('../../models/Comment');
 const Post = require('../../models/Post');
 const { canUserViewPost } = require('./accessService');
 const { createNotification } = require('./notificationService');
+const { incrementPostCommentCounter } = require('./postCommentCounterService');
 const {
   decodeCursor,
   normalizeLimit,
@@ -62,6 +63,11 @@ async function createComment({ app, postId, authorId, text, parentId = null }) {
     { _id: postObjectId },
     { $inc: { 'stats.comments': 1 } }
   );
+
+  await incrementPostCommentCounter({
+    postId: postObjectId,
+    isReply: Boolean(parentObjectId)
+  });
 
   await createNotification({
     app,
