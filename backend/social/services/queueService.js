@@ -68,15 +68,21 @@ async function enqueueJob(name, data, opts = {}) {
   }
 }
 
+function safeJobIdPart(value) {
+  return String(value ?? '').replace(/:/g, '-');
+}
+
 function enqueueFeedFanoutPost(postId) {
+  const postPart = safeJobIdPart(postId);
   return enqueueJob(JOB.FEED_FANOUT_POST, { postId }, {
-    jobId: `${JOB.FEED_FANOUT_POST}:${String(postId)}`
+    jobId: `${JOB.FEED_FANOUT_POST}-${postPart}`
   });
 }
 
 function enqueueFeedRebuildPost(postId) {
+  const postPart = safeJobIdPart(postId);
   return enqueueJob(JOB.FEED_REBUILD_POST, { postId }, {
-    jobId: `${JOB.FEED_REBUILD_POST}:${String(postId)}`
+    jobId: `${JOB.FEED_REBUILD_POST}-${postPart}`
   });
 }
 
@@ -86,21 +92,28 @@ function enqueueFeedRebuildAll(payload = {}) {
 }
 
 function enqueueFeedRemovePost(postId) {
+  const postPart = safeJobIdPart(postId);
   return enqueueJob(JOB.FEED_REMOVE_POST, { postId }, {
-    jobId: `${JOB.FEED_REMOVE_POST}:${String(postId)}`
+    jobId: `${JOB.FEED_REMOVE_POST}-${postPart}`
   });
 }
 
 function enqueueNotificationCreate(payload) {
-  const targetPart = String(payload?.targetId || '');
-  const userPart = String(payload?.userId || '');
+  const targetPart = safeJobIdPart(payload?.targetId || '');
+  const userPart = safeJobIdPart(payload?.userId || '');
+  const uniquePart = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   return enqueueJob(JOB.NOTIFICATION_CREATE, payload, {
-    jobId: `${JOB.NOTIFICATION_CREATE}:${userPart}:${targetPart}:${Date.now()}`
+    jobId: `${JOB.NOTIFICATION_CREATE}-${userPart}-${targetPart}-${uniquePart}`
   });
 }
 
 function enqueueNotificationBulkCreate(payload) {
-  return enqueueJob(JOB.NOTIFICATION_BULK_CREATE, payload);
+  const targetPart = safeJobIdPart(payload?.targetId || '');
+  const actorPart = safeJobIdPart(payload?.actorId || '');
+  const uniquePart = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  return enqueueJob(JOB.NOTIFICATION_BULK_CREATE, payload, {
+    jobId: `${JOB.NOTIFICATION_BULK_CREATE}-${actorPart}-${targetPart}-${uniquePart}`
+  });
 }
 
 function enqueuePostCleanup(payload) {
