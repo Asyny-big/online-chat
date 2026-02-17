@@ -1,0 +1,141 @@
+const mongoose = require('mongoose');
+const Feed = require('../../models/Feed');
+const Post = require('../../models/Post');
+const Relationship = require('../../models/Relationship');
+const {
+  decodeCursor,
+  encodeCursor,
+  normalizeLimit
+} = require('../utils/cursor');
+const { canUserViewPost } = require('./accessService');
+
+function toObjectIdOrNull(value) {
+  if (!mongoose.Types.ObjectId.isValid(value)) return null;
+  return new mongoose.Types.ObjectId(value);
+}
+
+async function resolveFanOutRecipients({ authorId, visibility }) {
+  const baseQuery = {
+    fromUserId: authorId,
+    status: 'accepted',
+    type: visibility === 'friends' ? 'friend' : { $in: ['friend', 'follow'] }
+  };
+
+  const relatedUserIds = await Relationship.distinct('toUserId', baseQuery);
+  const recipients = new Set(relatedUserIds.map((id) => String(id)));
+  recipients.add(String(authorId));
+  return Array.from(recipients);
+}
+
+async function fanOutPostOnWrite(post) {
+  if (!post?._id || !post?.authorId) return { inserted: 0 };
+
+  const recipients = await resolveFanOutRecipients({
+    authorId: post.authorId,
+    visibility: post.visibility
+  });
+  if (!recipients.length) return { inserted: 0 };
+
+  const score = Date.now();
+  const createdAt = post.createdAt ? new Date(post.createdAt) : new Date();
+  const ops = recipients.map((recipientId) => ({
+    updateOne: {
+      filter: { userId: recipientId, postId: post._id },
+      update: {
+        $set: {
+          score,
+          createdAt
+        }
+      },
+      upsert: true
+    }
+  }));
+
+  for (let i = 0; i < ops.length; i += 500) {
+    // Chunked unordered writes keep fan-out bounded under high follower counts.
+    // eslint-disable-next-line no-await-in-loop
+    await Feed.bulkWrite(ops.slice(i, i + 500), { ordered: false });
+  }
+
+  return { inserted: recipients.length };
+}
+
+async function removePostFromFeed(postId) {
+  return Feed.deleteMany({ postId });
+}
+
+async function rebuildPostFeed(post) {
+  if (!post?._id) return { success: false };
+  await removePostFromFeed(post._id);
+  await fanOutPostOnWrite(post);
+  return { success: true };
+}
+
+async function getUserFeedPage({ userId, cursor, limit }) {
+  const normalizedLimit = normalizeLimit(limit, 20, 50);
+  const userObjectId = toObjectIdOrNull(userId);
+  if (!userObjectId) {
+    return { items: [], nextCursor: null };
+  }
+
+  const cursorPayload = decodeCursor(cursor);
+  const query = { userId: userObjectId };
+
+  const cursorScore = Number.isFinite(Number(cursorPayload?.score))
+    ? Number(cursorPayload.score)
+    : null;
+  const cursorId = toObjectIdOrNull(cursorPayload?.id);
+
+  if (cursorScore !== null && cursorId) {
+    query.$or = [
+      { score: { $lt: cursorScore } },
+      { score: cursorScore, _id: { $lt: cursorId } }
+    ];
+  }
+
+  const rows = await Feed.find(query)
+    .sort({ score: -1, _id: -1 })
+    .limit(normalizedLimit + 1)
+    .lean();
+
+  const hasMore = rows.length > normalizedLimit;
+  const pageRows = hasMore ? rows.slice(0, normalizedLimit) : rows;
+
+  const postIds = pageRows.map((row) => row.postId);
+  const posts = await Post.find({ _id: { $in: postIds } })
+    .populate('authorId', '_id name avatarUrl')
+    .populate('media')
+    .lean();
+
+  const postMap = new Map(posts.map((post) => [String(post._id), post]));
+  const visibleRows = [];
+  for (const row of pageRows) {
+    const post = postMap.get(String(row.postId));
+    if (!post) continue;
+    // eslint-disable-next-line no-await-in-loop
+    const canView = await canUserViewPost(post, userId);
+    if (!canView) continue;
+    visibleRows.push({ row, post });
+  }
+
+  const nextCursor = hasMore && pageRows.length
+    ? encodeCursor({ score: pageRows[pageRows.length - 1].score, id: String(pageRows[pageRows.length - 1]._id) })
+    : null;
+
+  return {
+    items: visibleRows.map(({ row, post }) => ({
+      _id: row._id,
+      score: row.score,
+      createdAt: row.createdAt,
+      post
+    })),
+    nextCursor
+  };
+}
+
+module.exports = {
+  fanOutPostOnWrite,
+  removePostFromFeed,
+  rebuildPostFeed,
+  getUserFeedPage
+};

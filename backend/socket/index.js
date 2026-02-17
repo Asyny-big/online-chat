@@ -3,6 +3,7 @@ const User = require('../models/User');
 const Chat = require('../models/Chat');
 const Message = require('../models/Message');
 const Call = require('../models/Call');
+const SocialNotification = require('../models/SocialNotification');
 const config = require('../config.local');
 const { maybeRewardMessage, maybeRewardCallStart } = require('../economy/rewardsService');
 const { NotificationService } = require('../services/notificationService');
@@ -210,6 +211,53 @@ module.exports = function (io) {
         });
 
         callback?.({ success: true, message: message.toObject() });
+
+        Promise.resolve().then(async () => {
+          const recipientIds = (chat?.participants || [])
+            .map((participant) => participant?.user?.toString?.() || participant?.user?._id?.toString?.())
+            .filter((participantId) => participantId && participantId !== userId);
+
+          if (!recipientIds.length) return;
+
+          const notifications = recipientIds.map((recipientId) => ({
+            userId: recipientId,
+            type: 'message',
+            actorId: userId,
+            targetId: message._id,
+            read: false,
+            meta: {
+              chatId: String(chatId),
+              messageType: String(type || 'text')
+            }
+          }));
+
+          await SocialNotification.insertMany(notifications, { ordered: false });
+
+          recipientIds.forEach((recipientId) => {
+            const recipientSocketIds = userSockets.get(recipientId);
+            if (!recipientSocketIds || recipientSocketIds.size === 0) return;
+            recipientSocketIds.forEach((socketId) => {
+              io.to(socketId).emit('notification:new', {
+                type: 'message',
+                actorId: userId,
+                targetId: message._id,
+                read: false,
+                createdAt: new Date(),
+                meta: {
+                  chatId: String(chatId),
+                  messageType: String(type || 'text')
+                },
+                actor: {
+                  _id: userId,
+                  name: socket.user?.name || '',
+                  avatarUrl: socket.user?.avatarUrl || ''
+                }
+              });
+            });
+          });
+        }).catch((error) => {
+          console.warn('[Social] message notification persist failed:', error?.message || error);
+        });
 
         Promise.resolve().then(async () => {
           const messageType = String(type || '').toLowerCase();
