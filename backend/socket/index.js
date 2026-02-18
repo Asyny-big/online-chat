@@ -245,6 +245,10 @@ module.exports = function (io) {
           chatId,
           message: message.toObject()
         });
+        io.to(`chat:${chatId}`).emit('new_message', {
+          chatId,
+          message: message.toObject()
+        });
 
         callback?.({ success: true, message: message.toObject() });
 

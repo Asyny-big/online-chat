@@ -1,39 +1,33 @@
 import React, { useState } from 'react';
-import UserSearch from './UserSearch';
 import ChatList from './ChatList';
 import CreateGroupModal from './CreateGroupModal';
 import ProfileDrawer from './ProfileDrawer';
 import ProfilePage from '../pages/ProfilePage';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 
-function Sidebar({ token, chats, selectedChat, onSelectChat, onCreateChat, onAddChat, onLogout, incomingCallChatId }) {
+function Sidebar({ token, chats, selectedChat, onSelectChat, onAddChat, onLogout, incomingCallChatId }) {
   const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const isDesktop = useMediaQuery('(min-width: 769px)', { defaultValue: true });
 
   return (
     <div className="chat-sidebar">
-      {/* Заголовок и кнопки */}
       <div className="sidebar-header">
         <h2 className="sidebar-title">
-          <span className="logo-emoji">🦆</span>
+          <span className="logo-emoji">??</span>
           GovChat
         </h2>
         <div className="header-actions">
           <button
             onClick={() => setShowCreateGroupModal(true)}
             className="icon-btn-outline group-btn"
-            title="Создать групповой чат"
+            title="Create group chat"
           >
-            👥
+            ??
           </button>
         </div>
       </div>
 
-      {/* Поиск пользователей */}
-      <UserSearch token={token} onCreateChat={onCreateChat} />
-
-      {/* Список чатов */}
       <ChatList
         chats={chats}
         selectedChat={selectedChat}
@@ -41,15 +35,13 @@ function Sidebar({ token, chats, selectedChat, onSelectChat, onCreateChat, onAdd
         incomingCallChatId={incomingCallChatId}
       />
 
-      {/* Внизу списка чатов */}
       <div className="sidebar-footer">
         <button className="profile-btn-full" onClick={() => setShowProfile(true)}>
-          <span className="profile-icon">👤</span>
-          <span className="profile-text">Профиль</span>
+          <span className="profile-icon">??</span>
+          <span className="profile-text">Profile</span>
         </button>
       </div>
 
-      {/* Модал создания группового чата */}
       {showCreateGroupModal && (
         <CreateGroupModal
           token={token}
@@ -74,7 +66,7 @@ function Sidebar({ token, chats, selectedChat, onSelectChat, onCreateChat, onAdd
         .chat-sidebar {
             width: 100%;
             height: 100%;
-            background-color: var(--bg-secondary);
+            background-color: var(--bg-surface);
             display: flex;
             flex-direction: column;
             border-right: 1px solid var(--border-color);
@@ -88,7 +80,7 @@ function Sidebar({ token, chats, selectedChat, onSelectChat, onCreateChat, onAdd
             justify-content: space-between;
             align-items: center;
             flex-shrink: 0;
-            background-color: var(--bg-surface);
+            background-color: var(--bg-card);
         }
 
         .sidebar-title {
@@ -118,7 +110,7 @@ function Sidebar({ token, chats, selectedChat, onSelectChat, onCreateChat, onAdd
             justify-content: center;
             background: transparent;
             border: 1px solid var(--border-color);
-            border-radius: 8px;
+            border-radius: 10px;
             cursor: pointer;
             font-size: 16px;
             transition: var(--transition-fast);
@@ -127,18 +119,18 @@ function Sidebar({ token, chats, selectedChat, onSelectChat, onCreateChat, onAdd
 
         .group-btn {
             color: var(--accent);
-            border-color: var(--accent);
+            border-color: var(--accent-soft);
         }
 
         .group-btn:hover {
-            background-color: rgba(168, 85, 247, 0.1);
+            background-color: var(--accent-soft);
         }
 
         .sidebar-footer {
             margin-top: auto;
             padding: 12px;
             border-top: 1px solid var(--border-color);
-            background-color: var(--bg-surface);
+            background-color: var(--bg-card);
         }
 
         .profile-btn-full {
@@ -149,7 +141,7 @@ function Sidebar({ token, chats, selectedChat, onSelectChat, onCreateChat, onAdd
             padding: 12px 14px;
             border-radius: 14px;
             border: 1px solid var(--border-light);
-            background-color: var(--bg-input);
+            background-color: var(--bg-surface);
             color: var(--text-primary);
             cursor: pointer;
             transition: var(--transition-fast);
@@ -166,7 +158,7 @@ function Sidebar({ token, chats, selectedChat, onSelectChat, onCreateChat, onAdd
             display: flex;
             align-items: center;
             justify-content: center;
-            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            background: linear-gradient(135deg, #dbeafe, #bfdbfe);
             flex-shrink: 0;
             font-size: 18px;
         }
@@ -182,4 +174,3 @@ function Sidebar({ token, chats, selectedChat, onSelectChat, onCreateChat, onAdd
 }
 
 export default Sidebar;
-

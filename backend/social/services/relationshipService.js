@@ -2,7 +2,8 @@ const mongoose = require('mongoose');
 const Relationship = require('../../models/Relationship');
 const User = require('../../models/User');
 const { createNotification } = require('./notificationService');
-const { emitToUsers } = require('./socketService');
+const { ensureDirectChat, formatChatForUser } = require('./chatService');
+const { emitToUserSockets, emitToUsers } = require('./socketService');
 const { incrementManyCounters } = require('./userCounterService');
 const {
   decodeCursor,
@@ -45,6 +46,70 @@ async function assertNotBlocked(userIdA, userIdB) {
   if (blocked) {
     throw httpError(403, 'Operation is blocked');
   }
+}
+
+function normalizePhoneDigits(input) {
+  const digits = String(input || '').replace(/\D/g, '');
+  if (!digits) return '';
+
+  if (digits.length === 10 && digits.startsWith('9')) {
+    return `7${digits}`;
+  }
+
+  if (digits.length === 11 && digits.startsWith('8')) {
+    return `7${digits.slice(1)}`;
+  }
+
+  if (digits.length === 11 && digits.startsWith('7')) {
+    return digits;
+  }
+
+  return digits;
+}
+
+function formatPhoneForClient(rawPhone) {
+  const normalized = normalizePhoneDigits(rawPhone);
+  return normalized || String(rawPhone || '').replace(/\s+/g, '').replace(/^\+/, '');
+}
+
+function escapeRegex(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function resolveRelationshipStatus({ currentUserId, candidateUserId, relationRows }) {
+  const current = String(currentUserId);
+  const candidate = String(candidateUserId);
+
+  const hasFriend = relationRows.some((row) => {
+    if (row.type !== 'friend' || row.status !== 'accepted') return false;
+    const fromId = String(row.fromUserId);
+    const toId = String(row.toUserId);
+    return (fromId === current && toId === candidate) || (fromId === candidate && toId === current);
+  });
+
+  if (hasFriend) return 'friends';
+
+  const outgoingPending = relationRows.some((row) => (
+    row.type === 'request'
+    && row.status === 'pending'
+    && String(row.fromUserId) === current
+    && String(row.toUserId) === candidate
+  ));
+  if (outgoingPending) return 'outgoing_request';
+
+  const incomingPending = relationRows.some((row) => (
+    row.type === 'request'
+    && row.status === 'pending'
+    && String(row.fromUserId) === candidate
+    && String(row.toUserId) === current
+  ));
+  if (incomingPending) return 'incoming_request';
+
+  return 'none';
+}
+
+function emitRelationshipUpdate(app, userIds, payload) {
+  emitToUsers(app, userIds, 'relationship:update', payload);
 }
 
 async function sendFriendRequest({ app, fromUserId, toUserId }) {
@@ -95,7 +160,20 @@ async function sendFriendRequest({ app, fromUserId, toUserId }) {
     type: 'friend_request',
     actorId: fromId,
     targetId: request._id,
-    meta: { action: 'request_created' }
+    meta: {
+      action: 'request_created',
+      requestId: String(request._id),
+      fromUserId: String(fromId),
+      toUserId: String(toId)
+    }
+  });
+
+  emitRelationshipUpdate(app, [String(fromId), String(toId)], {
+    action: 'friend_request',
+    status: 'pending',
+    fromUserId: String(fromId),
+    toUserId: String(toId),
+    requestId: String(request._id)
   });
 
   emitToUsers(app, [String(fromId), String(toId)], 'social:relationship', {
@@ -176,10 +254,41 @@ async function acceptFriendRequest({ app, userId, fromUserId }) {
   await createNotification({
     app,
     userId: fromId,
-    type: 'friend_request',
+    type: 'friend_accept',
     actorId: currentUserId,
     targetId: request._id,
-    meta: { action: 'request_accepted' }
+    meta: {
+      action: 'request_accepted',
+      requestId: String(request._id),
+      fromUserId: String(fromId),
+      toUserId: String(currentUserId)
+    }
+  });
+
+  const { chat, created } = await ensureDirectChat({
+    userAId: fromId,
+    userBId: currentUserId
+  });
+
+  const payloadForRequester = formatChatForUser({
+    app,
+    chat,
+    viewerUserId: fromId
+  });
+
+  const payloadForAcceptor = formatChatForUser({
+    app,
+    chat,
+    viewerUserId: currentUserId
+  });
+
+  emitRelationshipUpdate(app, [String(currentUserId), String(fromId)], {
+    action: 'friend_accept',
+    status: 'friends',
+    fromUserId: String(fromId),
+    toUserId: String(currentUserId),
+    requestId: String(request._id),
+    chatId: String(chat._id)
   });
 
   emitToUsers(app, [String(currentUserId), String(fromId)], 'social:relationship', {
@@ -189,7 +298,26 @@ async function acceptFriendRequest({ app, userId, fromUserId }) {
     requestId: String(request._id)
   });
 
-  return request;
+  emitToUserSockets(app, String(fromId), 'chat:created', {
+    chat: payloadForRequester,
+    created
+  });
+  emitToUserSockets(app, String(currentUserId), 'chat:created', {
+    chat: payloadForAcceptor,
+    created
+  });
+
+  // Backward-compat + required aliases.
+  emitToUserSockets(app, String(fromId), 'chat:new', payloadForRequester);
+  emitToUserSockets(app, String(currentUserId), 'chat:new', payloadForAcceptor);
+  emitToUserSockets(app, String(fromId), 'new_chat', payloadForRequester);
+  emitToUserSockets(app, String(currentUserId), 'new_chat', payloadForAcceptor);
+
+  return {
+    ...request,
+    chatId: chat._id,
+    chatCreated: created
+  };
 }
 
 async function rejectFriendRequest({ app, userId, fromUserId }) {
@@ -212,6 +340,14 @@ async function rejectFriendRequest({ app, userId, fromUserId }) {
     throw httpError(404, 'Pending friend request not found');
   }
 
+  emitRelationshipUpdate(app, [String(currentUserId), String(fromId)], {
+    action: 'friend_reject',
+    status: 'rejected',
+    fromUserId: String(fromId),
+    toUserId: String(currentUserId),
+    requestId: String(request._id)
+  });
+
   emitToUsers(app, [String(currentUserId), String(fromId)], 'social:relationship', {
     action: 'friend_request_rejected',
     fromUserId: String(fromId),
@@ -220,6 +356,40 @@ async function rejectFriendRequest({ app, userId, fromUserId }) {
   });
 
   return request;
+}
+
+async function cancelFriendRequest({ app, userId, toUserId }) {
+  const currentUserId = toObjectIdOrFail(userId, 'userId');
+  const targetUserId = toObjectIdOrFail(toUserId, 'toUserId');
+  assertNotSelf(currentUserId, targetUserId);
+
+  const request = await Relationship.findOneAndDelete({
+    fromUserId: currentUserId,
+    toUserId: targetUserId,
+    type: 'request',
+    status: 'pending'
+  }).lean();
+
+  if (!request) {
+    throw httpError(404, 'Pending friend request not found');
+  }
+
+  emitRelationshipUpdate(app, [String(currentUserId), String(targetUserId)], {
+    action: 'friend_request_cancel',
+    status: 'cancelled',
+    fromUserId: String(currentUserId),
+    toUserId: String(targetUserId),
+    requestId: String(request._id)
+  });
+
+  emitToUsers(app, [String(currentUserId), String(targetUserId)], 'social:relationship', {
+    action: 'friend_request_cancelled',
+    fromUserId: String(currentUserId),
+    toUserId: String(targetUserId),
+    requestId: String(request._id)
+  });
+
+  return { success: true, requestId: request._id };
 }
 
 async function removeFriend({ app, userId, friendUserId }) {
@@ -244,6 +414,13 @@ async function removeFriend({ app, userId, friendUserId }) {
     { userId: currentUserId, delta: { friends: -1 } },
     { userId: friendId, delta: { friends: -1 } }
   ]);
+
+  emitRelationshipUpdate(app, [String(currentUserId), String(friendId)], {
+    action: 'friend_remove',
+    status: 'none',
+    userId: String(currentUserId),
+    friendUserId: String(friendId)
+  });
 
   emitToUsers(app, [String(currentUserId), String(friendId)], 'social:relationship', {
     action: 'friend_removed',
@@ -335,7 +512,7 @@ async function listRelationsWithUsers({ query, userField, cursor, limit }) {
   const rows = await Relationship.find(mongoQuery)
     .sort({ _id: -1 })
     .limit(normalizedLimit + 1)
-    .populate(userField, '_id name avatarUrl')
+    .populate(userField, '_id name phone avatarUrl')
     .lean();
 
   const hasMore = rows.length > normalizedLimit;
@@ -351,6 +528,71 @@ async function listRelationsWithUsers({ query, userField, cursor, limit }) {
       user: row[userField] || null
     })),
     nextCursor
+  };
+}
+
+async function searchUsers({ userId, query, limit }) {
+  const currentUserId = toObjectIdOrFail(userId, 'userId');
+  const rawQuery = String(query || '').trim();
+  const normalizedLimit = normalizeLimit(limit, 20, 40);
+
+  if (!rawQuery || rawQuery.length < 2) {
+    return { items: [] };
+  }
+
+  const escaped = escapeRegex(rawQuery);
+  const byName = { name: { $regex: escaped, $options: 'i' } };
+
+  const phoneDigits = normalizePhoneDigits(rawQuery);
+  const searchOr = [byName];
+  if (phoneDigits) {
+    const escapedDigits = escapeRegex(phoneDigits);
+    searchOr.push({ phoneNormalized: { $regex: escapedDigits, $options: 'i' } });
+    searchOr.push({ phone: { $regex: escapedDigits, $options: 'i' } });
+  }
+
+  const users = await User.find({
+    _id: { $ne: currentUserId },
+    $or: searchOr
+  })
+    .select('_id name phone phoneNormalized avatarUrl followers following friends posts')
+    .sort({ name: 1, _id: -1 })
+    .limit(normalizedLimit)
+    .lean();
+
+  if (!users.length) {
+    return { items: [] };
+  }
+
+  const candidateIds = users.map((user) => user._id);
+  const relationRows = await Relationship.find({
+    type: { $in: ['friend', 'request'] },
+    status: { $in: ['accepted', 'pending'] },
+    $or: [
+      { fromUserId: currentUserId, toUserId: { $in: candidateIds } },
+      { fromUserId: { $in: candidateIds }, toUserId: currentUserId }
+    ]
+  }).lean();
+
+  return {
+    items: users.map((user) => ({
+      _id: user._id,
+      name: user.name,
+      username: user.name,
+      phone: formatPhoneForClient(user.phoneNormalized || user.phone),
+      avatarUrl: user.avatarUrl || null,
+      counters: {
+        followers: Number(user.followers || 0),
+        following: Number(user.following || 0),
+        friends: Number(user.friends || 0),
+        posts: Number(user.posts || 0)
+      },
+      relationshipStatus: resolveRelationshipStatus({
+        currentUserId,
+        candidateUserId: user._id,
+        relationRows
+      })
+    }))
   };
 }
 
@@ -414,11 +656,13 @@ module.exports = {
   sendFriendRequest,
   acceptFriendRequest,
   rejectFriendRequest,
+  cancelFriendRequest,
   removeFriend,
   followUser,
   unfollowUser,
   listIncomingRequests,
   listFriends,
   listFollowers,
-  listFollowing
+  listFollowing,
+  searchUsers
 };

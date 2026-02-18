@@ -8,7 +8,7 @@ const socialNotificationSchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ['like', 'comment', 'friend_request', 'message'],
+    enum: ['like', 'comment', 'friend_request', 'friend_accept', 'message'],
     required: true
   },
   actorId: {

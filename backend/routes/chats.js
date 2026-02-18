@@ -6,6 +6,7 @@ const User = require('../models/User');
 const Message = require('../models/Message');
 const authMiddleware = require('../middleware/auth');
 const { checkChatAccess, checkChatAdmin } = require('../middleware/checkChatAccess');
+const { formatChatForUser } = require('../social/services/chatService');
 const fs = require('fs');
 const path = require('path');
 
@@ -176,7 +177,7 @@ router.post('/private', async (req, res) => {
       p => p.user._id.toString() !== userId
     );
     const formatted = {
-      ...chat.toObject(),
+      ...formatChatForUser({ app: req.app, chat, viewerUserId: userId }),
       displayName: otherParticipant?.user.name,
       displayPhone: otherParticipant?.user.phone,
       displayAvatar: otherParticipant?.user.avatarUrl,
@@ -185,6 +186,11 @@ router.post('/private', async (req, res) => {
         : otherParticipant?.user.status,
       unreadCount: 0
     };
+    const formattedForTarget = formatChatForUser({
+      app: req.app,
+      chat,
+      viewerUserId: targetUser._id
+    });
 
     // Уведомляем только если чат был создан
     if (created) {
@@ -193,7 +199,9 @@ router.post('/private', async (req, res) => {
       
       if (socketData?.userSockets.has(targetUser._id.toString())) {
         socketData.userSockets.get(targetUser._id.toString()).forEach(socketId => {
-          io.to(socketId).emit('chat:new', formatted);
+          io.to(socketId).emit('chat:new', formattedForTarget);
+          io.to(socketId).emit('chat:created', { chat: formattedForTarget, created: true });
+          io.to(socketId).emit('new_chat', formattedForTarget);
         });
       }
     }
@@ -271,6 +279,8 @@ router.post('/group', async (req, res) => {
       if (socketData?.userSockets.has(participantId)) {
         socketData.userSockets.get(participantId).forEach(socketId => {
           io.to(socketId).emit('chat:new', chatPayload);
+          io.to(socketId).emit('chat:created', { chat: chatPayload, created: true });
+          io.to(socketId).emit('new_chat', chatPayload);
         });
       }
     });
@@ -334,6 +344,8 @@ router.post('/:chatId/participants', checkChatAdmin, async (req, res) => {
     if (socketData?.userSockets.has(newUser._id.toString())) {
       socketData.userSockets.get(newUser._id.toString()).forEach(socketId => {
         io.to(socketId).emit('chat:new', chat);
+        io.to(socketId).emit('chat:created', { chat, created: true });
+        io.to(socketId).emit('new_chat', chat);
       });
     }
 

@@ -40,6 +40,19 @@ async function rejectFriendRequest(req, res) {
   }
 }
 
+async function cancelFriendRequest(req, res) {
+  try {
+    const result = await relationshipService.cancelFriendRequest({
+      app: req.app,
+      userId: req.userId,
+      toUserId: req.params.toUserId
+    });
+    return res.json(result);
+  } catch (error) {
+    return sendServiceError(res, error, 'Failed to cancel friend request');
+  }
+}
+
 async function removeFriend(req, res) {
   try {
     const result = await relationshipService.removeFriend({
@@ -131,14 +144,29 @@ async function listFollowing(req, res) {
   }
 }
 
+async function searchUsers(req, res) {
+  try {
+    const result = await relationshipService.searchUsers({
+      userId: req.userId,
+      query: req.query?.q || req.query?.query || '',
+      limit: req.query?.limit
+    });
+    return res.json(result);
+  } catch (error) {
+    return sendServiceError(res, error, 'Failed to search users');
+  }
+}
+
 module.exports = {
   sendFriendRequest,
   acceptFriendRequest,
   rejectFriendRequest,
+  cancelFriendRequest,
   removeFriend,
   followUser,
   unfollowUser,
   listIncomingRequests,
+  searchUsers,
   listFriends,
   listFollowers,
   listFollowing

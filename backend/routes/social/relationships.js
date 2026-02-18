@@ -6,9 +6,11 @@ const router = express.Router();
 
 router.use(authMiddleware);
 
+router.get('/search', controller.searchUsers);
 router.post('/friend-request', controller.sendFriendRequest);
 router.post('/friend-request/:fromUserId/accept', controller.acceptFriendRequest);
 router.post('/friend-request/:fromUserId/reject', controller.rejectFriendRequest);
+router.delete('/friend-request/:toUserId', controller.cancelFriendRequest);
 router.get('/friend-requests/incoming', controller.listIncomingRequests);
 
 router.delete('/friends/:friendUserId', controller.removeFriend);

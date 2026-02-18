@@ -7,6 +7,7 @@ const reactionsRoutes = require('./reactions');
 const feedRoutes = require('./feed');
 const notificationsRoutes = require('./notifications');
 const mediaRoutes = require('./media');
+const profileRoutes = require('./profile');
 
 const router = express.Router();
 
@@ -17,5 +18,6 @@ router.use('/reactions', reactionsRoutes);
 router.use('/feed', feedRoutes);
 router.use('/notifications', notificationsRoutes);
 router.use('/media', mediaRoutes);
+router.use('/profile', profileRoutes);
 
 module.exports = router;
