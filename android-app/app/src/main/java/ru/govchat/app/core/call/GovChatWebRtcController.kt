@@ -563,13 +563,16 @@ class GovChatWebRtcController(
         )
         audioTrack?.let { localAudioTrack ->
             localAudioTrack.setEnabled(microphoneEnabled)
-            val addedViaTransceiver = runCatching {
-                logStep("attachLocalTracks:before addTransceiver(audio)")
-                peerConnection.addTransceiver(localAudioTrack, transceiverInit)
-            }.isSuccess
-            if (!addedViaTransceiver) {
+            val audioSender = runCatching {
+                // Prefer addTrack for better interoperability when Android is the answerer.
                 logStep("attachLocalTracks:before addTrack(audio)")
                 peerConnection.addTrack(localAudioTrack, localStreamIds)
+            }.getOrNull()
+            if (audioSender == null) {
+                runCatching {
+                    logStep("attachLocalTracks:before addTransceiver(audio)")
+                    peerConnection.addTransceiver(localAudioTrack, transceiverInit)
+                }
             }
         }
 
