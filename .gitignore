@@ -10,7 +10,6 @@ frontend/build/
 # env
 .env
 config.local.js
-backend/*firebase-adminsdk*.json
 
 # logs
 npm-debug.log*
