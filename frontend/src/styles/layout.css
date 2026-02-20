@@ -1,0 +1,34 @@
+/* Route-level layout contract.
+   .page-frame intentionally avoids display changes. */
+
+.page-frame {
+  width: 100%;
+  min-height: 100%;
+  padding-block: var(--page-block-pad, var(--space-20, 20px));
+  padding-inline: var(--page-inline-pad, var(--space-16, 16px));
+}
+
+.page-rail {
+  width: 100%;
+  max-width: var(--page-rail-default, 720px);
+  margin-inline: auto;
+}
+
+.page-rail--narrow {
+  max-width: var(--page-rail-narrow, 680px);
+}
+
+.page-rail--wide {
+  max-width: var(--page-rail-wide, 860px);
+}
+
+.page-rail--profile {
+  max-width: var(--page-rail-profile, 960px);
+}
+
+@media (max-width: 768px) {
+  .page-frame {
+    padding-block: var(--page-block-pad-mobile, var(--space-14, 14px));
+    padding-inline: var(--page-inline-pad-mobile, var(--space-12, 12px));
+  }
+}

@@ -3,6 +3,10 @@
   --bg-primary: #020617;   /* Slate 950 */
   --bg-surface: #0f172a;   /* Slate 900 */
   --bg-card: #1e293b;      /* Slate 800 */
+  --bg-secondary: var(--bg-surface);
+  --bg-hover: rgba(255, 255, 255, 0.04);
+  --bg-input: var(--bg-surface);
+  --bg-disabled: rgba(148, 163, 184, 0.18);
   
   --text-primary: #f8fafc; /* Slate 50 */
   --text-secondary: #94a3b8; /* Slate 400 */
@@ -11,6 +15,7 @@
   --accent: #8b5cf6;       /* Violet 500 */
   --accent-hover: #7c3aed; /* Violet 600 */
   --accent-light: rgba(139, 92, 246, 0.1);
+  --accent-soft: rgba(139, 92, 246, 0.16);
 
   --danger: #ef4444;       /* Red 500 */
   --success: #22c55e;      /* Green 500 */
@@ -19,6 +24,7 @@
   /* Borders */
   --border-color: #334155; /* Slate 700 */
   --border-light: rgba(255, 255, 255, 0.08);
+  --border-input: var(--border-color);
 
   /* Radii */
   --radius-xs: 8px;
@@ -31,6 +37,7 @@
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
   --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
   --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.35), 0 10px 10px -5px rgba(0, 0, 0, 0.2);
   --shadow-glow: 0 0 15px rgba(139, 92, 246, 0.3);
 
   /* Transitions */
@@ -38,7 +45,27 @@
   --transition-normal: 250ms ease;
 
   /* Spacing */
+  --space-4: 4px;
+  --space-6: 6px;
+  --space-8: 8px;
+  --space-10: 10px;
+  --space-12: 12px;
+  --space-14: 14px;
+  --space-16: 16px;
+  --space-18: 18px;
+  --space-20: 20px;
+  --space-24: 24px;
+  --space-40: 40px;
+
   --header-height: 60px;
   --sidebar-width: 80px;
   --right-panel-width: 350px;
+  --page-inline-pad: var(--space-16);
+  --page-block-pad: var(--space-20);
+  --page-inline-pad-mobile: var(--space-12);
+  --page-block-pad-mobile: var(--space-14);
+  --page-rail-narrow: 680px;
+  --page-rail-default: 720px;
+  --page-rail-wide: 860px;
+  --page-rail-profile: 960px;
 }

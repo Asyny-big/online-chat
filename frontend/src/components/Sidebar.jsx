@@ -1,14 +1,9 @@
 import React, { useState } from 'react';
 import ChatList from './ChatList';
 import CreateGroupModal from './CreateGroupModal';
-import ProfileDrawer from './ProfileDrawer';
-import ProfilePage from '../pages/ProfilePage';
-import { useMediaQuery } from '../hooks/useMediaQuery';
 
-function Sidebar({ token, chats, selectedChat, onSelectChat, onAddChat, onLogout, incomingCallChatId }) {
+function Sidebar({ token, chats, selectedChat, onSelectChat, onAddChat, onLogout, incomingCallChatId, onNavigateToProfile }) {
   const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
-  const [showProfile, setShowProfile] = useState(false);
-  const isDesktop = useMediaQuery('(min-width: 769px)', { defaultValue: true });
 
   return (
     <div className="chat-sidebar">
@@ -36,7 +31,7 @@ function Sidebar({ token, chats, selectedChat, onSelectChat, onAddChat, onLogout
       />
 
       <div className="sidebar-footer">
-        <button className="profile-btn-full" onClick={() => setShowProfile(true)}>
+        <button className="profile-btn-full" onClick={() => onNavigateToProfile?.()}>
           <span className="profile-icon">??</span>
           <span className="profile-text">Profile</span>
         </button>
@@ -52,14 +47,6 @@ function Sidebar({ token, chats, selectedChat, onSelectChat, onAddChat, onLogout
             setShowCreateGroupModal(false);
           }}
         />
-      )}
-
-      {showProfile && (
-        isDesktop ? (
-          <ProfilePage token={token} onClose={() => setShowProfile(false)} onLogout={onLogout} />
-        ) : (
-          <ProfileDrawer token={token} onClose={() => setShowProfile(false)} onLogout={onLogout} />
-        )
       )}
 
       <style>{`

@@ -1,17 +1,17 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { API_URL } from './config';
-import ChatPage from './pages/ChatPage';
+import ChatPage from './domains/messages/pages/ChatPage';
 import AdminPage from './pages/AdminPage';
-import FeedPage from './pages/FeedPage';
-import SearchPage from './pages/SearchPage';
-import NotificationsPage from './pages/NotificationsPage';
-import ProfileRoutePage from './pages/ProfileRoutePage';
-import AppNavSidebar from './components/AppNavSidebar';
+import FeedPage from './domains/feed/pages/FeedPage';
+import SearchPage from './domains/search/pages/SearchPage';
+import NotificationsPage from './domains/notifications/pages/NotificationsPage';
+import ProfileRoutePage from './domains/profile/pages/ProfileRoutePage';
 import RightPanel from './components/RightPanel';
 import { authStyles as styles } from './styles/authStyles';
-import { initPushNotifications } from './mobile/pushNotifications';
 import AndroidAppDownloadModal from './components/AndroidAppDownloadModal';
+import AppShell from './app/AppShell';
+import RootProviders from './app/providers/RootProviders';
 
 function normalizeRoute(hash) {
   const value = String(hash || '').trim();
@@ -42,12 +42,6 @@ function App() {
 
   useEffect(() => {
     if (token) localStorage.setItem('token', token);
-  }, [token]);
-
-  useEffect(() => {
-    if (!token) return;
-    const cleanup = initPushNotifications({ token });
-    return cleanup;
   }, [token]);
 
   useEffect(() => {
@@ -93,146 +87,164 @@ function App() {
     }
   };
 
-  const renderAppRoute = () => {
+  const buildRouteView = () => {
     const key = resolveRouteKey(route);
 
     if (key === 'admin') {
-      return <AdminPage token={token} onBack={() => navigateTo('#/')} />;
+      return {
+        key,
+        showPrimaryNav: false,
+        withRightPanel: false,
+        rightPanel: null,
+        content: <AdminPage token={token} onBack={() => navigateTo('#/')} />
+      };
     }
 
-    // Messages layout (2 columns)
     if (key === 'messages') {
-      return (
-        <div className="app-layout messages-layout">
-          <AppNavSidebar activeKey="messages" onNavigate={navigateTo} onLogout={handleLogout} />
-          <main className="main-content">
-            <ChatPage token={token} onLogout={handleLogout} />
-          </main>
-        </div>
-      );
+      return {
+        key,
+        showPrimaryNav: true,
+        withRightPanel: false,
+        rightPanel: null,
+        content: <ChatPage token={token} onLogout={handleLogout} />
+      };
     }
 
-    // Standard Social Layout (3 columns)
-    return (
-      <div className="app-layout">
-        <AppNavSidebar activeKey={key} onNavigate={navigateTo} onLogout={handleLogout} />
-        <main className="main-content">
-          {key === 'feed' ? <FeedPage token={token} /> : null}
-          {key === 'search' ? <SearchPage token={token} onOpenMessages={() => navigateTo('#/messages')} /> : null}
-          {key === 'notifications' ? <NotificationsPage token={token} /> : null}
-          {key === 'profile' ? (
-            <ProfileRoutePage token={token} onLogout={handleLogout} onClose={() => navigateTo('#/')} />
+    const showRightPanel = key === 'feed' || key === 'search' || key === 'notifications';
+
+    return {
+      key,
+      showPrimaryNav: true,
+      withRightPanel: showRightPanel,
+      rightPanel: showRightPanel ? <RightPanel /> : null,
+      content: (
+        <>
+          {key === 'feed' ? (
+            <div className="page-frame">
+              <div className="page-rail page-rail--narrow">
+                <FeedPage token={token} />
+              </div>
+            </div>
           ) : null}
-        </main>
-        <RightPanel />
-      </div>
-    );
+          {key === 'search' ? (
+            <div className="page-frame">
+              <div className="page-rail page-rail--wide">
+                <SearchPage token={token} onOpenMessages={() => navigateTo('#/messages')} />
+              </div>
+            </div>
+          ) : null}
+          {key === 'notifications' ? (
+            <div className="page-frame">
+              <div className="page-rail">
+                <NotificationsPage token={token} />
+              </div>
+            </div>
+          ) : null}
+          {key === 'profile' ? (
+            <div className="page-frame">
+              <div className="page-rail page-rail--profile">
+                <ProfileRoutePage token={token} onLogout={handleLogout} onClose={() => navigateTo('#/')} />
+              </div>
+            </div>
+          ) : null}
+        </>
+      )
+    };
   };
 
-  const pageContent = token
-    ? renderAppRoute()
-    : (
-      <div style={styles.authContainer}>
-        <div style={styles.authBox}>
-          <h1 style={styles.title}>
-            <span>🦆</span>
-            GovChat
-          </h1>
-          <p style={styles.subtitle}>Современный мессенджер</p>
+  const authView = (
+    <div style={styles.authContainer}>
+      <div style={styles.authBox}>
+        <h1 style={styles.title}>
+          <span>🦆</span>
+          GovChat
+        </h1>
+        <p style={styles.subtitle}>Современный мессенджер</p>
 
-          <div style={styles.tabs}>
-            <button
-              onClick={() => setAuthMode('login')}
-              style={{ ...styles.tab, ...(authMode === 'login' ? styles.tabActive : {}) }}
-            >
-              Вход
-            </button>
-            <button
-              onClick={() => setAuthMode('register')}
-              style={{ ...styles.tab, ...(authMode === 'register' ? styles.tabActive : {}) }}
-            >
-              Регистрация
-            </button>
-          </div>
-
-          <form onSubmit={handleAuth} style={styles.form}>
-            {authMode === 'register' && (
-              <input
-                type="text"
-                placeholder="Ваше имя"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                style={styles.input}
-                required
-              />
-            )}
-
-            <input
-              type="tel"
-              placeholder="Номер телефона"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              style={styles.input}
-              required
-            />
-
-            <input
-              type="password"
-              placeholder="Пароль"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              style={styles.input}
-              required
-            />
-
-            {error && <div style={styles.error}>{error}</div>}
-
-            <button
-              type="submit"
-              style={{
-                ...styles.button,
-                opacity: loading ? 0.7 : 1,
-                cursor: loading ? 'not-allowed' : 'pointer'
-              }}
-              disabled={loading}
-            >
-              {loading ? 'Загрузка...' : (authMode === 'login' ? 'Войти' : 'Зарегистрироваться')}
-            </button>
-          </form>
+        <div style={styles.tabs}>
+          <button
+            onClick={() => setAuthMode('login')}
+            style={{ ...styles.tab, ...(authMode === 'login' ? styles.tabActive : {}) }}
+          >
+            Вход
+          </button>
+          <button
+            onClick={() => setAuthMode('register')}
+            style={{ ...styles.tab, ...(authMode === 'register' ? styles.tabActive : {}) }}
+          >
+            Регистрация
+          </button>
         </div>
+
+        <form onSubmit={handleAuth} style={styles.form}>
+          {authMode === 'register' && (
+            <input
+              type="text"
+              placeholder="Ваше имя"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              style={styles.input}
+              required
+            />
+          )}
+
+          <input
+            type="tel"
+            placeholder="Номер телефона"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            style={styles.input}
+            required
+          />
+
+          <input
+            type="password"
+            placeholder="Пароль"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            style={styles.input}
+            required
+          />
+
+          {error && <div style={styles.error}>{error}</div>}
+
+          <button
+            type="submit"
+            style={{
+              ...styles.button,
+              opacity: loading ? 0.7 : 1,
+              cursor: loading ? 'not-allowed' : 'pointer'
+            }}
+            disabled={loading}
+          >
+            {loading ? 'Загрузка...' : (authMode === 'login' ? 'Войти' : 'Зарегистрироваться')}
+          </button>
+        </form>
       </div>
+    </div>
+  );
+
+  const appView = (() => {
+    const routeView = buildRouteView();
+    return (
+      <AppShell
+        showPrimaryNav={routeView.showPrimaryNav}
+        activeNavKey={routeView.key}
+        onNavigate={navigateTo}
+        onLogout={handleLogout}
+        withRightPanel={routeView.withRightPanel}
+        rightPanel={routeView.rightPanel}
+        overlay={<AndroidAppDownloadModal />}
+      >
+        {routeView.content}
+      </AppShell>
     );
+  })();
 
   return (
-    <>
-      {pageContent}
-      <AndroidAppDownloadModal />
-      <style>{`
-        .app-layout {
-          display: grid;
-          grid-template-columns: var(--sidebar-width) 1fr var(--right-panel-width);
-          min-height: 100vh;
-        }
-
-        .messages-layout {
-            grid-template-columns: var(--sidebar-width) 1fr;
-        }
-
-        .main-content {
-            border-right: 1px solid var(--border-color);
-            border-left: 1px solid var(--border-color);
-        }
-
-        @media (max-width: 1024px) {
-            .app-layout {
-                grid-template-columns: var(--sidebar-width) 1fr;
-            }
-            .right-panel {
-                display: none;
-            }
-        }
-      `}</style>
-    </>
+    <RootProviders token={token} setToken={setToken}>
+      {token ? appView : authView}
+    </RootProviders>
   );
 }
 
