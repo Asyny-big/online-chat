@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { ANDROID_APK_DOWNLOAD_URL } from '../config';
-import { useMediaQuery } from '../hooks/useMediaQuery';
+import { ANDROID_APK_DOWNLOAD_URL } from '@/config';
+import { useMediaQuery } from '@/shared/hooks/useMediaQuery';
 import './AndroidAppDownloadModal.css';
 
 function AndroidAppDownloadModal() {

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo } from 'react';
-import { useTasks, useTransactions, useWallet } from '../../../economy/EconomyStore';
-import { HrumIcon } from '../../../economy/hrumIcon';
-import { useHrumToast } from '../../../components/HrumToast';
+import { useTasks, useTransactions, useWallet } from '@/economy/EconomyStore';
+import { HrumIcon } from '@/economy/hrumIcon';
+import { useHrumToast } from '@/components/HrumToast';
 
 function clamp01(n) {
   const x = Number(n);
@@ -295,4 +295,3 @@ const styles = {
     background: 'rgba(148,163,184,0.14)'
   }
 };
-

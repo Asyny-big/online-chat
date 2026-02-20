@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo } from 'react';
-import { initPushNotifications } from '../../mobile/pushNotifications';
-import { HrumToastProvider } from '../../components/HrumToast';
+import { initPushNotifications } from '@/mobile/pushNotifications';
+import { HrumToastProvider } from '@/components/HrumToast';
 
 const AuthSessionContext = createContext(null);
 const ApiClientContext = createContext(null);
@@ -114,4 +114,3 @@ export function useCallSessionContext() {
 export function useModalHostContext() {
   return useContext(ModalHostContext);
 }
-

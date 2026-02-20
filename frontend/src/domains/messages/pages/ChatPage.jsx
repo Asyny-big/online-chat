@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 import io from 'socket.io-client';
-import { API_URL, SOCKET_URL } from '../../../config';
-import Sidebar from '../../../components/Sidebar';
-import ChatWindow from '../../../components/ChatWindow';
-import CallModal from '../../../components/CallModal';
-import GroupCallModalLiveKit from '../../../components/GroupCallModalLiveKit';
-import { useHrumToast } from '../../../components/HrumToast';
-import { getTransactions } from '../../../economy/api';
-import { consumePendingPushAction, pushEvents } from '../../../mobile/pushNotifications';
+import { API_URL, SOCKET_URL } from '@/config';
+import Sidebar from '@/components/Sidebar';
+import ChatWindow from '@/components/ChatWindow';
+import CallModal from '@/components/CallModal';
+import GroupCallModalLiveKit from '@/components/GroupCallModalLiveKit';
+import { useHrumToast } from '@/components/HrumToast';
+import { getTransactions } from '@/economy/api';
+import { consumePendingPushAction, pushEvents } from '@/mobile/pushNotifications';
 
 function ChatPageInner({ token, onLogout }) {
   const { showEarn } = useHrumToast();

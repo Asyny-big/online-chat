@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { resolveAssetUrl } from '../utils/resolveAssetUrl';
+import { resolveAssetUrl } from '@/shared/lib/resolveAssetUrl';
 
 function formatTime(value) {
   if (!value) return '';
@@ -259,4 +259,3 @@ export default function PostCard({ item, onOpenComments }) {
     </article>
   );
 }
-

@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
-import { HrumIcon } from '../economy/hrumIcon';
+import { HrumIcon } from '@/economy/hrumIcon';
 
 const HrumToastContext = createContext(null);
 

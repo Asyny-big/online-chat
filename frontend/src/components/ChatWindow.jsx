@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import axios from 'axios';
 import MessageInput from './MessageInput';
-import { API_URL } from '../config';
+import { API_URL } from '@/config';
 
 function ChatWindow({
   token,

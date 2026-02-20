@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { API_URL } from '../config';
+import { API_URL } from '@/config';
 
 const Icons = {
   Mic: ({ off }) => (

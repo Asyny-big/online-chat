@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { API_URL } from '../../../config';
-import { resolveAssetUrl } from '../../../utils/resolveAssetUrl';
-import { EconomyStoreProvider } from '../../../economy/EconomyStore';
-import HrumOverview from '../components/HrumOverview';
-import TasksPanel from '../components/TasksPanel';
-import ShopPanel from '../components/ShopPanel';
-import WalletHistoryPanel from '../components/WalletHistoryPanel';
+import { API_URL } from '@/config';
+import { resolveAssetUrl } from '@/shared/lib/resolveAssetUrl';
+import { EconomyStoreProvider } from '@/economy/EconomyStore';
+import HrumOverview from '@/domains/profile/components/HrumOverview';
+import TasksPanel from '@/domains/profile/components/TasksPanel';
+import ShopPanel from '@/domains/profile/components/ShopPanel';
+import WalletHistoryPanel from '@/domains/profile/components/WalletHistoryPanel';
 
 function SkeletonLine({ w = 160 }) {
   return (
@@ -314,5 +314,4 @@ export default function ProfilePage({ token, onClose, onLogout }) {
     </EconomyStoreProvider>
   );
 }
-
 

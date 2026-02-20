@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo } from 'react';
-import { useShop, useTransactions, useWallet } from '../../../economy/EconomyStore';
-import { HrumIcon } from '../../../economy/hrumIcon';
-import { useHrumToast } from '../../../components/HrumToast';
+import { useShop, useTransactions, useWallet } from '@/economy/EconomyStore';
+import { HrumIcon } from '@/economy/hrumIcon';
+import { useHrumToast } from '@/components/HrumToast';
 
 function ItemSkeleton() {
   return (
@@ -265,4 +265,3 @@ const styles = {
   },
   skelBtn: { height: 40, borderRadius: 12, background: 'rgba(148,163,184,0.14)' }
 };
-

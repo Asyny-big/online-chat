@@ -1,5 +1,5 @@
 import React from 'react';
-import AppNavSidebar from '../components/AppNavSidebar';
+import AppNavSidebar from '@/components/AppNavSidebar';
 
 function TopBar() {
   return null;
@@ -104,4 +104,3 @@ export default function AppShell({
     </div>
   );
 }
-

@@ -1,6 +1,6 @@
 import React from 'react';
-import { usePhoneUserLookup } from '../hooks/usePhoneUserLookup';
-import { resolveAssetUrl } from '../utils/resolveAssetUrl';
+import { usePhoneUserLookup } from '@/shared/hooks/usePhoneUserLookup';
+import { resolveAssetUrl } from '@/shared/lib/resolveAssetUrl';
 
 function UserSearch({ token, onCreateChat }) {
   const { phone, setPhone, status, user, error } = usePhoneUserLookup({ token, minLen: 9, debounceMs: 400 });

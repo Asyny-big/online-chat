@@ -1,1 +1,1 @@
-export { default } from '../../domains/profile/components/WalletHistoryPanel';
+export { default } from '@/domains/profile/components/WalletHistoryPanel';

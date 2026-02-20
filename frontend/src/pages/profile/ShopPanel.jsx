@@ -1,1 +1,1 @@
-export { default } from '../../domains/profile/components/ShopPanel';
+export { default } from '@/domains/profile/components/ShopPanel';

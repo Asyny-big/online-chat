@@ -1,9 +1,9 @@
 ﻿import React, { useEffect, useState } from 'react';
 import axios from 'axios';
-import { API_URL } from '../../../config';
-import PostComposer from '../../../components/PostComposer';
-import PostCard from '../../../components/PostCard';
-import CommentsModal from '../../../components/CommentsModal';
+import { API_URL } from '@/config';
+import PostComposer from '@/components/PostComposer';
+import PostCard from '@/components/PostCard';
+import CommentsModal from '@/components/CommentsModal';
 
 export default function FeedPage({ token }) {
   const [items, setItems] = useState([]);

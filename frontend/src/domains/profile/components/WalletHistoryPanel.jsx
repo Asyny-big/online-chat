@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
-import { useTransactions } from '../../../economy/EconomyStore';
-import { HrumIcon } from '../../../economy/hrumIcon';
+import { useTransactions } from '@/economy/EconomyStore';
+import { HrumIcon } from '@/economy/hrumIcon';
 
 function formatTxDate(value) {
   try {
@@ -198,4 +198,3 @@ const styles = {
   skelAmt: { width: 140, height: 12, borderRadius: 999, ...shimmer },
   skelLine: { width: 210, height: 12, borderRadius: 999, ...shimmer }
 };
-

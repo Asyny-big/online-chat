@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import axios from 'axios';
-import { API_URL } from '../../../config';
+import { API_URL } from '@/config';
 
 export default function SearchPage({ token, onOpenMessages }) {
   const [phone, setPhone] = useState('');

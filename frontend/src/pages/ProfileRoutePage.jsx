@@ -1,1 +1,1 @@
-export { default } from '../domains/profile/pages/ProfileRoutePage';
+export { default } from '@/domains/profile/pages/ProfileRoutePage';

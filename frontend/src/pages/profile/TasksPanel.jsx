@@ -1,1 +1,1 @@
-export { default } from '../../domains/profile/components/TasksPanel';
+export { default } from '@/domains/profile/components/TasksPanel';

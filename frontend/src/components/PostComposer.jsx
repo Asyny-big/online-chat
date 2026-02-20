@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import axios from 'axios';
-import { API_URL } from '../config';
+import { API_URL } from '@/config';
 
 export default function PostComposer({ token, onCreated }) {
   const [text, setText] = useState('');
@@ -173,4 +173,3 @@ export default function PostComposer({ token, onCreated }) {
     </div>
   );
 }
-

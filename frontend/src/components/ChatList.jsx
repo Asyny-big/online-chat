@@ -1,5 +1,5 @@
 import React from 'react';
-import { resolveAssetUrl } from '../utils/resolveAssetUrl';
+import { resolveAssetUrl } from '@/shared/lib/resolveAssetUrl';
 
 function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
   // Защита от неправильного типа данных
@@ -283,4 +283,3 @@ function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
 }
 
 export default ChatList;
-

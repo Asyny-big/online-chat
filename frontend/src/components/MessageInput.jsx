@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
-import { API_URL } from '../config';
-import { getTransactions } from '../economy/api';
+import { API_URL } from '@/config';
+import { getTransactions } from '@/economy/api';
 import { useHrumToast } from './HrumToast';
 
 function MessageInput({ chatId, socket, token, onTyping }) {

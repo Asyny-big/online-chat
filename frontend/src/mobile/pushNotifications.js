@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { Capacitor } from '@capacitor/core';
 import { PushNotifications } from '@capacitor/push-notifications';
-import { API_URL } from '../config';
+import { API_URL } from '@/config';
 
 const PUSH_OPEN_EVENT = 'govchat:push-open';
 const PENDING_PUSH_KEY = 'govchat.pending_push_action';

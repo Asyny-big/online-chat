@@ -1,5 +1,5 @@
 import React from 'react';
-import HrumIconUrl from '../assets/icons/hrum.png';
+import HrumIconUrl from '@/assets/icons/hrum.png';
 
 export { HrumIconUrl };
 
@@ -15,4 +15,3 @@ export function HrumIcon({ size = 18, alt = 'Хрумы', style, title }) {
     />
   );
 }
-

@@ -1,1 +1,1 @@
-export { default } from '../domains/feed/pages/FeedPage';
+export { default } from '@/domains/feed/pages/FeedPage';

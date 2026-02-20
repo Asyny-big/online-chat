@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
-import { API_URL } from '../config';
-import { usePhoneUserLookup } from '../hooks/usePhoneUserLookup';
+import { API_URL } from '@/config';
+import { usePhoneUserLookup } from '@/shared/hooks/usePhoneUserLookup';
 
 /**
  * CreateGroupModal - Модальное окно для создания группового чата

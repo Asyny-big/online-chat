@@ -1,17 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { API_URL } from './config';
-import ChatPage from './domains/messages/pages/ChatPage';
-import AdminPage from './pages/AdminPage';
-import FeedPage from './domains/feed/pages/FeedPage';
-import SearchPage from './domains/search/pages/SearchPage';
-import NotificationsPage from './domains/notifications/pages/NotificationsPage';
-import ProfileRoutePage from './domains/profile/pages/ProfileRoutePage';
-import RightPanel from './components/RightPanel';
-import { authStyles as styles } from './styles/authStyles';
-import AndroidAppDownloadModal from './components/AndroidAppDownloadModal';
-import AppShell from './app/AppShell';
-import RootProviders from './app/providers/RootProviders';
+import { API_URL } from '@/config';
+import ChatPage from '@/domains/messages/pages/ChatPage';
+import AdminPage from '@/pages/AdminPage';
+import FeedPage from '@/domains/feed/pages/FeedPage';
+import SearchPage from '@/domains/search/pages/SearchPage';
+import NotificationsPage from '@/domains/notifications/pages/NotificationsPage';
+import ProfileRoutePage from '@/domains/profile/pages/ProfileRoutePage';
+import RightPanel from '@/components/RightPanel';
+import { authStyles as styles } from '@/styles/authStyles';
+import AndroidAppDownloadModal from '@/components/AndroidAppDownloadModal';
+import AppShell from '@/app/AppShell';
+import RootProviders from '@/app/providers/RootProviders';
 
 function normalizeRoute(hash) {
   const value = String(hash || '').trim();
@@ -249,4 +249,3 @@ function App() {
 }
 
 export default App;
-

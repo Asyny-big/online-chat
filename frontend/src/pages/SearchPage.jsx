@@ -1,1 +1,1 @@
-export { default } from '../domains/search/pages/SearchPage';
+export { default } from '@/domains/search/pages/SearchPage';

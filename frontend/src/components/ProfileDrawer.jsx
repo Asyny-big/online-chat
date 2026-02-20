@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { API_URL } from '../config';
-import { CLIENT_VERSION } from '../version';
-import { resolveAssetUrl } from '../utils/resolveAssetUrl';
+import { API_URL } from '@/config';
+import { CLIENT_VERSION } from '@/version';
+import { resolveAssetUrl } from '@/shared/lib/resolveAssetUrl';
 import HrumPanel from './HrumPanel';
 
 function formatDate(value) {

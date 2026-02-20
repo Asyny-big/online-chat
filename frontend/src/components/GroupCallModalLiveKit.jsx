@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { API_URL, LIVEKIT_URL } from '../config';
+import { API_URL, LIVEKIT_URL } from '@/config';
 import { createLocalTracks, Room, RoomEvent, Track, VideoQuality } from 'livekit-client';
 
 function isAndroidWebViewRuntime() {

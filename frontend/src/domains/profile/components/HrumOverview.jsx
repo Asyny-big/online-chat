@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
-import { useWallet } from '../../../economy/EconomyStore';
-import { HrumIcon } from '../../../economy/hrumIcon';
+import { useWallet } from '@/economy/EconomyStore';
+import { HrumIcon } from '@/economy/hrumIcon';
 
 function SkeletonNumber() {
   return (
@@ -126,4 +126,3 @@ const styles = {
   },
   hint: { marginTop: 12, color: '#94a3b8', fontWeight: 800, fontSize: 12, lineHeight: 1.35 }
 };
-
