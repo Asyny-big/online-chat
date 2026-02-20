@@ -60,15 +60,23 @@ class CallForegroundService : Service() {
             } else {
                 startForeground(NOTIFICATION_ID, notification)
             }
+            running = true
         }.onFailure { error ->
             Log.e(TAG, "Failed to start call foreground service", error)
+            running = false
             stopSelf()
         }
     }
 
     private fun stopCallForeground() {
+        running = false
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
+    }
+
+    override fun onDestroy() {
+        running = false
+        super.onDestroy()
     }
 
     private fun buildNotification(title: String, text: String): Notification {
@@ -95,6 +103,8 @@ class CallForegroundService : Service() {
         private const val REQUEST_CODE_OPEN_APP = 10
         private const val NOTIFICATION_ID = 1001
         private const val TAG = "CallForegroundService"
+        @Volatile
+        private var running: Boolean = false
 
         const val ACTION_START = "ru.govchat.app.call.START"
         const val ACTION_STOP = "ru.govchat.app.call.STOP"
@@ -131,5 +141,7 @@ class CallForegroundService : Service() {
                 Log.e(TAG, "Unable to request call foreground service stop", error)
             }
         }
+
+        fun isRunning(): Boolean = running
     }
 }

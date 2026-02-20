@@ -1,8 +1,11 @@
 package ru.govchat.app.ui.screens.main
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.GlobalScope
@@ -510,7 +513,7 @@ class MainViewModel(
 
                 NotificationIntents.ACTION_ACCEPT_CALL -> {
                     ensureIncomingCallFromNotification(command)
-                    acceptIncomingCall()
+                    acceptIncomingCall(fromNotification = true)
                 }
 
                 NotificationIntents.ACTION_DECLINE_CALL -> {
@@ -521,11 +524,25 @@ class MainViewModel(
         }
     }
 
-    fun acceptIncomingCall() {
+    fun acceptIncomingCall(fromNotification: Boolean = false) {
         val incoming = mutableState.value.incomingCall ?: return
         if (mutableState.value.isCallActionInProgress) return
 
         viewModelScope.launch {
+            if (fromNotification) {
+                val hasMicrophonePermission = hasRuntimePermission(Manifest.permission.RECORD_AUDIO)
+                val hasCameraPermission = incoming.type != "video" || hasRuntimePermission(Manifest.permission.CAMERA)
+                if (!hasMicrophonePermission || !hasCameraPermission) {
+                    mutableState.update {
+                        it.copy(
+                            isCallActionInProgress = false,
+                            callErrorMessage = "Нужны разрешения на микрофон и камеру для принятия звонка"
+                        )
+                    }
+                    return@launch
+                }
+            }
+
             mutableState.update {
                 it.copy(
                     isCallActionInProgress = true,
@@ -644,6 +661,10 @@ class MainViewModel(
             IncomingCallNotifications.cancel(applicationContext, incoming.callId)
             mutableState.update { it.copy(incomingCall = null, isCallActionInProgress = false) }
         }
+    }
+
+    private fun hasRuntimePermission(permission: String): Boolean {
+        return ContextCompat.checkSelfPermission(applicationContext, permission) == PackageManager.PERMISSION_GRANTED
     }
 
     fun leaveActiveCall() {
