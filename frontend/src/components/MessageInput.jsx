@@ -83,9 +83,9 @@ function MessageInput({ chatId, socket, token, onTyping }) {
   const uploadFile = async (file) => {
     if (!file || !chatId) return;
 
-    // Лимит 20 МБ
-    if (file.size > 20 * 1024 * 1024) {
-      alert('Максимальный размер файла: 20 МБ');
+    // Лимит 100 МБ
+    if (file.size > 100 * 1024 * 1024) {
+      alert('Максимальный размер файла: 100 МБ');
       return;
     }
 

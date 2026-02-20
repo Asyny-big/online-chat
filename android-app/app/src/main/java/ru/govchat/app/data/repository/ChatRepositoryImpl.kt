@@ -187,7 +187,7 @@ class ChatRepositoryImpl(
             ?: return Result.failure(IllegalArgumentException("Не удалось прочитать файл"))
 
         if (meta.sizeBytes != null && meta.sizeBytes > MAX_ATTACHMENT_SIZE_BYTES) {
-            return Result.failure(IllegalArgumentException("Максимальный размер файла: 20 МБ"))
+            return Result.failure(IllegalArgumentException("Максимальный размер файла: 100 МБ"))
         }
 
         onProgress(0)
@@ -385,7 +385,7 @@ class ChatRepositoryImpl(
     )
 
     private companion object {
-        const val MAX_ATTACHMENT_SIZE_BYTES = 20L * 1024L * 1024L
+        const val MAX_ATTACHMENT_SIZE_BYTES = 100L * 1024L * 1024L
         const val SOCKET_SEND_TIMEOUT_MS = 20_000L
 
         val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "svg")
