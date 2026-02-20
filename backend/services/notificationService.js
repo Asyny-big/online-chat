@@ -276,7 +276,8 @@ class NotificationService {
       if (item.success) return;
       const token = tokenRows[index]?.token;
       const code = item.error?.code || '';
-      failed.push({ token, code });
+      const message = item.error?.message || '';
+      failed.push({ token, code, message });
       if (code === 'messaging/registration-token-not-registered' || code === 'messaging/invalid-registration-token') {
         invalidTokens.push(token);
       }
@@ -292,6 +293,12 @@ class NotificationService {
         failedCount: failed.length,
         sample: failed.slice(0, 3)
       });
+
+      if (failed.every((item) => item.code === 'app/invalid-credential')) {
+        console.error(
+          '[Push] Firebase credentials rejected by FCM. Check service-account key validity, IAM access and server time sync.'
+        );
+      }
     }
 
     return {

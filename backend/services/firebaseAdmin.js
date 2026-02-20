@@ -32,21 +32,42 @@ function readServiceAccount() {
   return null;
 }
 
+function normalizeServiceAccount(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const normalized = { ...raw };
+  if (typeof normalized.private_key === 'string') {
+    normalized.private_key = normalized.private_key.replace(/\\n/g, '\n');
+  }
+  return normalized;
+}
+
 function getMessaging() {
   if (!initialized) {
-    const serviceAccount = readServiceAccount();
+    const serviceAccount = normalizeServiceAccount(readServiceAccount());
     if (!serviceAccount) {
+      return null;
+    }
+
+    const missingFields = ['project_id', 'client_email', 'private_key'].filter(
+      (key) => !serviceAccount[key]
+    );
+    if (missingFields.length) {
+      console.error('[Push] Firebase Admin init failed: missing service account fields:', missingFields);
       return null;
     }
 
     try {
       if (!admin.apps.length) {
         admin.initializeApp({
-          credential: admin.credential.cert(serviceAccount)
+          credential: admin.credential.cert(serviceAccount),
+          projectId: serviceAccount.project_id
         });
       }
       initialized = true;
-      console.log('[Push] Firebase Admin initialized');
+      console.log('[Push] Firebase Admin initialized:', {
+        projectId: serviceAccount.project_id,
+        clientEmail: serviceAccount.client_email
+      });
     } catch (error) {
       console.error('[Push] Firebase Admin init failed:', error?.message || error);
       return null;
