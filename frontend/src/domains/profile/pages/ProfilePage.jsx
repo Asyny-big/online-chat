@@ -155,7 +155,6 @@ export default function ProfilePage({ token, onLogout }) {
               radial-gradient(circle at 8% 12%, rgba(56, 189, 248, 0.15), transparent 38%),
               radial-gradient(circle at 95% 4%, rgba(99, 102, 241, 0.18), transparent 32%),
               var(--bg-primary);
-            overflow: hidden;
           }
 
           .profile-background-glow {

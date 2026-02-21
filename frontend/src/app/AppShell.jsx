@@ -60,14 +60,17 @@ export default function AppShell({
 
       <style>{`
         .app-shell-root {
+          height: 100vh;
           min-height: 100vh;
           position: relative;
+          overflow: hidden;
         }
 
         .app-shell-layout {
           display: grid;
           grid-template-columns: var(--sidebar-width) 1fr;
-          min-height: 100vh;
+          height: 100%;
+          min-height: 100%;
         }
 
         .app-shell-layout.with-right-panel {
@@ -78,6 +81,9 @@ export default function AppShell({
           border-right: 1px solid var(--border-color);
           border-left: 1px solid var(--border-color);
           min-width: 0;
+          min-height: 0;
+          overflow-y: auto;
+          overflow-x: hidden;
         }
 
         .app-shell-main.with-right-panel {
