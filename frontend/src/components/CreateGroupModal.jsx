@@ -1,4 +1,5 @@
 ﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import ReactDOM from 'react-dom';
 import { API_URL } from '@/config';
 import { usePhoneUserLookup } from '@/shared/hooks/usePhoneUserLookup';
 import { ImageIcon, SearchIcon } from '@/shared/ui/Icons';
@@ -359,7 +360,7 @@ function CreateGroupModal({ token, onClose, onGroupCreated }) {
     );
   };
 
-  return (
+  return ReactDOM.createPortal(
     <div className="group-wizard-overlay" onClick={onClose}>
       <div className="group-wizard-modal" onClick={(event) => event.stopPropagation()}>
         <header className="group-wizard-header">
@@ -1113,7 +1114,8 @@ function CreateGroupModal({ token, onClose, onGroupCreated }) {
           }
         `}</style>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
