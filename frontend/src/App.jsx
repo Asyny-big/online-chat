@@ -13,6 +13,8 @@ import AndroidAppDownloadModal from './components/AndroidAppDownloadModal';
 import AppShell from './app/AppShell';
 import RootProviders from './app/providers/RootProviders';
 
+const UNREAD_BADGES_REFRESH_EVENT = 'govchat:unread-badges-refresh';
+
 function normalizeRoute(hash) {
   const value = String(hash || '').trim();
   if (!value || value === '#') return '#/';
@@ -39,6 +41,7 @@ function App() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [route, setRoute] = useState(normalizeRoute(window.location.hash));
+  const [navBadgeCounts, setNavBadgeCounts] = useState({ notifications: 0, messages: 0 });
 
   useEffect(() => {
     if (token) localStorage.setItem('token', token);
@@ -53,6 +56,75 @@ function App() {
     window.addEventListener('hashchange', handleHash);
     return () => window.removeEventListener('hashchange', handleHash);
   }, []);
+
+  useEffect(() => {
+    if (!token) {
+      setNavBadgeCounts({ notifications: 0, messages: 0 });
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const refreshUnreadBadges = async () => {
+      try {
+        const [notificationsRes, chatsRes] = await Promise.all([
+          axios.get(`${API_URL}/social/notifications?limit=50`, {
+            headers: { Authorization: `Bearer ${token}` }
+          }),
+          axios.get(`${API_URL}/chats`, {
+            headers: { Authorization: `Bearer ${token}` }
+          })
+        ]);
+
+        if (cancelled) return;
+
+        const notificationsItems = Array.isArray(notificationsRes.data?.items)
+          ? notificationsRes.data.items
+          : [];
+        const chatsItems = Array.isArray(chatsRes.data) ? chatsRes.data : [];
+
+        const unreadNotifications = notificationsItems.reduce(
+          (sum, item) => sum + (item?.read ? 0 : 1),
+          0
+        );
+        const unreadMessages = chatsItems.reduce(
+          (sum, chat) => sum + Math.max(0, Number(chat?.unreadCount || 0)),
+          0
+        );
+
+        setNavBadgeCounts({
+          notifications: unreadNotifications,
+          messages: unreadMessages
+        });
+      } catch (_) {
+        // Keep previous badge values if one of sources is temporarily unavailable.
+      }
+    };
+
+    void refreshUnreadBadges();
+
+    const intervalId = setInterval(() => {
+      void refreshUnreadBadges();
+    }, 5000);
+
+    const handleFocus = () => {
+      void refreshUnreadBadges();
+    };
+
+    const handleManualRefresh = () => {
+      void refreshUnreadBadges();
+    };
+
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener(UNREAD_BADGES_REFRESH_EVENT, handleManualRefresh);
+
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener(UNREAD_BADGES_REFRESH_EVENT, handleManualRefresh);
+    };
+  }, [token, route]);
 
   const handleAuth = async (e) => {
     e.preventDefault();
@@ -76,6 +148,7 @@ function App() {
     setPhone('');
     setPassword('');
     setName('');
+    setNavBadgeCounts({ notifications: 0, messages: 0 });
   };
 
   const navigateTo = (hash) => {
@@ -252,6 +325,7 @@ function App() {
         activeNavKey={routeView.key}
         onNavigate={navigateTo}
         onLogout={handleLogout}
+        navBadgeCounts={navBadgeCounts}
         withRightPanel={routeView.withRightPanel}
         rightPanel={routeView.rightPanel}
         overlay={<AndroidAppDownloadModal />}

@@ -5,7 +5,7 @@ function TopBar() {
   return null;
 }
 
-function PrimaryNav({ show, activeKey, onNavigate, onLogout }) {
+function PrimaryNav({ show, activeKey, onNavigate, onLogout, badgeCounts }) {
   if (!show) return null;
 
   return (
@@ -13,6 +13,7 @@ function PrimaryNav({ show, activeKey, onNavigate, onLogout }) {
       activeKey={activeKey}
       onNavigate={onNavigate}
       onLogout={onLogout}
+      badgeCounts={badgeCounts}
     />
   );
 }
@@ -34,6 +35,7 @@ export default function AppShell({
   activeNavKey,
   onNavigate,
   onLogout,
+  navBadgeCounts,
   withRightPanel = false,
   rightPanel = null,
   overlay = null,
@@ -49,6 +51,7 @@ export default function AppShell({
           activeKey={activeNavKey}
           onNavigate={onNavigate}
           onLogout={onLogout}
+          badgeCounts={navBadgeCounts}
         />
 
         <RouteOutlet withRightPanel={withRightPanel}>{children}</RouteOutlet>

@@ -16,7 +16,7 @@ const NAV_ITEMS = [
   { key: 'profile', label: 'Профиль', hash: '#/profile', Icon: UserIcon }
 ];
 
-export default function AppNavSidebar({ activeKey, onNavigate }) {
+export default function AppNavSidebar({ activeKey, onNavigate, badgeCounts = {} }) {
   return (
     <aside className="app-nav-sidebar" aria-label="Primary navigation">
       <div className="app-nav-header">
@@ -29,6 +29,13 @@ export default function AppNavSidebar({ activeKey, onNavigate }) {
         {NAV_ITEMS.map((item) => {
           const active = activeKey === item.key;
           const IconComponent = item.Icon;
+          const rawBadgeCount = item.key === 'notifications'
+            ? Number(badgeCounts.notifications || 0)
+            : item.key === 'messages'
+              ? Number(badgeCounts.messages || 0)
+              : 0;
+          const badgeCount = Number.isFinite(rawBadgeCount) ? Math.max(0, Math.trunc(rawBadgeCount)) : 0;
+          const badgeLabel = badgeCount > 99 ? '99+' : String(badgeCount);
           return (
             <button
               key={item.key}
@@ -40,6 +47,7 @@ export default function AppNavSidebar({ activeKey, onNavigate }) {
               <span className="app-nav-icon" aria-hidden="true">
                 <IconComponent size={20} />
               </span>
+              {badgeCount > 0 ? <span className="app-nav-badge">{badgeLabel}</span> : null}
               <span className="app-nav-tooltip">{item.label}</span>
             </button>
           );
@@ -120,6 +128,27 @@ export default function AppNavSidebar({ activeKey, onNavigate }) {
           align-items: center;
           justify-content: center;
           line-height: 1;
+        }
+
+        .app-nav-badge {
+          position: absolute;
+          top: -3px;
+          right: -4px;
+          min-width: 18px;
+          height: 18px;
+          padding: 0 5px;
+          border-radius: 999px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          background: linear-gradient(145deg, #ef4444, #f43f5e);
+          color: #fff;
+          border: 2px solid var(--bg-primary);
+          box-shadow: 0 6px 12px rgba(239, 68, 68, 0.35);
+          font-size: 10px;
+          font-weight: 800;
+          line-height: 1;
+          pointer-events: none;
         }
 
         .app-nav-tooltip {

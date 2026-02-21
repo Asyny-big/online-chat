@@ -9,6 +9,8 @@ import {
   UserIcon
 } from '@/shared/ui/Icons';
 
+const UNREAD_BADGES_REFRESH_EVENT = 'govchat:unread-badges-refresh';
+
 function formatTime(value) {
   if (!value) return '';
   try {
@@ -127,6 +129,9 @@ export default function NotificationsPage({ token }) {
     setItems((prev) => prev.map((item) => (
       item._id === notificationId ? { ...item, read: true } : item
     )));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event(UNREAD_BADGES_REFRESH_EVENT));
+    }
 
     try {
       await axios.patch(
@@ -144,6 +149,9 @@ export default function NotificationsPage({ token }) {
 
     setMarkingAll(true);
     setItems((prev) => prev.map((item) => ({ ...item, read: true })));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event(UNREAD_BADGES_REFRESH_EVENT));
+    }
 
     try {
       await axios.patch(

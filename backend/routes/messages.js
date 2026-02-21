@@ -34,11 +34,21 @@ router.get('/:chatId', checkChatAccess, async (req, res) => {
   try {
     const { chatId } = req.params;
     const { before, limit = 50 } = req.query;
+    const userId = req.userId;
 
     const query = { chat: chatId };
     if (before) {
       query.createdAt = { $lt: new Date(before) };
     }
+
+    await Message.updateMany(
+      {
+        chat: chatId,
+        sender: { $ne: userId },
+        'readBy.user': { $ne: userId }
+      },
+      { $push: { readBy: { user: userId, readAt: new Date() } } }
+    );
 
     const messages = await Message.find(query)
       .populate('sender', 'name phone avatarUrl')
