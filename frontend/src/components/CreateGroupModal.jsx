@@ -70,6 +70,14 @@ function CreateGroupModal({ token, onClose, onGroupCreated }) {
 
   const canCreate = groupName.trim().length > 0 && selectedUsers.length > 0 && !isCreating;
   const progressPercent = ((step - 1) / (STEP_CONFIG.length - 1)) * 100;
+  const canAddFoundUser = status === 'found' && Boolean(user?.id) && !isAlreadySelected;
+
+  const addButtonLabel = useMemo(() => {
+    if (status === 'loading') return 'Поиск...';
+    if (status === 'found' && isAlreadySelected) return 'Уже добавлен';
+    if (status === 'found') return 'Добавить';
+    return 'Добавить';
+  }, [isAlreadySelected, status]);
 
   const searchHint = useMemo(() => {
     if (!phone) return 'Введите номер телефона участника';
@@ -275,6 +283,16 @@ function CreateGroupModal({ token, onClose, onGroupCreated }) {
               />
             </div>
             <div className="wizard-helper-text">{searchHint}</div>
+            <div className="wizard-search-actions">
+              <button
+                type="button"
+                className="btn btn-primary wizard-add-user-btn"
+                onClick={handleSelectUser}
+                disabled={!canAddFoundUser}
+              >
+                {addButtonLabel}
+              </button>
+            </div>
           </div>
 
           {status === 'found' && user ? (
@@ -284,14 +302,6 @@ function CreateGroupModal({ token, onClose, onGroupCreated }) {
                 <div className="wizard-user-name">{user?.name || 'Пользователь'}</div>
                 <div className="wizard-user-phone">{phone}</div>
               </div>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={handleSelectUser}
-                disabled={isAlreadySelected}
-              >
-                {isAlreadySelected ? 'Уже добавлен' : 'Добавить'}
-              </button>
             </div>
           ) : null}
 
@@ -791,6 +801,16 @@ function CreateGroupModal({ token, onClose, onGroupCreated }) {
             color: var(--text-muted);
             font-size: 12px;
             min-height: 18px;
+          }
+
+          .wizard-search-actions {
+            margin-top: var(--space-8);
+            display: flex;
+            justify-content: flex-end;
+          }
+
+          .wizard-add-user-btn {
+            min-width: 140px;
           }
 
           .wizard-counter {
