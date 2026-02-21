@@ -81,9 +81,10 @@ export function usePhoneUserLookup({ token, minLen = DEFAULT_MIN_LEN, debounceMs
         }
 
         const data = await res.json();
-        if (data && typeof data === 'object' && data.id) {
+        const userId = data?._id || data?.id;
+        if (data && typeof data === 'object' && userId) {
           setStatus('found');
-          setUser(data);
+          setUser({ ...data, id: userId });
         } else {
           setStatus('not_found');
           setUser(null);

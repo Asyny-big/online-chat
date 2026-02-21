@@ -361,7 +361,7 @@ function CreateGroupModal({ token, onClose, onGroupCreated }) {
   };
 
   return ReactDOM.createPortal(
-    <div className="group-wizard-overlay" onClick={onClose}>
+    <div className="group-wizard-overlay">
       <div className="group-wizard-modal" onClick={(event) => event.stopPropagation()}>
         <header className="group-wizard-header">
           <div className="group-wizard-header-main">
