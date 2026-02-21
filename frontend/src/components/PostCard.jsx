@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { API_URL } from '@/config';
 import { resolveAssetUrl } from '@/shared/lib/resolveAssetUrl';
+import { CommentIcon, HeartIcon, ShareIcon } from '@/shared/ui/Icons';
 
 function formatTime(value) {
   if (!value) return '';
@@ -130,7 +131,9 @@ export default function PostCard({ item, token, onOpenComments, onLikeSuccess })
           disabled={isLiking}
           aria-label="Like post"
         >
-          <span className="icon">L</span>
+          <span className="icon">
+            <HeartIcon size={16} />
+          </span>
           <span className="count">{displayedLikes > 0 ? displayedLikes : ''}</span>
         </button>
 
@@ -140,12 +143,16 @@ export default function PostCard({ item, token, onOpenComments, onLikeSuccess })
           onClick={() => onOpenComments?.(post?._id)}
           aria-label="Open comments"
         >
-          <span className="icon">C</span>
+          <span className="icon">
+            <CommentIcon size={16} />
+          </span>
           <span className="count">{comments > 0 ? comments : ''}</span>
         </button>
 
         <button type="button" className="action-btn share-btn" aria-label="Share post">
-          <span className="icon">S</span>
+          <span className="icon">
+            <ShareIcon size={16} />
+          </span>
         </button>
       </div>
 
@@ -325,7 +332,9 @@ export default function PostCard({ item, token, onOpenComments, onLikeSuccess })
         }
 
         .icon {
-          font-size: 14px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
           line-height: 1;
         }
 

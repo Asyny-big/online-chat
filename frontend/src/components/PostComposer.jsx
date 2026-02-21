@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import { API_URL } from '@/config';
+import { ImageIcon, PollIcon, SmileIcon } from '@/shared/ui/Icons';
 
 export default function PostComposer({ token, onCreated }) {
   const [text, setText] = useState('');
@@ -48,9 +49,15 @@ export default function PostComposer({ token, onCreated }) {
 
         <div className="composer-footer">
           <div className="composer-actions">
-            <button type="button" className="composer-icon-btn" title="Добавить фото">IMG</button>
-            <button type="button" className="composer-icon-btn" title="Опрос">P</button>
-            <button type="button" className="composer-icon-btn" title="Эмодзи">:)</button>
+            <button type="button" className="composer-icon-btn" title="Добавить фото" aria-label="Добавить фото">
+              <ImageIcon size={16} />
+            </button>
+            <button type="button" className="composer-icon-btn" title="Опрос" aria-label="Опрос">
+              <PollIcon size={16} />
+            </button>
+            <button type="button" className="composer-icon-btn" title="Эмодзи" aria-label="Эмодзи">
+              <SmileIcon size={16} />
+            </button>
           </div>
 
           <div className="composer-submit-area">
@@ -148,6 +155,9 @@ export default function PostComposer({ token, onCreated }) {
           background: var(--bg-surface);
           color: var(--text-secondary);
           transition: var(--transition-normal);
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
         }
 
         .composer-icon-btn:hover {

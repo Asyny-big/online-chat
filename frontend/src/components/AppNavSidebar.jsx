@@ -1,23 +1,34 @@
 import React from 'react';
+import {
+  BellIcon,
+  DuckIcon,
+  HomeIcon,
+  MessageIcon,
+  SearchIcon,
+  UserIcon
+} from '@/shared/ui/Icons';
 
 const NAV_ITEMS = [
-  { key: 'feed', label: 'Главная', hash: '#/', icon: 'H' },
-  { key: 'search', label: 'Поиск', hash: '#/search', icon: 'S' },
-  { key: 'notifications', label: 'Уведомления', hash: '#/notifications', icon: 'N' },
-  { key: 'messages', label: 'Сообщения', hash: '#/messages', icon: 'M' },
-  { key: 'profile', label: 'Профиль', hash: '#/profile', icon: 'P' }
+  { key: 'feed', label: 'Главная', hash: '#/', Icon: HomeIcon },
+  { key: 'search', label: 'Поиск', hash: '#/search', Icon: SearchIcon },
+  { key: 'notifications', label: 'Уведомления', hash: '#/notifications', Icon: BellIcon },
+  { key: 'messages', label: 'Сообщения', hash: '#/messages', Icon: MessageIcon },
+  { key: 'profile', label: 'Профиль', hash: '#/profile', Icon: UserIcon }
 ];
 
-export default function AppNavSidebar({ activeKey, onNavigate, onLogout }) {
+export default function AppNavSidebar({ activeKey, onNavigate }) {
   return (
     <aside className="app-nav-sidebar" aria-label="Primary navigation">
       <div className="app-nav-header">
-        <div className="app-logo" aria-hidden="true">GC</div>
+        <div className="app-logo" aria-hidden="true">
+          <DuckIcon size={22} />
+        </div>
       </div>
 
       <nav className="app-nav-menu">
         {NAV_ITEMS.map((item) => {
           const active = activeKey === item.key;
+          const IconComponent = item.Icon;
           return (
             <button
               key={item.key}
@@ -26,24 +37,14 @@ export default function AppNavSidebar({ activeKey, onNavigate, onLogout }) {
               onClick={() => onNavigate(item.hash)}
               aria-current={active ? 'page' : undefined}
             >
-              <span className="app-nav-icon" aria-hidden="true">{item.icon}</span>
+              <span className="app-nav-icon" aria-hidden="true">
+                <IconComponent size={20} />
+              </span>
               <span className="app-nav-tooltip">{item.label}</span>
             </button>
           );
         })}
       </nav>
-
-      <div className="app-nav-footer">
-        <button
-          type="button"
-          className="app-nav-item logout"
-          onClick={onLogout}
-          title="Выйти"
-          aria-label="Выйти"
-        >
-          <span className="app-nav-icon" aria-hidden="true">Q</span>
-        </button>
-      </div>
 
       <style>{`
         .app-nav-sidebar {
@@ -74,9 +75,6 @@ export default function AppNavSidebar({ activeKey, onNavigate, onLogout }) {
           display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 13px;
-          font-weight: 800;
-          letter-spacing: 0.08em;
           color: #dbeafe;
           background: linear-gradient(145deg, rgba(59, 130, 246, 0.78), rgba(79, 70, 229, 0.82));
           box-shadow: 0 10px 24px rgba(37, 99, 235, 0.34);
@@ -118,22 +116,10 @@ export default function AppNavSidebar({ activeKey, onNavigate, onLogout }) {
         }
 
         .app-nav-icon {
-          font-size: 18px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
           line-height: 1;
-        }
-
-        .app-nav-footer {
-          margin-top: auto;
-        }
-
-        .app-nav-item.logout {
-          color: #fda4af;
-        }
-
-        .app-nav-item.logout:hover {
-          color: #fecdd3;
-          background-color: rgba(244, 63, 94, 0.16);
-          border-color: rgba(244, 63, 94, 0.24);
         }
 
         .app-nav-tooltip {

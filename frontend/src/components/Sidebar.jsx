@@ -1,15 +1,18 @@
 import React, { useState } from 'react';
 import ChatList from './ChatList';
 import CreateGroupModal from './CreateGroupModal';
+import { DuckIcon, PlusIcon } from '@/shared/ui/Icons';
 
-function Sidebar({ token, chats, selectedChat, onSelectChat, onAddChat, incomingCallChatId, onNavigateToProfile }) {
+function Sidebar({ token, chats, selectedChat, onSelectChat, onAddChat, incomingCallChatId }) {
   const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
 
   return (
     <div className="chat-sidebar">
       <div className="sidebar-header">
         <h2 className="sidebar-title">
-          <span className="logo-mark">GC</span>
+          <span className="logo-mark" aria-hidden="true">
+            <DuckIcon size={16} />
+          </span>
           GovChat
         </h2>
         <div className="header-actions">
@@ -20,7 +23,7 @@ function Sidebar({ token, chats, selectedChat, onSelectChat, onAddChat, incoming
             title="Создать групповой чат"
             aria-label="Создать групповой чат"
           >
-            +
+            <PlusIcon size={16} />
           </button>
         </div>
       </div>
@@ -31,13 +34,6 @@ function Sidebar({ token, chats, selectedChat, onSelectChat, onAddChat, incoming
         onSelectChat={onSelectChat}
         incomingCallChatId={incomingCallChatId}
       />
-
-      <div className="sidebar-footer">
-        <button type="button" className="profile-btn-full" onClick={() => onNavigateToProfile?.()}>
-          <span className="profile-icon">P</span>
-          <span className="profile-text">Профиль</span>
-        </button>
-      </div>
 
       {showCreateGroupModal && (
         <CreateGroupModal
@@ -95,6 +91,9 @@ function Sidebar({ token, chats, selectedChat, onSelectChat, onAddChat, incoming
           font-size: 11px;
           font-weight: 800;
           letter-spacing: 0.08em;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
         }
 
         .header-actions {
@@ -128,48 +127,6 @@ function Sidebar({ token, chats, selectedChat, onSelectChat, onAddChat, incoming
           transform: translateY(-1px);
         }
 
-        .sidebar-footer {
-          margin-top: auto;
-          padding: var(--space-12);
-          border-top: 1px solid var(--border-color);
-          background-color: rgba(15, 23, 42, 0.74);
-        }
-
-        .profile-btn-full {
-          width: 100%;
-          display: flex;
-          align-items: center;
-          gap: var(--space-10);
-          padding: var(--space-10) var(--space-12);
-          border-radius: var(--radius-md);
-          border: 1px solid var(--border-color);
-          background-color: var(--bg-surface);
-          color: var(--text-primary);
-          cursor: pointer;
-          transition: var(--transition-normal);
-        }
-
-        .profile-btn-full:hover {
-          background-color: var(--bg-hover);
-          transform: translateY(-1px);
-        }
-
-        .profile-icon {
-          width: 30px;
-          height: 30px;
-          border-radius: 10px;
-          display: grid;
-          place-items: center;
-          background: rgba(59, 130, 246, 0.2);
-          flex-shrink: 0;
-          font-size: 14px;
-        }
-
-        .profile-text {
-          font-size: 14px;
-          font-weight: 700;
-          letter-spacing: 0.1px;
-        }
       `}</style>
     </div>
   );
