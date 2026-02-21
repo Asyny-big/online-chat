@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Build
 import android.view.WindowManager
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -18,6 +19,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -57,6 +59,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Cached
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DesktopWindows
 import androidx.compose.material.icons.filled.Email
@@ -167,6 +171,7 @@ import ru.govchat.app.domain.model.MessageDeliveryStatus
 import ru.govchat.app.domain.model.MessageType
 import ru.govchat.app.domain.model.UserProfile
 import ru.govchat.app.service.call.CallForegroundService
+import kotlin.math.abs
 
 @Composable
 fun MainScreen(
@@ -220,6 +225,18 @@ fun MainScreen(
     }
 
     var permissionPrompt by remember { mutableStateOf<PermissionPrompt?>(null) }
+
+    BackHandler(
+        enabled =
+            state.selectedChat != null &&
+                state.activeCall == null &&
+                state.incomingCall == null &&
+                state.existingGroupCallPrompt == null &&
+                permissionPrompt == null &&
+                !isInPictureInPictureMode
+    ) {
+        onBackFromChat()
+    }
 
     DisposableEffect(activity, state.activeCall?.callId) {
         if (state.activeCall != null) {
@@ -1854,8 +1871,27 @@ private fun ChatContent(
     var showParticipantsDialog by remember(chat.id) { mutableStateOf(false) }
     var draft by remember(chat.id) { mutableStateOf("") }
     val selectedMediaUris = remember(chat.id) { mutableStateListOf<Uri>() }
-    var imagePreviewMessage by remember(chat.id) { mutableStateOf<ChatMessage?>(null) }
+    val imageMessages = remember(state.messages) {
+        state.messages.filter { message ->
+            message.type == MessageType.Image && !message.attachment?.url.isNullOrBlank()
+        }
+    }
+    var imagePreviewStartIndex by remember(chat.id) { mutableIntStateOf(-1) }
     val listState = rememberLazyListState()
+
+    BackHandler(enabled = imagePreviewStartIndex >= 0) {
+        imagePreviewStartIndex = -1
+    }
+    BackHandler(enabled = imagePreviewStartIndex < 0 && showParticipantsDialog) {
+        showParticipantsDialog = false
+    }
+    BackHandler(
+        enabled = imagePreviewStartIndex < 0 &&
+            !showParticipantsDialog &&
+            selectedMediaUris.isNotEmpty()
+    ) {
+        selectedMediaUris.clear()
+    }
 
     val openMediaLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 20)
@@ -2104,7 +2140,10 @@ private fun ChatContent(
                         isMine = message.senderId == state.currentUserId,
                         onAttachmentClick = { type, attachment ->
                             if (type == MessageType.Image && !attachment?.url.isNullOrBlank()) {
-                                imagePreviewMessage = message
+                                val previewIndex = imageMessages.indexOfFirst { it.id == message.id }
+                                if (previewIndex >= 0) {
+                                    imagePreviewStartIndex = previewIndex
+                                }
                             } else {
                                 onAttachmentClick(type, attachment)
                             }
@@ -2120,64 +2159,95 @@ private fun ChatContent(
             modifier = Modifier.fillMaxWidth(),
             color = Color(0xFF17212B)
         ) {
-            if (state.uploadProgress != null) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                        .navigationBarsPadding()
+                        .imePadding()
                 ) {
-                    Text(
-                        text = "Загрузка вложения...",
-                        color = Color(0xFF8296AC),
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    LinearProgressIndicator(
-                        progress = state.uploadProgress / 100f,
-                        modifier = Modifier.fillMaxWidth(),
-                        color = Color(0xFF5EB5F7)
-                    )
-                }
-            }
+                    if (state.uploadProgress != null) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = "Загрузка вложения...",
+                                color = Color(0xFF8296AC),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            LinearProgressIndicator(
+                                progress = state.uploadProgress / 100f,
+                                modifier = Modifier.fillMaxWidth(),
+                                color = Color(0xFF5EB5F7)
+                            )
+                        }
+                    }
 
-            if (selectedMediaUris.isNotEmpty()) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
-                ) {
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(selectedMediaUris, key = { it.toString() }) { uri ->
-                            Box(
-                                modifier = Modifier
-                                    .size(width = 82.dp, height = 110.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(Color(0xFF1E293B))
+                    if (selectedMediaUris.isNotEmpty()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                LocalImagePreview(
-                                    uri = uri,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                                Surface(
-                                    color = Color(0xAA0F172A),
-                                    shape = CircleShape,
-                                    modifier = Modifier
-                                        .align(Alignment.TopEnd)
-                                        .padding(4.dp)
-                                        .size(22.dp)
-                                        .clickable {
-                                            selectedMediaUris.removeAll { it.toString() == uri.toString() }
-                                        }
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            imageVector = Icons.Filled.Close,
-                                            contentDescription = "Удалить",
-                                            tint = Color.White,
-                                            modifier = Modifier.size(14.dp)
+                                items(selectedMediaUris, key = { it.toString() }) { uri ->
+                                    Box(
+                                        modifier = Modifier
+                                            .size(width = 82.dp, height = 110.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(Color(0xFF1E293B))
+                                    ) {
+                                        LocalImagePreview(
+                                            uri = uri,
+                                            modifier = Modifier.fillMaxSize()
                                         )
+                                        Surface(
+                                            color = Color(0xAA0F172A),
+                                            shape = CircleShape,
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .padding(4.dp)
+                                                .size(22.dp)
+                                                .clickable {
+                                                    selectedMediaUris.removeAll { it.toString() == uri.toString() }
+                                                }
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.Close,
+                                                    contentDescription = "Удалить",
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                            }
+                                        }
                                     }
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Выбрано: ${selectedMediaUris.size}",
+                                    color = Color(0xFF9FB4C8),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                Spacer(modifier = Modifier.weight(1f))
+                                TextButton(onClick = { selectedMediaUris.clear() }) {
+                                    Text("Очистить")
+                                }
+                                Button(
+                                    onClick = sendSelectedMedia,
+                                    enabled = state.uploadProgress == null
+                                ) {
+                                    Text("Отправить")
                                 }
                             }
                         }
@@ -2186,129 +2256,103 @@ private fun ChatContent(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 6.dp),
+                            .padding(horizontal = 6.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "Выбрано: ${selectedMediaUris.size}",
-                            color = Color(0xFF9FB4C8),
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        Spacer(modifier = Modifier.weight(1f))
-                        TextButton(onClick = { selectedMediaUris.clear() }) {
-                            Text("Очистить")
-                        }
-                        Button(
-                            onClick = sendSelectedMedia,
-                            enabled = state.uploadProgress == null
+                        // Attachment button
+                        IconButton(
+                            onClick = {
+                                openMediaLauncher.launch(
+                                    PickVisualMediaRequest(
+                                        ActivityResultContracts.PickVisualMedia.ImageOnly
+                                    )
+                                )
+                            },
+                            modifier = Modifier.size(40.dp)
                         ) {
-                            Text("Отправить")
+                            Icon(
+                                imageVector = Icons.Filled.AttachFile,
+                                contentDescription = "Прикрепить",
+                                tint = Color(0xFF8296AC),
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+
+                        // Rounded text field
+                        TextField(
+                            value = draft,
+                            onValueChange = {
+                                draft = it
+                                onInputChanged(it)
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 4.dp),
+                            placeholder = {
+                                Text(
+                                    if (state.uploadProgress != null) "Загрузка файла..." else "Сообщение",
+                                    color = Color(0xFF6B7D8E)
+                                )
+                            },
+                            singleLine = true,
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = Color(0xFF242F3D),
+                                unfocusedContainerColor = Color(0xFF242F3D),
+                                cursorColor = Color(0xFF5EB5F7),
+                                focusedIndicatorColor = Color.Transparent,
+                                unfocusedIndicatorColor = Color.Transparent,
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(24.dp),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                            keyboardActions = KeyboardActions(
+                                onSend = {
+                                    if (draft.isNotBlank()) {
+                                        onSendText(draft)
+                                        draft = ""
+                                    }
+                                }
+                            )
+                        )
+
+                        // Send button (appears when draft is not blank)
+                        val sendAlpha by animateFloatAsState(
+                            targetValue = if (draft.isNotBlank() || selectedMediaUris.isNotEmpty()) 1f else 0.4f,
+                            animationSpec = tween(150),
+                            label = "sendAlpha"
+                        )
+                        IconButton(
+                            onClick = {
+                                if (draft.isNotBlank()) {
+                                    onSendText(draft)
+                                    draft = ""
+                                }
+                                if (selectedMediaUris.isNotEmpty()) {
+                                    sendSelectedMedia()
+                                }
+                            },
+                            enabled = draft.isNotBlank() || selectedMediaUris.isNotEmpty(),
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.Send,
+                                contentDescription = "Отправить",
+                                tint = Color(0xFF5EB5F7).copy(alpha = sendAlpha),
+                                modifier = Modifier.size(22.dp)
+                            )
                         }
                     }
                 }
-            }
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .imePadding()
-                    .padding(horizontal = 6.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Attachment button
-                IconButton(
-                    onClick = {
-                        openMediaLauncher.launch(
-                            PickVisualMediaRequest(
-                                ActivityResultContracts.PickVisualMedia.ImageOnly
-                            )
-                        )
-                    },
-                    modifier = Modifier.size(40.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.AttachFile,
-                        contentDescription = "Прикрепить",
-                        tint = Color(0xFF8296AC),
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-
-                // Rounded text field
-                TextField(
-                    value = draft,
-                    onValueChange = {
-                        draft = it
-                        onInputChanged(it)
-                    },
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(horizontal = 4.dp),
-                    placeholder = {
-                        Text(
-                            if (state.uploadProgress != null) "Загрузка файла..." else "Сообщение",
-                            color = Color(0xFF6B7D8E)
-                        )
-                    },
-                    singleLine = true,
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = Color(0xFF242F3D),
-                        unfocusedContainerColor = Color(0xFF242F3D),
-                        cursorColor = Color(0xFF5EB5F7),
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent,
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White
-                    ),
-                    shape = RoundedCornerShape(24.dp),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(
-                        onSend = {
-                            if (draft.isNotBlank()) {
-                                onSendText(draft)
-                                draft = ""
-                            }
-                        }
-                    )
-                )
-
-                // Send button (appears when draft is not blank)
-                val sendAlpha by animateFloatAsState(
-                    targetValue = if (draft.isNotBlank() || selectedMediaUris.isNotEmpty()) 1f else 0.4f,
-                    animationSpec = tween(150),
-                    label = "sendAlpha"
-                )
-                IconButton(
-                    onClick = {
-                        if (draft.isNotBlank()) {
-                            onSendText(draft)
-                            draft = ""
-                        }
-                        if (selectedMediaUris.isNotEmpty()) {
-                            sendSelectedMedia()
-                        }
-                    },
-                    enabled = draft.isNotBlank() || selectedMediaUris.isNotEmpty(),
-                    modifier = Modifier.size(40.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.Send,
-                        contentDescription = "Отправить",
-                        tint = Color(0xFF5EB5F7).copy(alpha = sendAlpha),
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-            }
         }
     }
 
-    if (imagePreviewMessage != null) {
-        ImagePreviewDialog(
-            message = imagePreviewMessage!!,
-            onDismiss = { imagePreviewMessage = null },
-            onDownload = {
-                val message = imagePreviewMessage ?: return@ImagePreviewDialog
+    if (imagePreviewStartIndex >= 0 && imageMessages.isNotEmpty()) {
+        ImagesGalleryDialog(
+            messages = imageMessages,
+            startIndex = imagePreviewStartIndex,
+            onDismiss = { imagePreviewStartIndex = -1 },
+            onDownload = { message ->
                 onAttachmentClick(message.type, message.attachment)
             }
         )
@@ -3901,13 +3945,22 @@ private fun LocalImagePreview(
 }
 
 @Composable
-private fun ImagePreviewDialog(
-    message: ChatMessage,
+private fun ImagesGalleryDialog(
+    messages: List<ChatMessage>,
+    startIndex: Int,
     onDismiss: () -> Unit,
-    onDownload: () -> Unit
+    onDownload: (ChatMessage) -> Unit
 ) {
-    val imageUrl = resolveMediaUrl(message.attachment?.url)
-    if (imageUrl == null) return
+    if (messages.isEmpty()) return
+    var currentIndex by remember(messages, startIndex) {
+        mutableIntStateOf(startIndex.coerceIn(0, messages.lastIndex))
+    }
+    LaunchedEffect(startIndex, messages.size) {
+        currentIndex = startIndex.coerceIn(0, messages.lastIndex)
+    }
+    val currentMessage = messages.getOrNull(currentIndex) ?: return
+    val imageUrl = resolveMediaUrl(currentMessage.attachment?.url) ?: return
+    var horizontalDragSum by remember { mutableStateOf(0f) }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -3917,14 +3970,78 @@ private fun ImagePreviewDialog(
             modifier = Modifier.fillMaxSize(),
             color = Color.Black
         ) {
-            Box(modifier = Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(messages.size, currentIndex) {
+                        detectHorizontalDragGestures(
+                            onDragCancel = { horizontalDragSum = 0f },
+                            onHorizontalDrag = { change, dragAmount ->
+                                horizontalDragSum += dragAmount
+                                change.consume()
+                            },
+                            onDragEnd = {
+                                val thresholdPx = 80f
+                                when {
+                                    horizontalDragSum > thresholdPx && currentIndex > 0 -> {
+                                        currentIndex -= 1
+                                    }
+
+                                    horizontalDragSum < -thresholdPx && currentIndex < messages.lastIndex -> {
+                                        currentIndex += 1
+                                    }
+                                }
+                                horizontalDragSum = 0f
+                            }
+                        )
+                    }
+            ) {
                 RemoteImagePreview(
                     imageUrl = imageUrl,
                     modifier = Modifier
-                        .fillMaxSize()
-                        .clickable { onDismiss() },
+                        .fillMaxSize(),
                     contentScale = ContentScale.Fit
                 )
+
+                if (currentIndex > 0) {
+                    Surface(
+                        color = Color(0x880F172A),
+                        shape = CircleShape,
+                        modifier = Modifier
+                            .align(Alignment.CenterStart)
+                            .padding(start = 10.dp)
+                            .size(42.dp)
+                            .clickable { currentIndex -= 1 }
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Filled.ChevronLeft,
+                                contentDescription = "Предыдущее фото",
+                                tint = Color.White
+                            )
+                        }
+                    }
+                }
+
+                if (currentIndex < messages.lastIndex) {
+                    Surface(
+                        color = Color(0x880F172A),
+                        shape = CircleShape,
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .padding(end = 10.dp)
+                            .size(42.dp)
+                            .clickable { currentIndex += 1 }
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Filled.ChevronRight,
+                                contentDescription = "Следующее фото",
+                                tint = Color.White
+                            )
+                        }
+                    }
+                }
 
                 Row(
                     modifier = Modifier
@@ -3949,8 +4066,31 @@ private fun ImagePreviewDialog(
                         }
                     }
                     Spacer(modifier = Modifier.weight(1f))
-                    Button(onClick = onDownload) {
+                    Text(
+                        text = "${currentIndex + 1} / ${messages.size}",
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Button(onClick = { onDownload(currentMessage) }) {
                         Text("Скачать")
+                    }
+                }
+
+                if (abs(horizontalDragSum) > 1f) {
+                    Surface(
+                        color = Color(0xAA020617),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .navigationBarsPadding()
+                            .padding(bottom = 14.dp)
+                    ) {
+                        Text(
+                            text = if (horizontalDragSum > 0f) "Свайп: предыдущее фото" else "Свайп: следующее фото",
+                            color = Color(0xFFD6E4F5),
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                        )
                     }
                 }
             }
