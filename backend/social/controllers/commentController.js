@@ -8,6 +8,7 @@ async function createComment(req, res) {
       postId: req.body?.postId,
       authorId: req.userId,
       text: req.body?.text,
+      media: req.body?.media,
       parentId: req.body?.parentId || null
     });
     return res.status(201).json(result);

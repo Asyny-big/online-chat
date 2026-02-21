@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const Comment = require('../../models/Comment');
+const Media = require('../../models/Media');
 const Post = require('../../models/Post');
 const { canUserViewPost } = require('./accessService');
 const { createNotification } = require('./notificationService');
@@ -20,17 +21,38 @@ function toObjectIdOrFail(value, fieldName) {
 }
 
 function normalizeText(text) {
-  const value = String(text || '').trim();
-  if (!value) {
-    throw httpError(400, 'Comment text is required');
-  }
-  return value;
+  return String(text || '').trim();
 }
 
-async function createComment({ app, postId, authorId, text, parentId = null }) {
+function normalizeMediaIds(media) {
+  if (!Array.isArray(media)) return [];
+  return media
+    .map((id) => String(id || '').trim())
+    .filter(Boolean);
+}
+
+async function assertMediaOwnership(mediaIds, ownerId) {
+  if (!mediaIds.length) return;
+  const validObjectIds = mediaIds.filter((id) => mongoose.Types.ObjectId.isValid(id));
+  if (validObjectIds.length !== mediaIds.length) {
+    throw httpError(400, 'Invalid media id');
+  }
+
+  const ownedMedia = await Media.find({
+    _id: { $in: validObjectIds },
+    ownerId
+  }).select('_id').lean();
+
+  if (ownedMedia.length !== mediaIds.length) {
+    throw httpError(403, 'Media item does not belong to user');
+  }
+}
+
+async function createComment({ app, postId, authorId, text, media, parentId = null }) {
   const postObjectId = toObjectIdOrFail(postId, 'postId');
   const authorObjectId = toObjectIdOrFail(authorId, 'authorId');
   const normalizedText = normalizeText(text);
+  const mediaIds = normalizeMediaIds(media);
 
   const post = await Post.findById(postObjectId).lean();
   if (!post) {
@@ -41,6 +63,12 @@ async function createComment({ app, postId, authorId, text, parentId = null }) {
   if (!canView) {
     throw httpError(403, 'Post is not accessible');
   }
+
+  if (!normalizedText && mediaIds.length === 0) {
+    throw httpError(400, 'Comment text or media is required');
+  }
+
+  await assertMediaOwnership(mediaIds, authorObjectId);
 
   let parentObjectId = null;
   let parentComment = null;
@@ -56,6 +84,7 @@ async function createComment({ app, postId, authorId, text, parentId = null }) {
     postId: postObjectId,
     authorId: authorObjectId,
     text: normalizedText,
+    media: mediaIds,
     parentId: parentObjectId
   });
 
@@ -98,6 +127,7 @@ async function createComment({ app, postId, authorId, text, parentId = null }) {
 
   return Comment.findById(comment._id)
     .populate('authorId', '_id name avatarUrl')
+    .populate('media')
     .lean();
 }
 
@@ -128,6 +158,7 @@ async function listComments({ postId, viewerUserId, cursor, limit, parentId = nu
     .sort({ _id: -1 })
     .limit(normalizedLimit + 1)
     .populate('authorId', '_id name avatarUrl')
+    .populate('media')
     .lean();
 
   const hasMore = rows.length > normalizedLimit;

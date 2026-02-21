@@ -1,6 +1,9 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { API_URL } from '@/config';
+import { resolveAssetUrl } from '@/shared/lib/resolveAssetUrl';
+import { uploadSocialMediaFile } from '@/shared/lib/uploadSocialMedia';
+import { ImageIcon } from '@/shared/ui/Icons';
 
 function formatTime(value) {
   if (!value) return '';
@@ -22,7 +25,10 @@ export default function CommentsModal({ token, postId, onClose, onCommentCreated
   const [error, setError] = useState('');
   const [text, setText] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [mediaUploading, setMediaUploading] = useState(false);
+  const [mediaItems, setMediaItems] = useState([]);
   const [submitError, setSubmitError] = useState('');
+  const mediaInputRef = useRef(null);
 
   const loadComments = useCallback(async () => {
     setLoading(true);
@@ -43,20 +49,61 @@ export default function CommentsModal({ token, postId, onClose, onCommentCreated
     void loadComments();
   }, [loadComments]);
 
+  const handlePickMedia = () => {
+    mediaInputRef.current?.click();
+  };
+
+  const handleMediaChange = async (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (!files.length || mediaUploading) return;
+
+    setMediaUploading(true);
+    setSubmitError('');
+    try {
+      const uploaded = [];
+      for (const file of files) {
+        // eslint-disable-next-line no-await-in-loop
+        const media = await uploadSocialMediaFile({ file, token });
+        if (media?._id) {
+          uploaded.push(media);
+        }
+      }
+
+      if (uploaded.length) {
+        setMediaItems((prev) => [...prev, ...uploaded]);
+      }
+    } catch (err) {
+      setSubmitError(err.response?.data?.error || err.message || 'Не удалось загрузить медиа');
+    } finally {
+      setMediaUploading(false);
+    }
+  };
+
+  const handleRemoveMedia = (mediaId) => {
+    setMediaItems((prev) => prev.filter((item) => item._id !== mediaId));
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     const trimmed = text.trim();
-    if (!trimmed || submitting) return;
+    if ((!trimmed && mediaItems.length === 0) || submitting || mediaUploading) return;
 
     setSubmitting(true);
     setSubmitError('');
     try {
       await axios.post(
         `${API_URL}/social/comments`,
-        { postId, text: trimmed },
+        {
+          postId,
+          text: trimmed,
+          media: mediaItems.map((item) => item._id)
+        },
         { headers: { Authorization: `Bearer ${token}` } }
       );
+
       setText('');
+      setMediaItems([]);
       await loadComments();
       await onCommentCreated?.();
     } catch (err) {
@@ -84,12 +131,59 @@ export default function CommentsModal({ token, postId, onClose, onCommentCreated
             rows={3}
             placeholder="Написать комментарий..."
           />
+
+          <input
+            ref={mediaInputRef}
+            type="file"
+            accept="image/*,video/*"
+            multiple
+            style={{ display: 'none' }}
+            onChange={handleMediaChange}
+          />
+
+          {mediaItems.length > 0 && (
+            <div className="comments-media-grid">
+              {mediaItems.map((item) => {
+                const src = resolveAssetUrl(item.path || '');
+                const isVideo = String(item.type || '').toLowerCase().includes('video');
+                return (
+                  <div key={item._id} className="comments-media-item">
+                    {isVideo ? (
+                      <video src={src} className="comments-media-preview" controls />
+                    ) : (
+                      <img src={src} alt="" className="comments-media-preview" />
+                    )}
+                    <button
+                      type="button"
+                      className="comments-media-remove"
+                      onClick={() => handleRemoveMedia(item._id)}
+                      aria-label="Удалить медиа"
+                    >
+                      x
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           <div className="comments-form-footer">
-            <div className="comments-form-error">{submitError}</div>
+            <div className="comments-form-left">
+              <button
+                type="button"
+                className="comments-attach-btn"
+                onClick={handlePickMedia}
+                disabled={mediaUploading}
+              >
+                <ImageIcon size={15} />
+                <span>{mediaUploading ? 'Загрузка...' : 'Фото/видео'}</span>
+              </button>
+              <div className="comments-form-error">{submitError}</div>
+            </div>
             <button
               type="submit"
               className="btn btn-primary comments-submit"
-              disabled={submitting || !text.trim()}
+              disabled={submitting || mediaUploading || (!text.trim() && mediaItems.length === 0)}
             >
               {submitting ? 'Отправка...' : 'Отправить'}
             </button>
@@ -112,7 +206,27 @@ export default function CommentsModal({ token, postId, onClose, onCommentCreated
                   </div>
                   <div className="comment-time">{formatTime(comment.createdAt)}</div>
                 </div>
-                <div className="comment-text">{comment.text || ''}</div>
+
+                {comment.text ? <div className="comment-text">{comment.text}</div> : null}
+
+                {Array.isArray(comment.media) && comment.media.length > 0 ? (
+                  <div className="comment-media-grid">
+                    {comment.media.map((item) => {
+                      const src = resolveAssetUrl(item?.path || item?.url || '');
+                      if (!src) return null;
+                      const isVideo = String(item?.type || '').toLowerCase().includes('video');
+                      return (
+                        <div key={item?._id || src} className="comment-media-item">
+                          {isVideo ? (
+                            <video src={src} controls className="comment-media-preview" />
+                          ) : (
+                            <img src={src} alt="" className="comment-media-preview" />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>
@@ -205,12 +319,79 @@ export default function CommentsModal({ token, postId, onClose, onCommentCreated
           color: var(--text-muted);
         }
 
+        .comments-media-grid {
+          margin-top: var(--space-10);
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+          gap: var(--space-8);
+        }
+
+        .comments-media-item {
+          position: relative;
+          border-radius: var(--radius-sm);
+          overflow: hidden;
+          border: 1px solid var(--border-color);
+          background: var(--bg-surface);
+          aspect-ratio: 4/3;
+        }
+
+        .comments-media-preview {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          display: block;
+        }
+
+        .comments-media-remove {
+          position: absolute;
+          top: 6px;
+          right: 6px;
+          width: 22px;
+          height: 22px;
+          border-radius: 7px;
+          border: 1px solid rgba(248, 113, 113, 0.35);
+          background: rgba(15, 23, 42, 0.82);
+          color: #fca5a5;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 12px;
+          font-weight: 700;
+          line-height: 1;
+        }
+
         .comments-form-footer {
           margin-top: var(--space-10);
           display: flex;
           align-items: center;
           justify-content: space-between;
           gap: var(--space-12);
+        }
+
+        .comments-form-left {
+          flex: 1;
+          min-width: 0;
+          display: flex;
+          align-items: center;
+          gap: var(--space-8);
+        }
+
+        .comments-attach-btn {
+          border: 1px solid var(--border-color);
+          background: var(--bg-surface);
+          color: var(--text-secondary);
+          border-radius: 10px;
+          padding: 8px 10px;
+          font-size: 12px;
+          font-weight: 700;
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+        }
+
+        .comments-attach-btn:hover {
+          color: var(--text-primary);
+          background: var(--bg-hover);
         }
 
         .comments-form-error {
@@ -272,8 +453,29 @@ export default function CommentsModal({ token, postId, onClose, onCommentCreated
           line-height: 1.5;
           word-break: break-word;
         }
+
+        .comment-media-grid {
+          margin-top: var(--space-8);
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+          gap: var(--space-8);
+        }
+
+        .comment-media-item {
+          border-radius: var(--radius-sm);
+          overflow: hidden;
+          border: 1px solid var(--border-color);
+          background: var(--bg-surface);
+          aspect-ratio: 16/10;
+        }
+
+        .comment-media-preview {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          display: block;
+        }
       `}</style>
     </div>
   );
 }
-

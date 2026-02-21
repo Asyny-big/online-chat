@@ -48,6 +48,10 @@ export default function FeedPage({ token }) {
     await loadFeed({ nextCursor: cursor, append: true });
   };
 
+  const handleLikeSuccess = useCallback(async () => {
+    await refetchFeed();
+  }, [refetchFeed]);
+
   const handlePostCreated = (post) => {
     if (!post?._id) return;
     setItems((prev) => [
@@ -82,15 +86,19 @@ export default function FeedPage({ token }) {
       ) : null}
 
       <div className="feed-list">
-        {items.map((item) => (
-          <PostCard
-            key={item._id}
-            item={item}
-            token={token}
-            onOpenComments={setActivePostId}
-            onLikeSuccess={refetchFeed}
-          />
-        ))}
+        {items.map((item) => {
+          const post = item?.post || item || {};
+          return (
+            <PostCard
+              key={item._id}
+              item={item}
+              token={token}
+              likedByMe={Boolean(post?.likedByMe)}
+              onOpenComments={setActivePostId}
+              onLikeSuccess={handleLikeSuccess}
+            />
+          );
+        })}
       </div>
 
       <div className="load-more-container">

@@ -55,7 +55,7 @@ function MediaBlock({ media }) {
   );
 }
 
-export default function PostCard({ item, token, onOpenComments, onLikeSuccess }) {
+export default function PostCard({ item, token, likedByMe = false, onOpenComments, onLikeSuccess }) {
   const post = item?.post || item || {};
   const author = useMemo(() => {
     const raw = post?.authorId;
@@ -68,14 +68,14 @@ export default function PostCard({ item, token, onOpenComments, onLikeSuccess })
   const comments = Number(post?.stats?.comments || 0);
 
   const [isLiking, setIsLiking] = useState(false);
-  const [liked, setLiked] = useState(null);
+  const [liked, setLiked] = useState(Boolean(likedByMe));
   const [likeDelta, setLikeDelta] = useState(0);
 
   useEffect(() => {
     setIsLiking(false);
-    setLiked(null);
+    setLiked(Boolean(likedByMe));
     setLikeDelta(0);
-  }, [post?._id, likes]);
+  }, [post?._id, likedByMe]);
 
   const handleLike = async () => {
     const targetId = post?._id;
@@ -92,7 +92,7 @@ export default function PostCard({ item, token, onOpenComments, onLikeSuccess })
       const nextActive = Boolean(res.data?.active);
       setLiked(nextActive);
       setLikeDelta(nextActive ? 1 : -1);
-      await onLikeSuccess?.();
+      await onLikeSuccess?.(post?._id, nextActive);
     } catch (_) {
       // Feed-level error handling is enough, do not interrupt UX with alerts here.
     } finally {

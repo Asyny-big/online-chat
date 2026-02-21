@@ -1,7 +1,8 @@
-﻿const mongoose = require('mongoose');
+const mongoose = require('mongoose');
 const Feed = require('../../models/Feed');
 const Post = require('../../models/Post');
 const Relationship = require('../../models/Relationship');
+const Reaction = require('../../models/Reaction');
 const { enqueueFeedRebuildAll } = require('./queueService');
 const {
   decodeCursor,
@@ -209,13 +210,78 @@ async function getUserFeedPage({ userId, cursor, limit }) {
     ? encodeCursor({ score: pageRows[pageRows.length - 1].score, id: String(pageRows[pageRows.length - 1]._id) })
     : null;
 
+  const resultItems = visibleRows.map(({ row, post }) => ({
+    _id: row._id,
+    score: row.score,
+    createdAt: row.createdAt,
+    post
+  }));
+
+  // Fallback for sparse social graph: if personal feed is empty/short, show public popular posts.
+  if (!cursor && resultItems.length < normalizedLimit) {
+    const excludedPostIds = new Set(resultItems.map((entry) => String(entry.post?._id || '')));
+    const fallbackPosts = await Post.find({
+      visibility: 'public',
+      _id: { $nin: Array.from(excludedPostIds).filter(Boolean) }
+    })
+      .sort({ 'stats.likes': -1, 'stats.comments': -1, createdAt: -1, _id: -1 })
+      .limit(Math.max(0, normalizedLimit - resultItems.length))
+      .populate('authorId', '_id name avatarUrl')
+      .populate('media')
+      .lean();
+
+    for (const post of fallbackPosts) {
+      // eslint-disable-next-line no-await-in-loop
+      const canView = await canUserViewPost(post, userId);
+      if (!canView) continue;
+
+      const popularity = Number(post?.stats?.likes || 0) * 2 + Number(post?.stats?.comments || 0);
+      const score = computeImmutableFeedScore({
+        createdAt: post.createdAt,
+        rankBoost: popularity * 60000
+      });
+
+      resultItems.push({
+        _id: `popular-${post._id}`,
+        score,
+        createdAt: post.createdAt,
+        post
+      });
+
+      if (resultItems.length >= normalizedLimit) break;
+    }
+  }
+
+  const resultPostIds = resultItems
+    .map((entry) => entry?.post?._id)
+    .filter(Boolean);
+
+  if (resultPostIds.length) {
+    const reactions = await Reaction.find({
+      targetType: 'post',
+      userId: userObjectId,
+      targetId: { $in: resultPostIds }
+    })
+      .select('targetId reaction')
+      .lean();
+
+    const likedIds = new Set(
+      reactions
+        .filter((row) => String(row?.reaction || '').toLowerCase() === 'like')
+        .map((row) => String(row.targetId))
+    );
+
+    for (const entry of resultItems) {
+      if (!entry?.post?._id) continue;
+      entry.post = {
+        ...entry.post,
+        likedByMe: likedIds.has(String(entry.post._id))
+      };
+    }
+  }
+
   return {
-    items: visibleRows.map(({ row, post }) => ({
-      _id: row._id,
-      score: row.score,
-      createdAt: row.createdAt,
-      post
-    })),
+    items: resultItems,
     nextCursor
   };
 }

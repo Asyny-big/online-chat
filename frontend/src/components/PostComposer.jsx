@@ -1,29 +1,75 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import axios from 'axios';
 import { API_URL } from '@/config';
+import { resolveAssetUrl } from '@/shared/lib/resolveAssetUrl';
+import { uploadSocialMediaFile } from '@/shared/lib/uploadSocialMedia';
 import { ImageIcon, PollIcon, SmileIcon } from '@/shared/ui/Icons';
 
 export default function PostComposer({ token, onCreated }) {
   const [text, setText] = useState('');
   const [visibility, setVisibility] = useState('public');
   const [loading, setLoading] = useState(false);
+  const [mediaUploading, setMediaUploading] = useState(false);
+  const [mediaItems, setMediaItems] = useState([]);
   const [error, setError] = useState('');
+  const mediaInputRef = useRef(null);
+
+  const canSubmit = !!text.trim() || mediaItems.length > 0;
+
+  const handlePickMedia = () => {
+    mediaInputRef.current?.click();
+  };
+
+  const handleMediaChange = async (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (!files.length || mediaUploading) return;
+
+    setMediaUploading(true);
+    setError('');
+    try {
+      const uploaded = [];
+      for (const file of files) {
+        // eslint-disable-next-line no-await-in-loop
+        const media = await uploadSocialMediaFile({ file, token });
+        if (media?._id) {
+          uploaded.push(media);
+        }
+      }
+      if (uploaded.length) {
+        setMediaItems((prev) => [...prev, ...uploaded]);
+      }
+    } catch (err) {
+      setError(err.response?.data?.error || err.message || 'Не удалось загрузить медиа');
+    } finally {
+      setMediaUploading(false);
+    }
+  };
+
+  const handleRemoveMedia = (mediaId) => {
+    setMediaItems((prev) => prev.filter((item) => item._id !== mediaId));
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    const trimmed = text.trim();
-    if (!trimmed || loading) return;
+    if ((!text.trim() && mediaItems.length === 0) || loading || mediaUploading) return;
 
     setLoading(true);
     setError('');
     try {
       const res = await axios.post(
         `${API_URL}/social/posts`,
-        { text: trimmed, visibility },
+        {
+          text: text.trim(),
+          visibility,
+          media: mediaItems.map((item) => item._id)
+        },
         { headers: { Authorization: `Bearer ${token}` } }
       );
+
       setText('');
       setVisibility('public');
+      setMediaItems([]);
       onCreated?.(res.data);
     } catch (err) {
       setError(err.response?.data?.error || 'Не удалось опубликовать пост');
@@ -45,11 +91,53 @@ export default function PostComposer({ token, onCreated }) {
           rows={3}
         />
 
+        <input
+          ref={mediaInputRef}
+          type="file"
+          accept="image/*,video/*"
+          multiple
+          style={{ display: 'none' }}
+          onChange={handleMediaChange}
+        />
+
+        {mediaItems.length > 0 && (
+          <div className="composer-media-grid">
+            {mediaItems.map((item) => {
+              const src = resolveAssetUrl(item.path || '');
+              const isVideo = String(item.type || '').toLowerCase().includes('video');
+              return (
+                <div key={item._id} className="composer-media-item">
+                  {isVideo ? (
+                    <video src={src} className="composer-media-preview" controls />
+                  ) : (
+                    <img src={src} alt="" className="composer-media-preview" />
+                  )}
+                  <button
+                    type="button"
+                    className="composer-media-remove"
+                    onClick={() => handleRemoveMedia(item._id)}
+                    aria-label="Удалить медиа"
+                  >
+                    x
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {error ? <div className="composer-error">{error}</div> : null}
 
         <div className="composer-footer">
           <div className="composer-actions">
-            <button type="button" className="composer-icon-btn" title="Добавить фото" aria-label="Добавить фото">
+            <button
+              type="button"
+              className="composer-icon-btn"
+              title="Добавить фото"
+              aria-label="Добавить фото"
+              onClick={handlePickMedia}
+              disabled={mediaUploading}
+            >
               <ImageIcon size={16} />
             </button>
             <button type="button" className="composer-icon-btn" title="Опрос" aria-label="Опрос">
@@ -72,8 +160,12 @@ export default function PostComposer({ token, onCreated }) {
                 <option value="friends">Друзья</option>
               </select>
             </label>
-            <button type="submit" disabled={loading || !text.trim()} className="btn btn-primary composer-submit">
-              {loading ? '...' : 'Опубликовать'}
+            <button
+              type="submit"
+              disabled={loading || mediaUploading || !canSubmit}
+              className="btn btn-primary composer-submit"
+            >
+              {mediaUploading ? 'Загрузка медиа...' : loading ? '...' : 'Опубликовать'}
             </button>
           </div>
         </div>
@@ -132,6 +224,52 @@ export default function PostComposer({ token, onCreated }) {
 
         .composer-input::placeholder {
           color: var(--text-muted);
+        }
+
+        .composer-media-grid {
+          margin-top: var(--space-10);
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+          gap: var(--space-8);
+        }
+
+        .composer-media-item {
+          position: relative;
+          border-radius: var(--radius-md);
+          overflow: hidden;
+          border: 1px solid var(--border-color);
+          background: var(--bg-surface);
+          aspect-ratio: 4/3;
+        }
+
+        .composer-media-preview {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          display: block;
+        }
+
+        .composer-media-remove {
+          position: absolute;
+          top: 6px;
+          right: 6px;
+          width: 24px;
+          height: 24px;
+          border-radius: 8px;
+          border: 1px solid rgba(248, 113, 113, 0.35);
+          background: rgba(15, 23, 42, 0.8);
+          color: #fca5a5;
+          font-size: 13px;
+          font-weight: 700;
+          line-height: 1;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .composer-media-remove:hover {
+          background: rgba(248, 113, 113, 0.16);
+          color: #fecdd3;
         }
 
         .composer-footer {
@@ -223,4 +361,3 @@ export default function PostComposer({ token, onCreated }) {
     </div>
   );
 }
-

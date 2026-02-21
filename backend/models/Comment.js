@@ -14,10 +14,16 @@ const commentSchema = new mongoose.Schema({
   },
   text: {
     type: String,
-    required: true,
+    default: '',
     trim: true,
     maxlength: 3000
   },
+  media: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Media'
+    }
+  ],
   parentId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Comment',
