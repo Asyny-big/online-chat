@@ -93,6 +93,25 @@ export function PlusIcon(props) {
   );
 }
 
+export function ChevronDownIcon(props) {
+  return (
+    <SvgIcon {...props}>
+      <path d="m6 9 6 6 6-6" />
+    </SvgIcon>
+  );
+}
+
+export function UsersIcon(props) {
+  return (
+    <SvgIcon {...props}>
+      <circle cx="9" cy="9" r="2.5" />
+      <circle cx="16.5" cy="10.2" r="2.1" />
+      <path d="M4.8 18.2c.8-2.6 2.5-4 4.8-4s4.1 1.4 4.9 4" />
+      <path d="M14.2 18.2c.5-1.7 1.7-2.8 3.5-3.1" />
+    </SvgIcon>
+  );
+}
+
 export function HeartIcon(props) {
   return (
     <SvgIcon {...props}>

@@ -753,6 +753,7 @@ function ChatPageInner({ token, onLogout }) {
           onSelectChat={handleSelectChat}
           onCreateChat={handleCreateChat}
           onAddChat={handleAddChat}
+          onOpenNewDialog={() => { window.location.hash = '#/search'; }}
           onLogout={onLogout}
           onNavigateToProfile={() => { window.location.hash = '#/profile'; }}
           incomingCallChatId={incomingCallData?.chatId}

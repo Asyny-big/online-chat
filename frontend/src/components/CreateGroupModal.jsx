@@ -1,46 +1,138 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { API_URL } from '@/config';
 import { usePhoneUserLookup } from '@/shared/hooks/usePhoneUserLookup';
-import { SearchIcon, UserIcon } from '@/shared/ui/Icons';
+import { ImageIcon, SearchIcon } from '@/shared/ui/Icons';
+
+const STEP_CONFIG = [
+  { id: 1, title: 'Название и аватар', subtitle: 'Визуал группы' },
+  { id: 2, title: 'Участники', subtitle: 'Состав чата' },
+  { id: 3, title: 'Подтверждение', subtitle: 'Финальная проверка' }
+];
 
 function CreateGroupModal({ token, onClose, onGroupCreated }) {
+  const [step, setStep] = useState(1);
+  const [direction, setDirection] = useState('forward');
+
   const [groupName, setGroupName] = useState('');
+  const [groupAvatarFile, setGroupAvatarFile] = useState(null);
+  const [groupAvatarUrl, setGroupAvatarUrl] = useState('');
+
   const [selectedUsers, setSelectedUsers] = useState([]);
+  const [lastAddedUserId, setLastAddedUserId] = useState('');
+
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState('');
 
-  const { phone, setPhone, status, user, error: lookupError } = usePhoneUserLookup({
-    token,
-    minLen: 9,
-    debounceMs: 400
-  });
+  const avatarInputRef = useRef(null);
+
+  const {
+    phone,
+    setPhone,
+    status,
+    user,
+    error: lookupError
+  } = usePhoneUserLookup({ token, minLen: 9, debounceMs: 350 });
 
   useEffect(() => {
-    const onKeyDown = (event) => {
+    const handleKeyDown = (event) => {
       if (event.key === 'Escape') onClose?.();
     };
 
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
+
+  useEffect(() => {
+    return () => {
+      if (groupAvatarUrl && groupAvatarUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(groupAvatarUrl);
+      }
+    };
+  }, [groupAvatarUrl]);
+
+  useEffect(() => {
+    if (!lastAddedUserId) return undefined;
+    const timer = setTimeout(() => setLastAddedUserId(''), 500);
+    return () => clearTimeout(timer);
+  }, [lastAddedUserId]);
 
   const isAlreadySelected = useMemo(
     () => Boolean(user?.id && selectedUsers.some((item) => item.id === user.id)),
     [selectedUsers, user?.id]
   );
 
-  const canCreate = groupName.trim().length > 0 && selectedUsers.length > 0 && !isCreating;
+  const canGoNext = step === 1
+    ? groupName.trim().length > 0
+    : step === 2
+      ? selectedUsers.length > 0
+      : false;
 
-  const hintText = useMemo(() => {
-    if (!phone) return 'Введите номер телефона, чтобы найти пользователя';
-    if (status === 'too_short') return 'Номер должен содержать минимум 9 цифр';
-    if (status === 'loading') return 'Ищем пользователя...';
-    if (status === 'not_found') return 'Пользователь с таким номером не найден';
+  const canCreate = groupName.trim().length > 0 && selectedUsers.length > 0 && !isCreating;
+  const progressPercent = ((step - 1) / (STEP_CONFIG.length - 1)) * 100;
+
+  const searchHint = useMemo(() => {
+    if (!phone) return 'Введите номер телефона участника';
+    if (status === 'too_short') return 'Укажите номер полностью (минимум 9 цифр)';
+    if (status === 'loading') return 'Поиск пользователя...';
+    if (status === 'not_found') return 'Пользователь не найден';
     if (status === 'rate_limited') return lookupError || 'Слишком много запросов. Попробуйте позже';
     if (status === 'error') return lookupError || 'Ошибка поиска';
-    if (status === 'found' && isAlreadySelected) return 'Этот пользователь уже добавлен в группу';
+    if (status === 'found' && isAlreadySelected) return 'Пользователь уже добавлен';
     return '';
-  }, [phone, status, lookupError, isAlreadySelected]);
+  }, [isAlreadySelected, lookupError, phone, status]);
+
+  const goToStep = useCallback((targetStep) => {
+    if (targetStep === step) return;
+    setDirection(targetStep > step ? 'forward' : 'backward');
+    setStep(targetStep);
+    setError('');
+  }, [step]);
+
+  const handleNext = useCallback(() => {
+    if (step === 1 && !groupName.trim()) {
+      setError('Введите название группы');
+      return;
+    }
+
+    if (step === 2 && selectedUsers.length === 0) {
+      setError('Добавьте хотя бы одного участника');
+      return;
+    }
+
+    goToStep(Math.min(3, step + 1));
+  }, [goToStep, groupName, selectedUsers.length, step]);
+
+  const handleBack = useCallback(() => {
+    goToStep(Math.max(1, step - 1));
+  }, [goToStep, step]);
+
+  const handlePickAvatar = useCallback(() => {
+    avatarInputRef.current?.click();
+  }, []);
+
+  const handleAvatarChange = useCallback((event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    if (!String(file.type || '').startsWith('image/')) {
+      setError('Для аватара используйте изображение');
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setError('Максимальный размер аватара: 5MB');
+      return;
+    }
+
+    if (groupAvatarUrl && groupAvatarUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(groupAvatarUrl);
+    }
+
+    setGroupAvatarFile(file);
+    setGroupAvatarUrl(URL.createObjectURL(file));
+    setError('');
+  }, [groupAvatarUrl]);
 
   const handleSelectUser = useCallback(() => {
     if (!user?.id || isAlreadySelected) {
@@ -49,6 +141,7 @@ function CreateGroupModal({ token, onClose, onGroupCreated }) {
     }
 
     setSelectedUsers((prev) => [...prev, user]);
+    setLastAddedUserId(user.id);
     setPhone('');
     setError('');
   }, [isAlreadySelected, setPhone, user]);
@@ -97,207 +190,358 @@ function CreateGroupModal({ token, onClose, onGroupCreated }) {
     } finally {
       setIsCreating(false);
     }
-  }, [groupName, selectedUsers, token, onGroupCreated]);
+  }, [groupName, onGroupCreated, selectedUsers, token]);
 
-  const handlePhoneKeyDown = useCallback(
-    (event) => {
-      if (event.key === 'Enter' && status === 'found' && user && !isAlreadySelected) {
-        event.preventDefault();
-        handleSelectUser();
-      }
-    },
-    [handleSelectUser, isAlreadySelected, status, user]
-  );
+  const handleSearchKeyDown = useCallback((event) => {
+    if (event.key === 'Enter' && status === 'found' && user && !isAlreadySelected) {
+      event.preventDefault();
+      handleSelectUser();
+    }
+  }, [handleSelectUser, isAlreadySelected, status, user]);
+
+  const renderStepContent = () => {
+    if (step === 1) {
+      return (
+        <section className="wizard-panel-inner">
+          <h3 className="wizard-heading">Шаг 1. Название и визуал</h3>
+          <p className="wizard-description">Придумайте имя группы и добавьте аватар для узнаваемости.</p>
+
+          <div className="wizard-avatar-row">
+            <div className="wizard-avatar-preview">
+              {groupAvatarUrl ? (
+                <img src={groupAvatarUrl} alt="Group avatar" className="wizard-avatar-image" />
+              ) : (
+                <span className="wizard-avatar-fallback">{String(groupName || 'G').charAt(0).toUpperCase()}</span>
+              )}
+            </div>
+
+            <div className="wizard-avatar-actions">
+              <button type="button" className="btn btn-secondary" onClick={handlePickAvatar}>
+                <ImageIcon size={16} />
+                {groupAvatarFile ? 'Сменить аватар' : 'Выбрать аватар'}
+              </button>
+              <div className="wizard-helper-text">PNG/JPG, до 5MB</div>
+            </div>
+          </div>
+
+          <input
+            ref={avatarInputRef}
+            type="file"
+            accept="image/*"
+            style={{ display: 'none' }}
+            onChange={handleAvatarChange}
+          />
+
+          <div className="wizard-field-block">
+            <label className="wizard-label" htmlFor="group-name-input">Название группы</label>
+            <input
+              id="group-name-input"
+              className="wizard-input"
+              type="text"
+              value={groupName}
+              onChange={(event) => setGroupName(event.target.value)}
+              placeholder="Например: Команда продукта"
+              maxLength={60}
+            />
+            <div className="wizard-counter">{groupName.trim().length || 0}/60</div>
+          </div>
+        </section>
+      );
+    }
+
+    if (step === 2) {
+      return (
+        <section className="wizard-panel-inner">
+          <h3 className="wizard-heading">Шаг 2. Добавьте участников</h3>
+          <p className="wizard-description">Введите номер телефона и добавьте людей в один клик.</p>
+          <div className="wizard-meta-banner">
+            <span className="wizard-meta-label">Добавлено участников</span>
+            <span className="wizard-meta-value">{selectedUsers.length}</span>
+          </div>
+
+          <div className="wizard-field-block">
+            <label className="wizard-label" htmlFor="group-member-phone">Поиск по номеру</label>
+            <div className="wizard-search-wrap">
+              <SearchIcon size={16} />
+              <input
+                id="group-member-phone"
+                className="wizard-search-input"
+                type="text"
+                value={phone}
+                onChange={(event) => setPhone(event.target.value)}
+                onKeyDown={handleSearchKeyDown}
+                placeholder="Введите номер телефона"
+              />
+            </div>
+            <div className="wizard-helper-text">{searchHint}</div>
+          </div>
+
+          {status === 'found' && user ? (
+            <div className="wizard-search-result">
+              <div className="wizard-user-avatar">{String(user?.name || '?').charAt(0).toUpperCase()}</div>
+              <div className="wizard-user-content">
+                <div className="wizard-user-name">{user?.name || 'Пользователь'}</div>
+                <div className="wizard-user-phone">{phone}</div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleSelectUser}
+                disabled={isAlreadySelected}
+              >
+                {isAlreadySelected ? 'Уже добавлен' : 'Добавить'}
+              </button>
+            </div>
+          ) : null}
+
+          <div className="wizard-chip-zone">
+            {selectedUsers.length === 0 ? (
+              <div className="wizard-empty-chip">Участники пока не добавлены</div>
+            ) : (
+              selectedUsers.map((item) => (
+                <div
+                  key={item.id}
+                  className={`wizard-chip ${lastAddedUserId === item.id ? 'is-new' : ''}`}
+                >
+                  <span className="wizard-chip-avatar">{String(item?.name || '?').charAt(0).toUpperCase()}</span>
+                  <span className="wizard-chip-name">{item?.name || 'Пользователь'}</span>
+                  <button
+                    type="button"
+                    className="wizard-chip-remove"
+                    onClick={() => handleRemoveUser(item.id)}
+                    aria-label="Удалить участника"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+      );
+    }
+
+    return (
+      <section className="wizard-panel-inner">
+        <h3 className="wizard-heading">Шаг 3. Подтверждение</h3>
+        <p className="wizard-description">Проверьте настройки и создайте группу.</p>
+
+        <div className="wizard-summary-card">
+          <div className="wizard-summary-header">
+            <div className="wizard-avatar-preview small">
+              {groupAvatarUrl ? (
+                <img src={groupAvatarUrl} alt="Group avatar" className="wizard-avatar-image" />
+              ) : (
+                <span className="wizard-avatar-fallback">{String(groupName || 'G').charAt(0).toUpperCase()}</span>
+              )}
+            </div>
+
+            <div className="wizard-summary-meta">
+              <div className="wizard-summary-name">{groupName.trim() || 'Без названия'}</div>
+              <div className="wizard-summary-sub">Участников: {selectedUsers.length}</div>
+            </div>
+          </div>
+
+          <div className="wizard-summary-members">
+            {selectedUsers.map((item) => (
+              <div key={item.id} className="wizard-summary-member">
+                <span className="wizard-summary-member-dot" />
+                <span>{item?.name || 'Пользователь'}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="wizard-summary-note">
+          После создания вы сразу попадете в новый групповой чат и сможете отправлять сообщения.
+        </div>
+      </section>
+    );
+  };
 
   return (
-    <div className="group-modal-overlay" onClick={onClose}>
-      <div className="group-modal" onClick={(event) => event.stopPropagation()}>
-        <div className="group-modal-header">
-          <div>
-            <h2 className="group-modal-title">Создание группы</h2>
-            <p className="group-modal-subtitle">Соберите участников и запустите новый чат</p>
+    <div className="group-wizard-overlay" onClick={onClose}>
+      <div className="group-wizard-modal" onClick={(event) => event.stopPropagation()}>
+        <header className="group-wizard-header">
+          <div className="group-wizard-header-main">
+            <div className="group-wizard-kicker">Создание чата</div>
+            <h2 className="group-wizard-title">Новая группа</h2>
+            <p className="group-wizard-subtitle">Соберите людей в один чат за три шага</p>
           </div>
-          <button type="button" onClick={onClose} className="group-close-btn" aria-label="Закрыть">
-            ×
-          </button>
+          <div className="group-wizard-header-actions">
+            <div className="group-wizard-step-counter">Шаг {step} из {STEP_CONFIG.length}</div>
+            <button type="button" className="group-wizard-close" onClick={onClose} aria-label="Закрыть">
+              ×
+            </button>
+          </div>
+        </header>
+
+        <div className="group-wizard-progress" aria-hidden="true">
+          <span className="group-wizard-progress-fill" style={{ width: `${progressPercent}%` }} />
         </div>
 
-        <div className="group-progress-row">
-          <div className={`group-step ${groupName.trim() ? 'done' : 'active'}`}>
-            <span className="group-step-index">1</span>
-            <span className="group-step-label">Название</span>
-          </div>
-          <div className={`group-step ${selectedUsers.length > 0 ? 'done' : 'active'}`}>
-            <span className="group-step-index">2</span>
-            <span className="group-step-label">Участники</span>
-          </div>
+        <div className="group-wizard-steps" role="tablist" aria-label="Шаги создания группы">
+          {STEP_CONFIG.map((item) => {
+            const done = step > item.id;
+            const active = step === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={`group-step-pill ${done ? 'done' : ''} ${active ? 'active' : ''}`}
+                onClick={() => {
+                  if (item.id < step) goToStep(item.id);
+                }}
+                disabled={item.id > step}
+              >
+                <span className="group-step-index">{item.id}</span>
+                <span className="group-step-labels">
+                  <span className="group-step-text">{item.title}</span>
+                  <span className="group-step-subtext">{item.subtitle}</span>
+                </span>
+              </button>
+            );
+          })}
         </div>
 
-        <div className="group-modal-body">
-          <section className="group-left-col">
-            <div className="group-field-block">
-              <label className="group-label" htmlFor="group-name-input">Название группы</label>
-              <input
-                id="group-name-input"
-                type="text"
-                value={groupName}
-                onChange={(event) => setGroupName(event.target.value)}
-                placeholder="Например: Команда проекта"
-                maxLength={60}
-                className="group-input"
-              />
-              <div className="group-inline-meta">{groupName.trim().length || 0}/60</div>
-            </div>
+        <main className="group-wizard-content">
+          <div key={step} className={`wizard-panel wizard-panel-${direction}`}>
+            {renderStepContent()}
+          </div>
+        </main>
 
-            <div className="group-field-block">
-              <label className="group-label" htmlFor="group-phone-input">Поиск участника по номеру</label>
-              <div className="group-search-wrap">
-                <SearchIcon size={16} />
-                <input
-                  id="group-phone-input"
-                  type="text"
-                  value={phone}
-                  onChange={(event) => setPhone(event.target.value)}
-                  onKeyDown={handlePhoneKeyDown}
-                  placeholder="Введите номер телефона"
-                  className="group-search-input"
-                />
-              </div>
-              <div className="group-hint">{hintText}</div>
-            </div>
+        {error ? <div className="group-wizard-error">{error}</div> : null}
 
-            {status === 'found' && user ? (
-              <div className="group-search-result">
-                <div className="group-result-avatar">{String(user?.name || '?').charAt(0).toUpperCase()}</div>
-                <div className="group-result-main">
-                  <div className="group-result-name">{user?.name || 'Пользователь'}</div>
-                  <div className="group-result-phone">{phone}</div>
-                </div>
-                <button
-                  type="button"
-                  className="btn btn-primary group-add-btn"
-                  onClick={handleSelectUser}
-                  disabled={isAlreadySelected}
-                >
-                  {isAlreadySelected ? 'Уже в группе' : 'Добавить'}
-                </button>
-              </div>
-            ) : null}
-
-            {error ? <div className="group-error">{error}</div> : null}
-          </section>
-
-          <aside className="group-right-col">
-            <div className="group-right-top">
-              <div className="group-participants-title">Участники ({selectedUsers.length})</div>
-              {selectedUsers.length > 0 ? (
-                <button
-                  type="button"
-                  className="group-clear-btn"
-                  onClick={() => setSelectedUsers([])}
-                >
-                  Очистить
-                </button>
-              ) : null}
-            </div>
-
-            {selectedUsers.length === 0 ? (
-              <div className="group-empty-state">
-                <div className="group-empty-icon">
-                  <UserIcon size={20} />
-                </div>
-                <div className="group-empty-title">Пока пусто</div>
-                <div className="group-empty-text">Добавьте участников через поле поиска слева</div>
-              </div>
-            ) : (
-              <div className="group-members-list">
-                {selectedUsers.map((item) => (
-                  <div key={item.id} className="group-member-row">
-                    <div className="group-member-avatar">{String(item?.name || '?').charAt(0).toUpperCase()}</div>
-                    <div className="group-member-meta">
-                      <div className="group-member-name">{item?.name || 'Пользователь'}</div>
-                    </div>
-                    <button
-                      type="button"
-                      className="group-remove-btn"
-                      onClick={() => handleRemoveUser(item.id)}
-                      aria-label="Удалить участника"
-                    >
-                      Убрать
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </aside>
-        </div>
-
-        <div className="group-modal-footer">
-          <button type="button" className="btn btn-ghost group-footer-btn" onClick={onClose}>
+        <footer className="group-wizard-footer">
+          <button type="button" className="btn btn-ghost wizard-footer-btn" onClick={onClose}>
             Отмена
           </button>
-          <button
-            type="button"
-            className="btn btn-primary group-footer-btn"
-            onClick={handleCreateGroup}
-            disabled={!canCreate}
-          >
-            {isCreating ? 'Создаем...' : 'Создать группу'}
-          </button>
-        </div>
+
+          <div className="wizard-footer-actions">
+            <div className="wizard-footer-info">
+              {step === 1 ? 'Сначала укажите название группы' : null}
+              {step === 2 ? `Выбрано участников: ${selectedUsers.length}` : null}
+              {step === 3 ? 'Проверьте данные перед созданием' : null}
+            </div>
+            {step > 1 ? (
+              <button type="button" className="btn btn-secondary wizard-footer-btn" onClick={handleBack}>
+                Назад
+              </button>
+            ) : null}
+
+            {step < 3 ? (
+              <button type="button" className="btn btn-primary wizard-footer-btn" onClick={handleNext} disabled={!canGoNext}>
+                Далее
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-primary wizard-footer-btn"
+                onClick={handleCreateGroup}
+                disabled={!canCreate}
+              >
+                {isCreating ? 'Создаем...' : `Создать группу (${selectedUsers.length})`}
+              </button>
+            )}
+          </div>
+        </footer>
 
         <style>{`
-          .group-modal-overlay {
+          .group-wizard-overlay {
             position: fixed;
             inset: 0;
-            background: rgba(2, 6, 23, 0.78);
-            backdrop-filter: blur(8px);
-            z-index: 11000;
+            z-index: 12000;
             display: flex;
             align-items: center;
             justify-content: center;
             padding: var(--space-16);
+            background: rgba(2, 6, 23, 0.78);
+            backdrop-filter: blur(8px);
           }
 
-          .group-modal {
-            width: min(920px, 96vw);
-            max-height: 88vh;
+          .group-wizard-modal {
+            width: min(720px, calc(100vw - 32px));
+            max-height: 90vh;
             display: flex;
             flex-direction: column;
+            background:
+              radial-gradient(circle at 10% 0%, rgba(59, 130, 246, 0.16), transparent 38%),
+              radial-gradient(circle at 92% 8%, rgba(99, 102, 241, 0.12), transparent 32%),
+              var(--bg-card);
             border-radius: var(--radius-modal);
             border: 1px solid var(--border-color);
-            background:
-              radial-gradient(circle at 12% 0%, rgba(59, 130, 246, 0.16), transparent 38%),
-              radial-gradient(circle at 92% 3%, rgba(99, 102, 241, 0.16), transparent 32%),
-              var(--bg-card);
             box-shadow: var(--shadow-xl);
             overflow: hidden;
           }
 
-          .group-modal-header {
-            padding: var(--space-20) var(--space-24) var(--space-14);
+          .group-wizard-header {
+            padding: var(--space-20) var(--space-24) var(--space-16);
             border-bottom: 1px solid var(--border-color);
             display: flex;
-            align-items: flex-start;
             justify-content: space-between;
             gap: var(--space-12);
+            align-items: flex-start;
           }
 
-          .group-modal-title {
+          .group-wizard-header-main {
+            min-width: 0;
+          }
+
+          .group-wizard-kicker {
+            font-size: 11px;
+            color: #93c5fd;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            font-weight: 800;
+            margin-bottom: var(--space-8);
+          }
+
+          .group-wizard-header-actions {
+            display: flex;
+            align-items: center;
+            gap: var(--space-10);
+          }
+
+          .group-wizard-step-counter {
+            border-radius: var(--radius-pill);
+            border: 1px solid rgba(99, 102, 241, 0.35);
+            background: rgba(79, 124, 255, 0.18);
+            padding: 5px 10px;
+            color: #dbeafe;
+            font-size: 12px;
+            font-weight: 700;
+            white-space: nowrap;
+          }
+
+          .group-wizard-title {
             margin: 0;
-            font-size: 28px;
+            font-size: 30px;
+            line-height: 1.1;
             font-weight: 820;
             color: var(--text-primary);
             letter-spacing: -0.01em;
           }
 
-          .group-modal-subtitle {
-            margin-top: var(--space-6);
+          .group-wizard-subtitle {
+            margin-top: var(--space-8);
             color: var(--text-muted);
             font-size: 14px;
           }
 
-          .group-close-btn {
+          .group-wizard-progress {
+            height: 3px;
+            background: rgba(148, 163, 184, 0.2);
+          }
+
+          .group-wizard-progress-fill {
+            display: block;
+            height: 100%;
+            background: linear-gradient(90deg, #4f7cff, #7c8cff);
+            box-shadow: 0 0 16px rgba(79, 124, 255, 0.55);
+            transition: width 220ms ease;
+          }
+
+          .group-wizard-close {
             width: 38px;
             height: 38px;
             border-radius: 12px;
@@ -309,98 +553,209 @@ function CreateGroupModal({ token, onClose, onGroupCreated }) {
             transition: var(--transition-normal);
           }
 
-          .group-close-btn:hover {
+          .group-wizard-close:hover {
             color: var(--text-primary);
             background: var(--bg-hover);
-            transform: translateY(-1px);
           }
 
-          .group-progress-row {
-            display: flex;
-            gap: var(--space-10);
-            padding: var(--space-14) var(--space-24) var(--space-12);
+          .group-wizard-steps {
+            padding: var(--space-12) var(--space-24);
             border-bottom: 1px solid var(--border-light);
+            display: flex;
+            gap: var(--space-8);
+            align-items: stretch;
           }
 
-          .group-step {
+          .group-step-pill {
+            flex: 1;
+            min-width: 0;
             display: inline-flex;
             align-items: center;
             gap: var(--space-8);
-            padding: var(--space-8) var(--space-12);
-            border-radius: var(--radius-pill);
             border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            background: rgba(15, 23, 42, 0.45);
             color: var(--text-muted);
-            background: rgba(15, 23, 42, 0.5);
+            padding: 8px 10px;
+            transition: var(--transition-fast);
           }
 
-          .group-step.active {
-            color: var(--text-secondary);
-          }
-
-          .group-step.done {
+          .group-step-pill.done,
+          .group-step-pill.active {
             color: #dbeafe;
-            border-color: rgba(96, 165, 250, 0.38);
-            background: rgba(59, 130, 246, 0.15);
+            border-color: rgba(99, 102, 241, 0.46);
+            background: rgba(79, 124, 255, 0.18);
+          }
+
+          .group-step-pill:disabled {
+            cursor: not-allowed;
+            opacity: 0.7;
           }
 
           .group-step-index {
-            width: 22px;
-            height: 22px;
+            width: 20px;
+            height: 20px;
             border-radius: 50%;
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            font-size: 12px;
+            font-size: 11px;
             font-weight: 800;
-            background: rgba(148, 163, 184, 0.2);
+            background: rgba(148, 163, 184, 0.25);
+            color: #f8fafc;
           }
 
-          .group-step.done .group-step-index {
-            background: rgba(59, 130, 246, 0.45);
-            color: #eff6ff;
+          .group-step-labels {
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
           }
 
-          .group-step-label {
-            font-size: 13px;
+          .group-step-text {
+            font-size: 12px;
             font-weight: 700;
+            letter-spacing: 0.015em;
+            line-height: 1.2;
           }
 
-          .group-modal-body {
-            display: grid;
-            grid-template-columns: 1.15fr 0.85fr;
-            min-height: 0;
+          .group-step-subtext {
+            margin-top: 1px;
+            font-size: 10px;
+            color: rgba(203, 213, 225, 0.72);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+
+          .group-wizard-content {
             flex: 1;
-          }
-
-          .group-left-col,
-          .group-right-col {
             min-height: 0;
+            overflow: hidden;
+            padding: var(--space-20) var(--space-24);
+          }
+
+          .wizard-panel {
+            height: 100%;
             overflow: auto;
-            padding: var(--space-18) var(--space-24);
+            animation-duration: 220ms;
+            animation-timing-function: ease;
+            animation-fill-mode: both;
           }
 
-          .group-left-col {
-            border-right: 1px solid var(--border-light);
+          .wizard-panel-forward {
+            animation-name: wizardSlideInFromRight;
           }
 
-          .group-field-block + .group-field-block {
-            margin-top: var(--space-16);
+          .wizard-panel-backward {
+            animation-name: wizardSlideInFromLeft;
           }
 
-          .group-label {
+          .wizard-panel-inner {
+            max-width: 100%;
+          }
+
+          .wizard-heading {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 790;
+            color: var(--text-primary);
+            letter-spacing: -0.01em;
+          }
+
+          .wizard-description {
+            margin-top: var(--space-8);
+            color: var(--text-muted);
+            font-size: 14px;
+            margin-bottom: var(--space-18);
+          }
+
+          .wizard-meta-banner {
+            margin-top: calc(var(--space-8) * -1);
+            margin-bottom: var(--space-14);
+            display: inline-flex;
+            align-items: baseline;
+            gap: var(--space-8);
+            padding: 6px 12px;
+            border-radius: var(--radius-pill);
+            border: 1px solid rgba(99, 102, 241, 0.32);
+            background: rgba(79, 124, 255, 0.12);
+          }
+
+          .wizard-meta-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+          }
+
+          .wizard-meta-value {
+            font-size: 16px;
+            font-weight: 800;
+            color: #dbeafe;
+            line-height: 1;
+          }
+
+          .wizard-avatar-row {
+            display: flex;
+            align-items: center;
+            gap: var(--space-16);
+            margin-bottom: var(--space-18);
+          }
+
+          .wizard-avatar-preview {
+            width: 86px;
+            height: 86px;
+            border-radius: 50%;
+            border: 1px solid var(--border-color);
+            background: linear-gradient(135deg, rgba(79, 124, 255, 0.22), rgba(139, 92, 246, 0.2));
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: #e2e8f0;
+            font-size: 30px;
+            font-weight: 800;
+            overflow: hidden;
+            flex-shrink: 0;
+          }
+
+          .wizard-avatar-preview.small {
+            width: 66px;
+            height: 66px;
+            font-size: 24px;
+          }
+
+          .wizard-avatar-image {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+          }
+
+          .wizard-avatar-fallback {
+            line-height: 1;
+          }
+
+          .wizard-avatar-actions {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-8);
+          }
+
+          .wizard-field-block {
+            margin-top: var(--space-8);
+          }
+
+          .wizard-label {
             display: block;
             margin-bottom: var(--space-8);
             color: var(--text-secondary);
             font-size: 12px;
+            font-weight: 800;
             letter-spacing: 0.07em;
             text-transform: uppercase;
-            font-weight: 800;
           }
 
-          .group-input,
-          .group-search-input {
+          .wizard-input,
+          .wizard-search-input {
             width: 100%;
-            border-radius: 14px;
+            border-radius: var(--radius-md);
             border: 1px solid var(--border-input);
             background: rgba(2, 6, 23, 0.52);
             color: var(--text-primary);
@@ -408,260 +763,352 @@ function CreateGroupModal({ token, onClose, onGroupCreated }) {
             transition: var(--transition-normal);
           }
 
-          .group-search-wrap {
+          .wizard-search-wrap {
             display: flex;
             align-items: center;
             gap: var(--space-8);
-            border-radius: 14px;
+            border-radius: var(--radius-md);
             border: 1px solid var(--border-input);
             background: rgba(2, 6, 23, 0.52);
             color: var(--text-muted);
             padding: 0 12px;
           }
 
-          .group-search-input {
+          .wizard-search-input {
             border: none;
             background: transparent;
             padding-left: 0;
           }
 
-          .group-input:focus,
-          .group-search-wrap:focus-within {
+          .wizard-input:focus,
+          .wizard-search-wrap:focus-within {
             border-color: rgba(99, 102, 241, 0.56);
             box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.14);
           }
 
-          .group-inline-meta {
-            margin-top: var(--space-6);
+          .wizard-helper-text {
             color: var(--text-muted);
             font-size: 12px;
+            min-height: 18px;
+          }
+
+          .wizard-counter {
+            margin-top: var(--space-6);
+            font-size: 12px;
+            color: var(--text-muted);
             text-align: right;
           }
 
-          .group-hint {
-            margin-top: var(--space-6);
-            min-height: 18px;
-            color: var(--text-muted);
-            font-size: 12px;
-          }
-
-          .group-search-result {
-            margin-top: var(--space-14);
+          .wizard-search-result {
+            margin-top: var(--space-12);
             border: 1px solid var(--border-color);
             border-radius: var(--radius-lg);
-            background: rgba(15, 23, 42, 0.66);
+            background: rgba(15, 23, 42, 0.62);
+            padding: var(--space-10);
             display: flex;
             align-items: center;
-            gap: var(--space-12);
-            padding: var(--space-10);
+            gap: var(--space-10);
           }
 
-          .group-result-avatar,
-          .group-member-avatar {
-            width: 42px;
-            height: 42px;
+          .wizard-user-avatar,
+          .wizard-chip-avatar {
+            width: 40px;
+            height: 40px;
             border-radius: 50%;
-            background: linear-gradient(135deg, rgba(99, 102, 241, 0.95), rgba(139, 92, 246, 0.9));
-            color: #eef2ff;
-            font-size: 16px;
-            font-weight: 800;
             display: inline-flex;
             align-items: center;
             justify-content: center;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.95), rgba(139, 92, 246, 0.9));
+            color: #eef2ff;
+            font-size: 15px;
+            font-weight: 800;
             flex-shrink: 0;
           }
 
-          .group-result-main,
-          .group-member-meta {
-            min-width: 0;
+          .wizard-user-content {
             flex: 1;
+            min-width: 0;
           }
 
-          .group-result-name,
-          .group-member-name {
-            color: var(--text-primary);
-            font-weight: 720;
+          .wizard-user-name {
             font-size: 14px;
+            font-weight: 720;
+            color: var(--text-primary);
+          }
+
+          .wizard-user-phone {
+            margin-top: 2px;
+            font-size: 12px;
+            color: var(--text-muted);
+          }
+
+          .wizard-chip-zone {
+            margin-top: var(--space-16);
+            display: flex;
+            flex-wrap: wrap;
+            gap: var(--space-8);
+          }
+
+          .wizard-empty-chip {
+            width: 100%;
+            border: 1px dashed var(--border-color);
+            border-radius: var(--radius-md);
+            background: rgba(15, 23, 42, 0.45);
+            color: var(--text-muted);
+            font-size: 13px;
+            text-align: center;
+            padding: var(--space-12);
+          }
+
+          .wizard-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--space-8);
+            border-radius: var(--radius-pill);
+            border: 1px solid rgba(99, 102, 241, 0.36);
+            background: rgba(79, 124, 255, 0.16);
+            color: #dbeafe;
+            padding: 6px 10px 6px 6px;
+          }
+
+          .wizard-chip.is-new {
+            animation: chipPopIn 240ms ease;
+          }
+
+          .wizard-chip-avatar {
+            width: 26px;
+            height: 26px;
+            font-size: 12px;
+          }
+
+          .wizard-chip-name {
+            font-size: 12px;
+            font-weight: 700;
+            max-width: 170px;
+            white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
-            white-space: nowrap;
           }
 
-          .group-result-phone {
-            color: var(--text-muted);
+          .wizard-chip-remove {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            border: 1px solid rgba(191, 219, 254, 0.35);
+            background: rgba(15, 23, 42, 0.55);
+            color: #dbeafe;
             font-size: 12px;
-            margin-top: 2px;
+            line-height: 1;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: var(--transition-fast);
           }
 
-          .group-add-btn {
-            min-width: 110px;
+          .wizard-chip-remove:hover {
+            background: rgba(239, 68, 68, 0.2);
+            border-color: rgba(248, 113, 113, 0.45);
+            color: #fecaca;
+          }
+
+          .wizard-summary-card {
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            background: rgba(15, 23, 42, 0.66);
+            padding: var(--space-14);
+          }
+
+          .wizard-summary-note {
+            margin-top: var(--space-12);
+            border: 1px dashed rgba(148, 163, 184, 0.35);
             border-radius: 12px;
-            padding-inline: 12px;
+            background: rgba(15, 23, 42, 0.5);
+            color: var(--text-secondary);
+            font-size: 13px;
+            line-height: 1.45;
+            padding: 12px;
           }
 
-          .group-error {
-            margin-top: var(--space-14);
+          .wizard-summary-header {
+            display: flex;
+            align-items: center;
+            gap: var(--space-12);
+            margin-bottom: var(--space-12);
+            padding-bottom: var(--space-12);
+            border-bottom: 1px solid var(--border-light);
+          }
+
+          .wizard-summary-meta {
+            min-width: 0;
+          }
+
+          .wizard-summary-name {
+            color: var(--text-primary);
+            font-size: 19px;
+            font-weight: 780;
+          }
+
+          .wizard-summary-sub {
+            margin-top: 4px;
+            color: var(--text-muted);
+            font-size: 13px;
+          }
+
+          .wizard-summary-members {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-6);
+            max-height: 220px;
+            overflow: auto;
+          }
+
+          .wizard-summary-member {
+            display: flex;
+            align-items: center;
+            gap: var(--space-8);
+            color: var(--text-secondary);
+            font-size: 14px;
+          }
+
+          .wizard-summary-member-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--accent);
+            box-shadow: 0 0 0 4px rgba(79, 124, 255, 0.16);
+          }
+
+          .group-wizard-error {
+            margin: 0 var(--space-24) var(--space-10);
+            border-radius: 12px;
             border: 1px solid rgba(248, 113, 113, 0.35);
-            border-radius: 12px;
             background: rgba(244, 63, 94, 0.12);
             color: #fecaca;
             font-size: 13px;
             font-weight: 600;
-            padding: var(--space-10) var(--space-12);
+            padding: 10px 12px;
           }
 
-          .group-right-top {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: var(--space-10);
-            margin-bottom: var(--space-12);
-          }
-
-          .group-participants-title {
-            color: var(--text-primary);
-            font-size: 15px;
-            font-weight: 760;
-          }
-
-          .group-clear-btn {
-            color: var(--text-muted);
-            font-size: 12px;
-            font-weight: 700;
-            border: 1px solid var(--border-color);
-            border-radius: 10px;
-            background: rgba(15, 23, 42, 0.45);
-            padding: 7px 10px;
-            transition: var(--transition-normal);
-          }
-
-          .group-clear-btn:hover {
-            color: var(--text-primary);
-            background: var(--bg-hover);
-          }
-
-          .group-empty-state {
-            border: 1px dashed var(--border-color);
-            border-radius: 14px;
-            padding: var(--space-20) var(--space-14);
-            text-align: center;
-            color: var(--text-muted);
-          }
-
-          .group-empty-icon {
-            width: 42px;
-            height: 42px;
-            border-radius: 12px;
-            margin: 0 auto var(--space-10);
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            background: rgba(15, 23, 42, 0.58);
-            border: 1px solid var(--border-color);
-          }
-
-          .group-empty-title {
-            color: var(--text-secondary);
-            font-size: 14px;
-            font-weight: 700;
-          }
-
-          .group-empty-text {
-            margin-top: var(--space-6);
-            font-size: 12px;
-          }
-
-          .group-members-list {
-            display: flex;
-            flex-direction: column;
-            gap: var(--space-8);
-          }
-
-          .group-member-row {
-            display: flex;
-            align-items: center;
-            gap: var(--space-10);
-            padding: var(--space-8);
-            border-radius: 12px;
-            border: 1px solid var(--border-color);
-            background: rgba(2, 6, 23, 0.35);
-          }
-
-          .group-remove-btn {
-            color: #fca5a5;
-            font-size: 12px;
-            font-weight: 700;
-            border: 1px solid rgba(248, 113, 113, 0.3);
-            border-radius: 9px;
-            background: rgba(15, 23, 42, 0.62);
-            padding: 6px 10px;
-            transition: var(--transition-normal);
-          }
-
-          .group-remove-btn:hover {
-            background: rgba(239, 68, 68, 0.16);
-            color: #fecaca;
-          }
-
-          .group-modal-footer {
+          .group-wizard-footer {
             border-top: 1px solid var(--border-color);
             padding: var(--space-14) var(--space-24);
             display: flex;
-            justify-content: flex-end;
+            justify-content: space-between;
+            align-items: center;
             gap: var(--space-10);
             background: rgba(10, 15, 27, 0.75);
           }
 
-          .group-footer-btn {
-            min-width: 148px;
+          .wizard-footer-actions {
+            display: inline-flex;
+            gap: var(--space-10);
+            align-items: center;
+          }
+
+          .wizard-footer-info {
+            margin-right: var(--space-4);
+            color: var(--text-muted);
+            font-size: 12px;
+            font-weight: 600;
+            white-space: nowrap;
+          }
+
+          .wizard-footer-btn {
+            min-width: 156px;
             border-radius: 12px;
-            height: 42px;
           }
 
-          @media (max-width: 900px) {
-            .group-modal {
-              width: min(700px, 96vw);
+          @keyframes wizardSlideInFromRight {
+            from {
+              opacity: 0;
+              transform: translateX(18px);
             }
-
-            .group-modal-body {
-              grid-template-columns: 1fr;
-            }
-
-            .group-left-col {
-              border-right: none;
-              border-bottom: 1px solid var(--border-light);
+            to {
+              opacity: 1;
+              transform: translateX(0);
             }
           }
 
-          @media (max-width: 640px) {
-            .group-modal-overlay {
-              padding: var(--space-8);
+          @keyframes wizardSlideInFromLeft {
+            from {
+              opacity: 0;
+              transform: translateX(-18px);
+            }
+            to {
+              opacity: 1;
+              transform: translateX(0);
+            }
+          }
+
+          @keyframes chipPopIn {
+            0% {
+              opacity: 0;
+              transform: translateY(6px) scale(0.98);
+            }
+            100% {
+              opacity: 1;
+              transform: translateY(0) scale(1);
+            }
+          }
+
+          @media (max-width: 768px) {
+            .group-wizard-overlay {
+              padding: var(--space-10);
             }
 
-            .group-modal {
+            .group-wizard-modal {
               width: 100%;
-              max-height: 95vh;
+              max-height: 94vh;
             }
 
-            .group-modal-title {
-              font-size: 22px;
+            .group-wizard-title {
+              font-size: 24px;
             }
 
-            .group-modal-header,
-            .group-progress-row,
-            .group-left-col,
-            .group-right-col,
-            .group-modal-footer {
+            .group-wizard-header,
+            .group-wizard-steps,
+            .group-wizard-content,
+            .group-wizard-footer {
               padding-left: var(--space-14);
               padding-right: var(--space-14);
             }
 
-            .group-modal-footer {
-              flex-direction: column-reverse;
+            .group-step-text {
+              font-size: 11px;
             }
 
-            .group-footer-btn {
+            .group-step-subtext {
+              display: none;
+            }
+
+            .group-wizard-step-counter {
+              display: none;
+            }
+
+            .group-wizard-footer {
+              flex-direction: column;
+              align-items: stretch;
+            }
+
+            .wizard-footer-actions {
               width: 100%;
+              flex-direction: column;
+            }
+
+            .wizard-footer-info {
+              width: 100%;
+              margin-right: 0;
+              margin-bottom: var(--space-8);
+              text-align: center;
+            }
+
+            .wizard-footer-btn {
+              width: 100%;
+            }
+
+            .wizard-avatar-row {
+              flex-direction: column;
+              align-items: flex-start;
             }
           }
         `}</style>
