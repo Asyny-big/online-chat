@@ -6,6 +6,7 @@ import PostCard from '@/components/PostCard';
 import CommentsModal from '@/components/CommentsModal';
 
 export default function FeedPage({ token }) {
+  const [feedMode, setFeedMode] = useState('subscriptions');
   const [items, setItems] = useState([]);
   const [cursor, setCursor] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -16,9 +17,11 @@ export default function FeedPage({ token }) {
     setLoading(true);
     setError('');
     try {
-      const url = nextCursor
-        ? `${API_URL}/social/feed?cursor=${encodeURIComponent(nextCursor)}`
-        : `${API_URL}/social/feed`;
+      const params = new URLSearchParams();
+      params.set('mode', feedMode);
+      if (nextCursor) params.set('cursor', nextCursor);
+
+      const url = `${API_URL}/social/feed?${params.toString()}`;
       const res = await axios.get(url, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -33,24 +36,64 @@ export default function FeedPage({ token }) {
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, feedMode]);
 
   const refetchFeed = useCallback(async () => {
     await loadFeed({ nextCursor: null, append: false });
   }, [loadFeed]);
 
   useEffect(() => {
+    setItems([]);
+    setCursor(null);
     void refetchFeed();
-  }, [refetchFeed]);
+  }, [feedMode, refetchFeed]);
 
   const handleLoadMore = async () => {
     if (loading || !cursor) return;
     await loadFeed({ nextCursor: cursor, append: true });
   };
 
-  const handleLikeSuccess = useCallback(async () => {
-    await refetchFeed();
-  }, [refetchFeed]);
+  const handleLikeSuccess = useCallback((postId, nextActive) => {
+    setItems((prev) => prev.map((entry) => {
+      const post = entry?.post || entry || {};
+      if (String(post?._id || '') !== String(postId || '')) return entry;
+
+      const currentLikes = Number(post?.stats?.likes || 0);
+      const nextLikes = Math.max(0, currentLikes + (nextActive ? 1 : -1));
+
+      return {
+        ...entry,
+        post: {
+          ...post,
+          likedByMe: Boolean(nextActive),
+          stats: {
+            ...(post.stats || {}),
+            likes: nextLikes
+          }
+        }
+      };
+    }));
+  }, []);
+
+  const handleCommentCreated = useCallback(() => {
+    if (!activePostId) return;
+    setItems((prev) => prev.map((entry) => {
+      const post = entry?.post || entry || {};
+      if (String(post?._id || '') !== String(activePostId || '')) return entry;
+
+      const currentComments = Number(post?.stats?.comments || 0);
+      return {
+        ...entry,
+        post: {
+          ...post,
+          stats: {
+            ...(post.stats || {}),
+            comments: currentComments + 1
+          }
+        }
+      };
+    }));
+  }, [activePostId]);
 
   const handlePostCreated = (post) => {
     if (!post?._id) return;
@@ -70,8 +113,20 @@ export default function FeedPage({ token }) {
       <div className="feed-header">
         <h1 className="feed-title">Главная</h1>
         <div className="feed-tabs">
-          <button type="button" className="feed-tab active">Популярное</button>
-          <button type="button" className="feed-tab">Подписки</button>
+          <button
+            type="button"
+            className={`feed-tab ${feedMode === 'popular' ? 'active' : ''}`}
+            onClick={() => setFeedMode('popular')}
+          >
+            Популярное
+          </button>
+          <button
+            type="button"
+            className={`feed-tab ${feedMode === 'subscriptions' ? 'active' : ''}`}
+            onClick={() => setFeedMode('subscriptions')}
+          >
+            Подписки
+          </button>
         </div>
       </div>
 
@@ -117,7 +172,7 @@ export default function FeedPage({ token }) {
           token={token}
           postId={activePostId}
           onClose={() => setActivePostId(null)}
-          onCommentCreated={refetchFeed}
+          onCommentCreated={handleCommentCreated}
         />
       ) : null}
 

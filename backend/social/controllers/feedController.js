@@ -6,7 +6,8 @@ async function getFeed(req, res) {
     const result = await getUserFeedPage({
       userId: req.userId,
       cursor: req.query?.cursor,
-      limit: req.query?.limit
+      limit: req.query?.limit,
+      mode: req.query?.mode
     });
     return res.json(result);
   } catch (error) {

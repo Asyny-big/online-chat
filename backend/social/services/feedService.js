@@ -159,13 +159,15 @@ function scheduleFeedRebuildAll({ batchSize = 200 } = {}) {
   return { queued: true, batchSize };
 }
 
-async function getUserFeedPage({ userId, cursor, limit }) {
-  const normalizedLimit = normalizeLimit(limit, 20, 50);
-  const userObjectId = toObjectIdOrNull(userId);
-  if (!userObjectId) {
-    return { items: [], nextCursor: null };
-  }
+function normalizeFeedMode(value) {
+  const normalized = String(value || 'subscriptions').trim().toLowerCase();
+  if (normalized === 'popular') return 'popular';
+  if (normalized === 'subscriptions') return 'subscriptions';
+  if (normalized === 'following' || normalized === 'friends') return 'subscriptions';
+  return 'subscriptions';
+}
 
+async function getSubscriptionsFeedPage({ userId, userObjectId, cursor, normalizedLimit }) {
   const cursorPayload = decodeCursor(cursor);
   const query = { userId: userObjectId };
 
@@ -196,35 +198,32 @@ async function getUserFeedPage({ userId, cursor, limit }) {
     .lean();
 
   const postMap = new Map(posts.map((post) => [String(post._id), post]));
-  const visibleRows = [];
+  const resultItems = [];
   for (const row of pageRows) {
     const post = postMap.get(String(row.postId));
     if (!post) continue;
+
     // eslint-disable-next-line no-await-in-loop
     const canView = await canUserViewPost(post, userId);
     if (!canView) continue;
-    visibleRows.push({ row, post });
+
+    resultItems.push({
+      _id: row._id,
+      score: row.score,
+      createdAt: row.createdAt,
+      post
+    });
   }
 
-  const nextCursor = hasMore && pageRows.length
-    ? encodeCursor({ score: pageRows[pageRows.length - 1].score, id: String(pageRows[pageRows.length - 1]._id) })
-    : null;
-
-  const resultItems = visibleRows.map(({ row, post }) => ({
-    _id: row._id,
-    score: row.score,
-    createdAt: row.createdAt,
-    post
-  }));
-
-  // Fallback for sparse social graph: if personal feed is empty/short, show public popular posts.
+  // Fallback for sparse social graph:
+  // fill from public feed in reverse chronology, without popularity reshuffling.
   if (!cursor && resultItems.length < normalizedLimit) {
     const excludedPostIds = new Set(resultItems.map((entry) => String(entry.post?._id || '')));
     const fallbackPosts = await Post.find({
       visibility: 'public',
       _id: { $nin: Array.from(excludedPostIds).filter(Boolean) }
     })
-      .sort({ 'stats.likes': -1, 'stats.comments': -1, createdAt: -1, _id: -1 })
+      .sort({ createdAt: -1, _id: -1 })
       .limit(Math.max(0, normalizedLimit - resultItems.length))
       .populate('authorId', '_id name avatarUrl')
       .populate('media')
@@ -235,15 +234,9 @@ async function getUserFeedPage({ userId, cursor, limit }) {
       const canView = await canUserViewPost(post, userId);
       if (!canView) continue;
 
-      const popularity = Number(post?.stats?.likes || 0) * 2 + Number(post?.stats?.comments || 0);
-      const score = computeImmutableFeedScore({
-        createdAt: post.createdAt,
-        rankBoost: popularity * 60000
-      });
-
       resultItems.push({
-        _id: `popular-${post._id}`,
-        score,
+        _id: `public-${post._id}`,
+        score: computeImmutableFeedScore({ createdAt: post.createdAt }),
         createdAt: post.createdAt,
         post
       });
@@ -252,37 +245,186 @@ async function getUserFeedPage({ userId, cursor, limit }) {
     }
   }
 
-  const resultPostIds = resultItems
+  const nextCursor = hasMore && pageRows.length
+    ? encodeCursor({ score: pageRows[pageRows.length - 1].score, id: String(pageRows[pageRows.length - 1]._id) })
+    : null;
+
+  return { items: resultItems, nextCursor };
+}
+
+async function getPopularFeedPage({ userId, cursor, normalizedLimit }) {
+  const cursorPayload = decodeCursor(cursor);
+  const cursorScore = Number.isFinite(Number(cursorPayload?.score))
+    ? Number(cursorPayload.score)
+    : null;
+  const cursorId = toObjectIdOrNull(cursorPayload?.id);
+  const now = new Date();
+
+  const pipeline = [
+    { $match: { visibility: 'public' } },
+    {
+      $addFields: {
+        likesCount: { $ifNull: ['$stats.likes', 0] },
+        commentsCount: { $ifNull: ['$stats.comments', 0] },
+        repostsCount: { $ifNull: ['$stats.reposts', 0] },
+        viewsCount: { $ifNull: ['$stats.views', 0] },
+        ageHours: {
+          $max: [
+            0,
+            {
+              $divide: [
+                { $subtract: [now, '$createdAt'] },
+                3600000
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      $addFields: {
+        rankScore: {
+          $add: [
+            {
+              $divide: [
+                {
+                  $add: [
+                    '$likesCount',
+                    { $multiply: ['$commentsCount', 2] },
+                    { $multiply: ['$repostsCount', 3] },
+                    { $min: [{ $multiply: ['$viewsCount', 0.05] }, 20] }
+                  ]
+                },
+                { $pow: [{ $add: ['$ageHours', 2] }, 1.3] }
+              ]
+            },
+            {
+              $divide: [1, { $add: ['$ageHours', 2] }]
+            }
+          ]
+        }
+      }
+    },
+    {
+      $addFields: {
+        scoreInt: {
+          $toLong: {
+            $floor: {
+              $multiply: ['$rankScore', 1000000]
+            }
+          }
+        }
+      }
+    }
+  ];
+
+  if (cursorScore !== null && cursorId) {
+    pipeline.push({
+      $match: {
+        $or: [
+          { scoreInt: { $lt: cursorScore } },
+          { scoreInt: cursorScore, _id: { $lt: cursorId } }
+        ]
+      }
+    });
+  }
+
+  pipeline.push(
+    { $sort: { scoreInt: -1, _id: -1 } },
+    { $limit: normalizedLimit + 1 },
+    {
+      $project: {
+        _id: 1,
+        createdAt: 1,
+        score: '$scoreInt'
+      }
+    }
+  );
+
+  const rows = await Post.aggregate(pipeline);
+  const hasMore = rows.length > normalizedLimit;
+  const pageRows = hasMore ? rows.slice(0, normalizedLimit) : rows;
+  const postIds = pageRows.map((row) => row._id);
+
+  const posts = await Post.find({ _id: { $in: postIds } })
+    .populate('authorId', '_id name avatarUrl')
+    .populate('media')
+    .lean();
+
+  const postMap = new Map(posts.map((post) => [String(post._id), post]));
+  const resultItems = [];
+  for (const row of pageRows) {
+    const post = postMap.get(String(row._id));
+    if (!post) continue;
+
+    // eslint-disable-next-line no-await-in-loop
+    const canView = await canUserViewPost(post, userId);
+    if (!canView) continue;
+
+    resultItems.push({
+      _id: `popular-${post._id}`,
+      score: row.score,
+      createdAt: row.createdAt,
+      post
+    });
+  }
+
+  const nextCursor = hasMore && pageRows.length
+    ? encodeCursor({ score: pageRows[pageRows.length - 1].score, id: String(pageRows[pageRows.length - 1]._id) })
+    : null;
+
+  return { items: resultItems, nextCursor };
+}
+
+async function appendLikedByMe({ items, userObjectId }) {
+  const resultPostIds = items
     .map((entry) => entry?.post?._id)
     .filter(Boolean);
 
-  if (resultPostIds.length) {
-    const reactions = await Reaction.find({
-      targetType: 'post',
-      userId: userObjectId,
-      targetId: { $in: resultPostIds }
-    })
-      .select('targetId reaction')
-      .lean();
+  if (!resultPostIds.length) return items;
 
-    const likedIds = new Set(
-      reactions
-        .filter((row) => String(row?.reaction || '').toLowerCase() === 'like')
-        .map((row) => String(row.targetId))
-    );
+  const reactions = await Reaction.find({
+    targetType: 'post',
+    userId: userObjectId,
+    targetId: { $in: resultPostIds }
+  })
+    .select('targetId reaction')
+    .lean();
 
-    for (const entry of resultItems) {
-      if (!entry?.post?._id) continue;
-      entry.post = {
-        ...entry.post,
-        likedByMe: likedIds.has(String(entry.post._id))
-      };
-    }
+  const likedIds = new Set(
+    reactions
+      .filter((row) => String(row?.reaction || '').toLowerCase() === 'like')
+      .map((row) => String(row.targetId))
+  );
+
+  for (const entry of items) {
+    if (!entry?.post?._id) continue;
+    entry.post = {
+      ...entry.post,
+      likedByMe: likedIds.has(String(entry.post._id))
+    };
   }
 
+  return items;
+}
+
+async function getUserFeedPage({ userId, cursor, limit, mode }) {
+  const normalizedLimit = normalizeLimit(limit, 20, 50);
+  const userObjectId = toObjectIdOrNull(userId);
+  if (!userObjectId) {
+    return { items: [], nextCursor: null };
+  }
+
+  const normalizedMode = normalizeFeedMode(mode);
+  const result = normalizedMode === 'popular'
+    ? await getPopularFeedPage({ userId, cursor, normalizedLimit })
+    : await getSubscriptionsFeedPage({ userId, userObjectId, cursor, normalizedLimit });
+
+  await appendLikedByMe({ items: result.items, userObjectId });
+
   return {
-    items: resultItems,
-    nextCursor
+    items: result.items,
+    nextCursor: result.nextCursor
   };
 }
 
