@@ -20,6 +20,7 @@ function CreateGroupModal({ token, onClose, onGroupCreated }) {
 
   const [selectedUsers, setSelectedUsers] = useState([]);
   const [lastAddedUserId, setLastAddedUserId] = useState('');
+  const [creatorName, setCreatorName] = useState('Вы');
 
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState('');
@@ -33,6 +34,41 @@ function CreateGroupModal({ token, onClose, onGroupCreated }) {
     user,
     error: lookupError
   } = usePhoneUserLookup({ token, minLen: 9, debounceMs: 350 });
+
+  useEffect(() => {
+    if (!token) {
+      setCreatorName('Вы');
+      return undefined;
+    }
+
+    const controller = new AbortController();
+
+    const loadCreatorProfile = async () => {
+      try {
+        const res = await fetch(`${API_URL}/users/me`, {
+          method: 'GET',
+          headers: { Authorization: `Bearer ${token}` },
+          signal: controller.signal,
+        });
+
+        if (!res.ok) return;
+
+        const data = await res.json().catch(() => ({}));
+        const name = String(data?.name || data?.username || '').trim();
+        if (name) setCreatorName(name);
+      } catch (err) {
+        if (err?.name !== 'AbortError') {
+          setCreatorName('Вы');
+        }
+      }
+    };
+
+    void loadCreatorProfile();
+
+    return () => {
+      controller.abort();
+    };
+  }, [token]);
 
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -71,6 +107,12 @@ function CreateGroupModal({ token, onClose, onGroupCreated }) {
   const canCreate = groupName.trim().length > 0 && selectedUsers.length > 0 && !isCreating;
   const progressPercent = ((step - 1) / (STEP_CONFIG.length - 1)) * 100;
   const canAddFoundUser = status === 'found' && Boolean(user?.id) && !isAlreadySelected;
+  const totalParticipantsCount = selectedUsers.length + 1;
+
+  const summaryMembers = useMemo(
+    () => [{ id: '__creator__', name: creatorName, isCreator: true }, ...selectedUsers.map((item) => ({ ...item, isCreator: false }))],
+    [creatorName, selectedUsers]
+  );
 
   const addButtonLabel = useMemo(() => {
     if (status === 'loading') return 'Поиск...';
@@ -349,15 +391,15 @@ function CreateGroupModal({ token, onClose, onGroupCreated }) {
 
             <div className="wizard-summary-meta">
               <div className="wizard-summary-name">{groupName.trim() || 'Без названия'}</div>
-              <div className="wizard-summary-sub">Участников: {selectedUsers.length}</div>
+              <div className="wizard-summary-sub">Участников: {totalParticipantsCount}</div>
             </div>
           </div>
 
           <div className="wizard-summary-members">
-            {selectedUsers.map((item) => (
-              <div key={item.id} className="wizard-summary-member">
+            {summaryMembers.map((item) => (
+              <div key={item.id} className={`wizard-summary-member ${item.isCreator ? 'is-creator' : ''}`}>
                 <span className="wizard-summary-member-dot" />
-                <span>{item?.name || 'Пользователь'}</span>
+                <span>{item?.name || 'Пользователь'}{item.isCreator ? ' (вы)' : ''}</span>
               </div>
             ))}
           </div>
@@ -432,7 +474,7 @@ function CreateGroupModal({ token, onClose, onGroupCreated }) {
             <div className="wizard-footer-info">
               {step === 1 ? 'Сначала укажите название группы' : null}
               {step === 2 ? `Выбрано участников: ${selectedUsers.length}` : null}
-              {step === 3 ? 'Проверьте данные перед созданием' : null}
+              {step === 3 ? 'Проверьте данные' : null}
             </div>
             {step > 1 ? (
               <button type="button" className="btn btn-secondary wizard-footer-btn" onClick={handleBack}>
@@ -447,11 +489,11 @@ function CreateGroupModal({ token, onClose, onGroupCreated }) {
             ) : (
               <button
                 type="button"
-                className="btn btn-primary wizard-footer-btn"
+                className="btn btn-primary wizard-footer-btn is-primary-action"
                 onClick={handleCreateGroup}
                 disabled={!canCreate}
               >
-                {isCreating ? 'Создаем...' : `Создать группу (${selectedUsers.length})`}
+                {isCreating ? 'Создаем...' : `Создать группу (${totalParticipantsCount})`}
               </button>
             )}
           </div>
@@ -991,12 +1033,22 @@ function CreateGroupModal({ token, onClose, onGroupCreated }) {
             font-size: 14px;
           }
 
+          .wizard-summary-member.is-creator {
+            color: #dbeafe;
+            font-weight: 700;
+          }
+
           .wizard-summary-member-dot {
             width: 7px;
             height: 7px;
             border-radius: 50%;
             background: var(--accent);
             box-shadow: 0 0 0 4px rgba(79, 124, 255, 0.16);
+          }
+
+          .wizard-summary-member.is-creator .wizard-summary-member-dot {
+            background: #22c55e;
+            box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.18);
           }
 
           .group-wizard-error {
@@ -1024,19 +1076,45 @@ function CreateGroupModal({ token, onClose, onGroupCreated }) {
             display: inline-flex;
             gap: var(--space-10);
             align-items: center;
+            min-width: 0;
+            flex: 1;
+            justify-content: flex-end;
           }
 
           .wizard-footer-info {
-            margin-right: var(--space-4);
+            margin-right: auto;
             color: var(--text-muted);
             font-size: 12px;
             font-weight: 600;
+            min-width: 0;
+            max-width: 240px;
             white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
           }
 
           .wizard-footer-btn {
-            min-width: 156px;
+            min-width: 132px;
             border-radius: 12px;
+            flex-shrink: 0;
+          }
+
+          .wizard-footer-btn.is-primary-action {
+            min-width: 176px;
+          }
+
+          @media (max-width: 980px) {
+            .wizard-footer-info {
+              display: none;
+            }
+
+            .wizard-footer-btn {
+              min-width: 120px;
+            }
+
+            .wizard-footer-btn.is-primary-action {
+              min-width: 154px;
+            }
           }
 
           @keyframes wizardSlideInFromRight {
