@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { API_URL } from '@/config';
 import { resolveAssetUrl } from '@/shared/lib/resolveAssetUrl';
-import { EconomyStoreProvider } from '@/economy/EconomyStore';
+import { EconomyStoreProvider } from '@/domains/hrum/store/EconomyStore';
 import HrumOverview from '@/domains/profile/components/HrumOverview';
 import TasksPanel from '@/domains/profile/components/TasksPanel';
 import ShopPanel from '@/domains/profile/components/ShopPanel';
@@ -314,4 +314,3 @@ export default function ProfilePage({ token, onClose, onLogout }) {
     </EconomyStoreProvider>
   );
 }
-

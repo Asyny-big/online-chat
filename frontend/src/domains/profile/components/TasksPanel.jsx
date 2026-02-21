@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo } from 'react';
-import { useTasks, useTransactions, useWallet } from '@/economy/EconomyStore';
-import { HrumIcon } from '@/economy/hrumIcon';
+import { useTasks, useTransactions, useWallet } from '@/domains/hrum/store/EconomyStore';
+import { HrumIcon } from '@/domains/hrum/components/HrumIcon';
 import { useHrumToast } from '@/components/HrumToast';
 
 function clamp01(n) {

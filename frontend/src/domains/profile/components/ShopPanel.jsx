@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo } from 'react';
-import { useShop, useTransactions, useWallet } from '@/economy/EconomyStore';
-import { HrumIcon } from '@/economy/hrumIcon';
+import { useShop, useTransactions, useWallet } from '@/domains/hrum/store/EconomyStore';
+import { HrumIcon } from '@/domains/hrum/components/HrumIcon';
 import { useHrumToast } from '@/components/HrumToast';
 
 function ItemSkeleton() {

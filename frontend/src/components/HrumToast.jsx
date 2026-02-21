@@ -1,5 +1,5 @@
-import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
-import { HrumIcon } from '@/economy/hrumIcon';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { HrumIcon } from '@/domains/hrum/components/HrumIcon';
 
 const HrumToastContext = createContext(null);
 
@@ -16,6 +16,7 @@ export function HrumToastProvider({ children }) {
   const hideTimerRef = useRef(null);
   const lastMergedAtRef = useRef(0);
   const seenTxIdsRef = useRef(new Set());
+  const seenTxQueueRef = useRef([]);
 
   const hide = useCallback(() => {
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
@@ -52,6 +53,12 @@ export function HrumToastProvider({ children }) {
         const id = String(txId);
         if (seenTxIdsRef.current.has(id)) return;
         seenTxIdsRef.current.add(id);
+        seenTxQueueRef.current.push(id);
+        // Keep dedup cache bounded for long-lived sessions.
+        if (seenTxQueueRef.current.length > 500) {
+          const stale = seenTxQueueRef.current.shift();
+          if (stale) seenTxIdsRef.current.delete(stale);
+        }
       }
       show({ kind: 'hrum_earn', amount });
     },
@@ -71,6 +78,15 @@ export function HrumToastProvider({ children }) {
   }, [show]);
 
   const value = useMemo(() => ({ showEarn, showInfo, showError, hide }), [showEarn, showInfo, showError, hide]);
+
+  useEffect(() => {
+    return () => {
+      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = null;
+      seenTxIdsRef.current.clear();
+      seenTxQueueRef.current = [];
+    };
+  }, []);
 
   return (
     <HrumToastContext.Provider value={value}>

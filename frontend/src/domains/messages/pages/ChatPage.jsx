@@ -7,8 +7,10 @@ import ChatWindow from '@/components/ChatWindow';
 import CallModal from '@/components/CallModal';
 import GroupCallModalLiveKit from '@/components/GroupCallModalLiveKit';
 import { useHrumToast } from '@/components/HrumToast';
-import { getTransactions } from '@/economy/api';
+import { getTransactions } from '@/domains/hrum/api/economyApi';
 import { consumePendingPushAction, pushEvents } from '@/mobile/pushNotifications';
+
+const WALLET_UPDATE_EVENT = 'govchat:wallet-update';
 
 function ChatPageInner({ token, onLogout }) {
   const { showEarn } = useHrumToast();
@@ -32,6 +34,7 @@ function ChatPageInner({ token, onLogout }) {
   const [groupCallData, setGroupCallData] = useState(null);
 
   const socketRef = useRef(null);
+  const economyProbeTimersRef = useRef([]);
 
   // Refs для использования актуальных значений в обработчиках сокета
   const chatsRef = useRef(chats);
@@ -169,9 +172,17 @@ function ChatPageInner({ token, onLogout }) {
   );
 
   const economyProbeCallStart = useCallback(() => {
-    setTimeout(() => economyProbe('earn:call_start'), 800);
-    setTimeout(() => economyProbe('earn:call_start'), 2200);
+    const timerOne = setTimeout(() => economyProbe('earn:call_start'), 800);
+    const timerTwo = setTimeout(() => economyProbe('earn:call_start'), 2200);
+    economyProbeTimersRef.current.push(timerOne, timerTwo);
   }, [economyProbe]);
+
+  useEffect(() => {
+    return () => {
+      economyProbeTimersRef.current.forEach((timerId) => clearTimeout(timerId));
+      economyProbeTimersRef.current = [];
+    };
+  }, []);
 
   // Получение текущего пользователя
   useEffect(() => {
@@ -441,14 +452,39 @@ function ChatPageInner({ token, onLogout }) {
       }));
     });
 
+    socket.on('wallet:update', (payload) => {
+      const detail = payload && typeof payload === 'object' ? payload : {};
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent(WALLET_UPDATE_EVENT, { detail }));
+      }
+
+      const tx = detail.tx || detail.transaction || detail.txItem || null;
+      const txId = tx?.id || detail.txId || detail.eventId;
+      const rawDelta = detail.deltaHrum ?? tx?.deltaHrum;
+      const raw = String(rawDelta ?? '').trim();
+      if (!raw) return;
+
+      if (raw.startsWith('+')) {
+        const amount = raw.slice(1);
+        if (amount) showEarn({ amountHrum: amount, txId });
+      } else {
+        const parsed = Number(raw);
+        if (Number.isFinite(parsed) && parsed > 0) {
+          showEarn({ amountHrum: String(parsed), txId });
+        }
+      }
+    });
+
     socket.on('disconnect', () => {
       console.log('Socket.IO отключен');
     });
 
     return () => {
+      economyProbeTimersRef.current.forEach((timerId) => clearTimeout(timerId));
+      economyProbeTimersRef.current = [];
       socket.disconnect();
     };
-  }, [token]); // ТОЛЬКО token - сокет создаётся один раз
+  }, [token, showEarn]); // showEarn stable callback from provider
 
   useEffect(() => {
     if (!token) return;

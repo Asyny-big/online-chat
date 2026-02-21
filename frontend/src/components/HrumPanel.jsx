@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { buyShopItem, claimDailyLogin, getShopItems, getTransactions, getWallet } from '@/economy/api';
-import { HrumIcon } from '@/economy/hrumIcon';
+import { buyShopItem, claimDailyLogin, getShopItems, getTransactions, getWallet } from '@/domains/hrum/api/economyApi';
+import { HrumIcon } from '@/domains/hrum/components/HrumIcon';
 import { useHrumToast } from './HrumToast';
 
 function formatTxDate(value) {

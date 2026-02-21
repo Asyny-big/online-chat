@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
-import { useWallet } from '@/economy/EconomyStore';
-import { HrumIcon } from '@/economy/hrumIcon';
+import { useWallet } from '@/domains/hrum/store/EconomyStore';
+import { HrumIcon } from '@/domains/hrum/components/HrumIcon';
 
 function SkeletonNumber() {
   return (
