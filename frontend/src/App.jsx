@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { API_URL } from './config';
 import ChatPage from './domains/messages/pages/ChatPage';
@@ -12,6 +12,7 @@ import { authStyles as styles } from './styles/authStyles';
 import AndroidAppDownloadModal from './components/AndroidAppDownloadModal';
 import AppShell from './app/AppShell';
 import RootProviders from './app/providers/RootProviders';
+import { initNotificationSound, playNotificationTone } from '@/shared/lib/playNotificationTone';
 
 const UNREAD_BADGES_REFRESH_EVENT = 'govchat:unread-badges-refresh';
 
@@ -42,6 +43,8 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [route, setRoute] = useState(normalizeRoute(window.location.hash));
   const [navBadgeCounts, setNavBadgeCounts] = useState({ notifications: 0, messages: 0 });
+  const prevUnreadRef = useRef({ notifications: 0, messages: 0 });
+  const unreadInitializedRef = useRef(false);
 
   useEffect(() => {
     if (token) localStorage.setItem('token', token);
@@ -60,8 +63,12 @@ function App() {
   useEffect(() => {
     if (!token) {
       setNavBadgeCounts({ notifications: 0, messages: 0 });
+      prevUnreadRef.current = { notifications: 0, messages: 0 };
+      unreadInitializedRef.current = false;
       return undefined;
     }
+
+    initNotificationSound();
 
     let cancelled = false;
 
@@ -92,10 +99,24 @@ function App() {
           0
         );
 
-        setNavBadgeCounts({
+        const nextCounts = {
           notifications: unreadNotifications,
           messages: unreadMessages
-        });
+        };
+
+        setNavBadgeCounts(nextCounts);
+
+        if (unreadInitializedRef.current) {
+          const hasNewNotifications = nextCounts.notifications > prevUnreadRef.current.notifications;
+          const hasNewMessages = nextCounts.messages > prevUnreadRef.current.messages;
+          if (hasNewNotifications || hasNewMessages) {
+            playNotificationTone();
+          }
+        } else {
+          unreadInitializedRef.current = true;
+        }
+
+        prevUnreadRef.current = nextCounts;
       } catch (_) {
         // Keep previous badge values if one of sources is temporarily unavailable.
       }
@@ -149,6 +170,8 @@ function App() {
     setPassword('');
     setName('');
     setNavBadgeCounts({ notifications: 0, messages: 0 });
+    prevUnreadRef.current = { notifications: 0, messages: 0 };
+    unreadInitializedRef.current = false;
   };
 
   const navigateTo = (hash) => {
