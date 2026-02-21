@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import axios from 'axios';
 import MessageInput from './MessageInput';
 import { API_URL } from '@/config';
+import { DuckIcon, MessageIcon, PlusIcon, SearchIcon } from '@/shared/ui/Icons';
 
 function ChatWindow({
   token,
@@ -64,11 +65,192 @@ function ChatWindow({
   if (!chat) {
     return (
       <div className="chat-window-empty">
-        <div className="empty-icon">💬</div>
-        <div className="empty-text">Выберите чат</div>
-        <div className="empty-hint">
-          Или найдите пользователя по номеру телефона
+        <div className="empty-surface-glow" />
+        <div className="empty-card">
+          <div className="empty-badge">
+            <DuckIcon size={14} />
+            <span>GovChat Messages</span>
+          </div>
+
+          <div className="empty-icon-wrap" aria-hidden="true">
+            <MessageIcon size={30} />
+          </div>
+
+          <h2 className="empty-title">Выберите чат</h2>
+          <p className="empty-hint">
+            Откройте диалог слева или найдите пользователя по номеру телефона.
+          </p>
+
+          <div className="empty-actions">
+            <button
+              type="button"
+              className="empty-btn empty-btn-primary"
+              onClick={() => { window.location.hash = '#/search'; }}
+            >
+              <SearchIcon size={15} />
+              <span>Найти пользователя</span>
+            </button>
+          </div>
+
+          <div className="empty-tips">
+            <div className="empty-tip">
+              <SearchIcon size={14} />
+              <span>Поиск доступен по номеру телефона</span>
+            </div>
+            <div className="empty-tip">
+              <PlusIcon size={14} />
+              <span>Кнопка «+» в списке чатов создаёт группу</span>
+            </div>
+          </div>
         </div>
+
+        <style>{`
+          .chat-window-empty {
+            position: relative;
+            flex: 1;
+            display: grid;
+            place-items: center;
+            padding: 24px;
+            background:
+              radial-gradient(circle at 14% 12%, rgba(59, 130, 246, 0.16), transparent 36%),
+              radial-gradient(circle at 84% 18%, rgba(79, 70, 229, 0.16), transparent 34%),
+              var(--bg-primary);
+            overflow: hidden;
+          }
+
+          .empty-surface-glow {
+            position: absolute;
+            width: min(760px, 88vw);
+            height: 320px;
+            border-radius: 999px;
+            background: radial-gradient(circle, rgba(59, 130, 246, 0.2), transparent 68%);
+            filter: blur(28px);
+            top: -92px;
+            left: 50%;
+            transform: translateX(-50%);
+            pointer-events: none;
+          }
+
+          .empty-card {
+            position: relative;
+            z-index: 2;
+            width: min(560px, 94vw);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-xl);
+            padding: 24px;
+            background:
+              linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(15, 23, 42, 0.72)),
+              var(--bg-card);
+            box-shadow: var(--shadow-xl);
+            text-align: center;
+          }
+
+          .empty-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 10px;
+            border-radius: 999px;
+            border: 1px solid rgba(96, 165, 250, 0.35);
+            background: rgba(37, 99, 235, 0.2);
+            color: #bfdbfe;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+          }
+
+          .empty-icon-wrap {
+            margin: 18px auto 14px;
+            width: 74px;
+            height: 74px;
+            border-radius: 22px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: #dbeafe;
+            background: linear-gradient(145deg, rgba(59, 130, 246, 0.85), rgba(79, 70, 229, 0.9));
+            box-shadow: 0 12px 26px rgba(37, 99, 235, 0.34);
+          }
+
+          .empty-title {
+            margin: 0;
+            font-size: 30px;
+            line-height: 1.15;
+            color: var(--text-primary);
+            letter-spacing: -0.01em;
+          }
+
+          .empty-hint {
+            margin: 10px auto 0;
+            max-width: 420px;
+            font-size: 15px;
+            line-height: 1.55;
+            color: var(--text-secondary);
+          }
+
+          .empty-actions {
+            margin-top: 20px;
+            display: flex;
+            justify-content: center;
+          }
+
+          .empty-btn {
+            border-radius: 12px;
+            border: 1px solid transparent;
+            padding: 11px 16px;
+            font-size: 14px;
+            font-weight: 700;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: var(--transition-normal);
+          }
+
+          .empty-btn-primary {
+            color: #eff6ff;
+            background: linear-gradient(145deg, var(--accent), #4f46e5);
+            border-color: rgba(96, 165, 250, 0.45);
+            box-shadow: 0 12px 24px rgba(37, 99, 235, 0.28);
+          }
+
+          .empty-btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 16px 30px rgba(37, 99, 235, 0.35);
+          }
+
+          .empty-tips {
+            margin-top: 18px;
+            display: grid;
+            gap: 8px;
+          }
+
+          .empty-tip {
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
+            background: rgba(15, 23, 42, 0.7);
+            padding: 10px 12px;
+            color: var(--text-secondary);
+            font-size: 13px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+          }
+
+          @media (max-width: 768px) {
+            .chat-window-empty {
+              padding: 16px;
+            }
+
+            .empty-card {
+              padding: 18px;
+            }
+
+            .empty-title {
+              font-size: 24px;
+            }
+          }
+        `}</style>
       </div>
     );
   }
@@ -295,20 +477,6 @@ function ChatWindow({
             min-height: 0;
             position: relative;
         }
-
-        .chat-window-empty {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            background-color: var(--bg-primary);
-            color: var(--text-muted);
-        }
-
-        .empty-icon { font-size: 48px; margin-bottom: 16px; opacity: 0.5; }
-        .empty-text { font-size: 20px; font-weight: 700; color: var(--text-secondary); margin-bottom: 8px; }
-        .empty-hint { font-size: 14px; color: var(--text-muted); }
 
         /* Banners */
         .incoming-call-banner, .incoming-group-call-banner {
