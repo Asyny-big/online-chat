@@ -1,8 +1,26 @@
-﻿import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { API_URL } from '@/config';
 
 const DEFAULT_MIN_LEN = 9;
 const DEFAULT_DEBOUNCE_MS = 400;
+
+function sanitizeLookupPhoneInput(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+
+  const allowed = raw.replace(/[^\d+]/g, '');
+  if (!allowed) return '';
+
+  if (allowed.startsWith('+')) {
+    return `+${allowed.slice(1).replace(/\+/g, '')}`;
+  }
+
+  return allowed.replace(/\+/g, '');
+}
+
+function countDigits(value) {
+  return String(value || '').replace(/\D/g, '').length;
+}
 
 export function usePhoneUserLookup({ token, minLen = DEFAULT_MIN_LEN, debounceMs = DEFAULT_DEBOUNCE_MS }) {
   const [phone, setPhone] = useState('');
@@ -15,17 +33,16 @@ export function usePhoneUserLookup({ token, minLen = DEFAULT_MIN_LEN, debounceMs
 
   useEffect(() => {
     const current = phone;
+    const queryPhone = sanitizeLookupPhoneInput(current);
 
-    // РЎР±СЂРѕСЃ РґР»СЏ РїСѓСЃС‚РѕРіРѕ РІРІРѕРґР°.
-    if (!current) {
+    if (!queryPhone) {
       setStatus('idle');
       setUser(null);
       setError('');
       return undefined;
     }
 
-    // РџРѕСЂРѕРі: РґРѕ minLen РЅРµ РґРµР»Р°РµРј Р·Р°РїСЂРѕСЃС‹ Рё РЅРµ РїРѕРєР°Р·С‹РІР°РµРј РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№.
-    if (current.length < minLen) {
+    if (countDigits(queryPhone) < minLen) {
       if (abortRef.current) abortRef.current.abort();
       setStatus('too_short');
       setUser(null);
@@ -39,7 +56,7 @@ export function usePhoneUserLookup({ token, minLen = DEFAULT_MIN_LEN, debounceMs
       if (!token) {
         setStatus('error');
         setUser(null);
-        setError('РќРµС‚ С‚РѕРєРµРЅР° Р°РІС‚РѕСЂРёР·Р°С†РёРё');
+        setError('Нет токена авторизации');
         return;
       }
 
@@ -52,31 +69,36 @@ export function usePhoneUserLookup({ token, minLen = DEFAULT_MIN_LEN, debounceMs
       setUser(null);
 
       try {
-        const res = await fetch(`${API_URL}/users/search?phone=${encodeURIComponent(current)}`, {
+        const res = await fetch(`${API_URL}/users/search?phone=${encodeURIComponent(queryPhone)}`, {
           method: 'GET',
           headers: { Authorization: `Bearer ${token}` },
           signal: controller.signal,
         });
 
-        // Р•СЃР»Рё СЌС‚Рѕ СѓР¶Рµ РЅРµ РїРѕСЃР»РµРґРЅРёР№ Р·Р°РїСЂРѕСЃ вЂ” РёРіРЅРѕСЂРёСЂСѓРµРј СЂРµР·СѓР»СЊС‚Р°С‚.
         if (requestSeqRef.current !== seq) return;
 
         if (res.status === 429) {
           setStatus('rate_limited');
-          setError('РЎР»РёС€РєРѕРј РјРЅРѕРіРѕ Р·Р°РїСЂРѕСЃРѕРІ. РџРѕРїСЂРѕР±СѓР№С‚Рµ РїРѕР·Р¶Рµ.');
+          setError('Слишком много запросов. Попробуйте позже.');
           return;
         }
 
         if (res.status === 400) {
           const data = await res.json().catch(() => ({}));
-          setStatus('error');
-          setError(data?.error || 'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ РЅРѕРјРµСЂ С‚РµР»РµС„РѕРЅР°');
+          const message = String(data?.error || 'Некорректный номер телефона');
+          if (/too short/i.test(message)) {
+            setStatus('too_short');
+            setError('');
+          } else {
+            setStatus('error');
+            setError(message);
+          }
           return;
         }
 
         if (!res.ok) {
           setStatus('error');
-          setError(`РћС€РёР±РєР° РїРѕРёСЃРєР°: HTTP ${res.status}`);
+          setError(`Ошибка поиска: HTTP ${res.status}`);
           return;
         }
 
@@ -93,7 +115,7 @@ export function usePhoneUserLookup({ token, minLen = DEFAULT_MIN_LEN, debounceMs
         if (e?.name === 'AbortError') return;
         if (requestSeqRef.current !== seq) return;
         setStatus('error');
-        setError('РћС€РёР±РєР° СЃРµС‚Рё');
+        setError('Ошибка сети');
       }
     }, debounceMs);
 
@@ -110,8 +132,3 @@ export function usePhoneUserLookup({ token, minLen = DEFAULT_MIN_LEN, debounceMs
 
   return { phone, setPhone, status, user, error };
 }
-
-
-
-
-

@@ -86,11 +86,8 @@ router.get('/contacts', async (req, res) => {
   }
 });
 
-// Поиск пользователя по номеру телефона (ТОЧНОЕ совпадение, single-result).
-// Контракт:
-// - phone: строка в едином формате (без нормализации на backend)
-// - длина < 9 -> 400
-// - ответ: { _id, name, phone, avatarUrl } | null
+// Поиск пользователя по номеру телефона (single-result).
+// Принимаем распространенные форматы: +7/7/8, пробелы, скобки и дефисы.
 router.get('/search', async (req, res) => {
   try {
     const { phone } = req.query;
@@ -99,12 +96,15 @@ router.get('/search', async (req, res) => {
       return res.status(400).json({ error: 'phone is required' });
     }
 
+    const rawPhone = phone.trim();
+    const digitCount = rawPhone.replace(/\D/g, '').length;
+
     // Порог защиты от перебора/частичных запросов.
-    if (phone.length < 9) {
+    if (digitCount < 9) {
       return res.status(400).json({ error: 'phone is too short' });
     }
 
-    if (!isValidPhoneExact(phone)) {
+    if (!isValidPhoneExact(rawPhone)) {
       return res.status(400).json({ error: 'invalid phone format' });
     }
 
@@ -114,20 +114,10 @@ router.get('/search', async (req, res) => {
       return res.status(429).json({ error: 'too many requests' });
     }
 
-    // Точное совпадение по строке. На практике в базе могут быть номера как с '+', так и без него.
-    // Поддерживаем оба варианта без дополнительных запросов от клиента.
-    const candidates = new Set([phone]);
-    if (phone.startsWith('+')) {
-      candidates.add(phone.slice(1));
-    } else {
-      candidates.add('+' + phone);
-    }
-
-    let result = null;
-    for (const candidate of candidates) {
-      result = await findUserByExactPhone({ phone: candidate, excludeUserId: req.userId });
-      if (result) break;
-    }
+    const result = await findUserByExactPhone({
+      phone: rawPhone,
+      excludeUserId: req.userId
+    });
 
     return res.json(result);
   } catch (error) {
