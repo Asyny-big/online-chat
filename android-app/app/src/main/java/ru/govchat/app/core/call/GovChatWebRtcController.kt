@@ -2,6 +2,8 @@ package ru.govchat.app.core.call
 
 import android.content.Context
 import android.content.Intent
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.media.projection.MediaProjection
 import android.os.Looper
@@ -94,6 +96,8 @@ class GovChatWebRtcController(
     private var previousAudioMode: Int? = null
     private var previousSpeakerphoneState: Boolean? = null
     private var previousMicrophoneMuteState: Boolean? = null
+    private var previousBluetoothScoState: Boolean? = null
+    private var audioDeviceCallback: AudioDeviceCallback? = null
 
     private val pendingRemoteCandidates = mutableListOf<IceCandidate>()
     private val pendingOutgoingCandidates = mutableListOf<CallSignalPayload.IceCandidate>()
@@ -1015,22 +1019,116 @@ class GovChatWebRtcController(
             previousAudioMode = manager.mode
             previousSpeakerphoneState = manager.isSpeakerphoneOn
             previousMicrophoneMuteState = manager.isMicrophoneMute
+            previousBluetoothScoState = manager.isBluetoothScoOn
         }
 
         manager.mode = AudioManager.MODE_IN_COMMUNICATION
-        manager.isSpeakerphoneOn = true
         manager.isMicrophoneMute = false
+        applyPreferredAudioRoute(manager)
+        registerAudioRouteListener(manager)
     }
 
     private fun restoreAudioForCall() {
         ensureMainThread("restoreAudioForCall")
         val manager = audioManager ?: return
+        unregisterAudioRouteListener(manager)
+        previousBluetoothScoState?.let { wasScoEnabled ->
+            if (wasScoEnabled) {
+                runCatching { manager.startBluetoothSco() }
+                runCatching { manager.isBluetoothScoOn = true }
+            } else {
+                runCatching { manager.stopBluetoothSco() }
+                runCatching { manager.isBluetoothScoOn = false }
+            }
+        }
         previousAudioMode?.let { manager.mode = it }
         previousSpeakerphoneState?.let { manager.isSpeakerphoneOn = it }
         previousMicrophoneMuteState?.let { manager.isMicrophoneMute = it }
         previousAudioMode = null
         previousSpeakerphoneState = null
         previousMicrophoneMuteState = null
+        previousBluetoothScoState = null
+    }
+
+    private fun registerAudioRouteListener(manager: AudioManager) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+        if (audioDeviceCallback != null) return
+        val callback = object : AudioDeviceCallback() {
+            override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) {
+                mainHandler.post { applyPreferredAudioRoute(manager) }
+            }
+
+            override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) {
+                mainHandler.post { applyPreferredAudioRoute(manager) }
+            }
+        }
+        audioDeviceCallback = callback
+        manager.registerAudioDeviceCallback(callback, mainHandler)
+    }
+
+    private fun unregisterAudioRouteListener(manager: AudioManager) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+        val callback = audioDeviceCallback ?: return
+        runCatching { manager.unregisterAudioDeviceCallback(callback) }
+        audioDeviceCallback = null
+    }
+
+    private fun applyPreferredAudioRoute(manager: AudioManager) {
+        val hasBluetoothAudio = hasActiveBluetoothAudioDevice(manager)
+        val hasWiredAudio = hasActiveWiredAudioDevice(manager)
+        when {
+            hasBluetoothAudio -> {
+                manager.isSpeakerphoneOn = false
+                runCatching { manager.startBluetoothSco() }
+                runCatching { manager.isBluetoothScoOn = true }
+            }
+
+            hasWiredAudio -> {
+                manager.isSpeakerphoneOn = false
+                runCatching { manager.stopBluetoothSco() }
+                runCatching { manager.isBluetoothScoOn = false }
+            }
+
+            else -> {
+                manager.isSpeakerphoneOn = true
+                runCatching { manager.stopBluetoothSco() }
+                runCatching { manager.isBluetoothScoOn = false }
+            }
+        }
+    }
+
+    private fun hasActiveBluetoothAudioDevice(manager: AudioManager): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val devices = manager.getDevices(AudioManager.GET_DEVICES_INPUTS or AudioManager.GET_DEVICES_OUTPUTS)
+            if (devices.any { device ->
+                    device.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                        device.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                        (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
+                            device.type == AudioDeviceInfo.TYPE_HEARING_AID) ||
+                        (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                            (device.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
+                                device.type == AudioDeviceInfo.TYPE_BLE_SPEAKER))
+                }) {
+                return true
+            }
+        }
+        return manager.isBluetoothScoOn || manager.isBluetoothA2dpOn
+    }
+
+    private fun hasActiveWiredAudioDevice(manager: AudioManager): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val devices = manager.getDevices(AudioManager.GET_DEVICES_INPUTS or AudioManager.GET_DEVICES_OUTPUTS)
+            if (devices.any { device ->
+                    device.type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                        device.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                        (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                            device.type == AudioDeviceInfo.TYPE_USB_HEADSET)
+                }) {
+                return true
+            }
+        }
+        @Suppress("DEPRECATION")
+        return manager.isWiredHeadsetOn
     }
 
     private fun WebRtcConfig.toIceServerList(): List<PeerConnection.IceServer> {

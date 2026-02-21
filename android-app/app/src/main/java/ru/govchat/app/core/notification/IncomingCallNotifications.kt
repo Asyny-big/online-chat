@@ -143,10 +143,24 @@ object IncomingCallNotifications {
         val manager = NotificationManagerCompat.from(context)
         if (!manager.areNotificationsEnabled()) return
         manager.notify(notificationId(callId), notification)
+        rememberCallId(context, callId)
     }
 
     fun cancel(context: Context, callId: String) {
         NotificationManagerCompat.from(context).cancel(notificationId(callId))
+        forgetCallId(context, callId)
+    }
+
+    fun cancelAll(context: Context) {
+        val manager = NotificationManagerCompat.from(context)
+        val trackedIds = readTrackedCallIds(context)
+        trackedIds.forEach { trackedCallId ->
+            manager.cancel(notificationId(trackedCallId))
+        }
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .remove(PREFS_KEY_TRACKED_CALL_IDS)
+            .apply()
     }
 
     private fun notificationId(callId: String): Int = CALL_NOTIFICATION_BASE_ID + callId.hashCode()
@@ -155,8 +169,37 @@ object IncomingCallNotifications {
         return (callId + "|" + action).hashCode()
     }
 
+    private fun rememberCallId(context: Context, callId: String) {
+        if (callId.isBlank()) return
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val stored = prefs.getStringSet(PREFS_KEY_TRACKED_CALL_IDS, emptySet()).orEmpty().toMutableSet()
+        if (!stored.add(callId)) return
+        prefs.edit().putStringSet(PREFS_KEY_TRACKED_CALL_IDS, stored).apply()
+    }
+
+    private fun forgetCallId(context: Context, callId: String) {
+        if (callId.isBlank()) return
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val stored = prefs.getStringSet(PREFS_KEY_TRACKED_CALL_IDS, emptySet()).orEmpty().toMutableSet()
+        if (!stored.remove(callId)) return
+        if (stored.isEmpty()) {
+            prefs.edit().remove(PREFS_KEY_TRACKED_CALL_IDS).apply()
+        } else {
+            prefs.edit().putStringSet(PREFS_KEY_TRACKED_CALL_IDS, stored).apply()
+        }
+    }
+
+    private fun readTrackedCallIds(context: Context): Set<String> {
+        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getStringSet(PREFS_KEY_TRACKED_CALL_IDS, emptySet())
+            .orEmpty()
+            .toSet()
+    }
+
     const val EXTRA_CHAT_ID = NotificationIntents.EXTRA_CHAT_ID
     const val EXTRA_CALL_ID = NotificationIntents.EXTRA_CALL_ID
     private const val CALL_NOTIFICATION_BASE_ID = 30_000
     private const val INCOMING_CALL_TIMEOUT_MS = 60_000L
+    private const val PREFS_NAME = "govchat_incoming_call_notifications"
+    private const val PREFS_KEY_TRACKED_CALL_IDS = "tracked_call_ids"
 }

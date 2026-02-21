@@ -56,7 +56,8 @@ data class ActiveCallUi(
     val chatName: String,
     val type: String,
     val isGroup: Boolean,
-    val phase: ActiveCallPhase
+    val phase: ActiveCallPhase,
+    val startedAtMillis: Long
 )
 
 data class ExistingGroupCallPromptUi(

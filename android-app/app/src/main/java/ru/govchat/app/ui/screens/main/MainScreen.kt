@@ -3,10 +3,12 @@
 import android.graphics.BitmapFactory
 import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -201,6 +203,7 @@ fun MainScreen(
     onRefreshProfile: () -> Unit
 ) {
     val context = LocalContext.current
+    val activity = remember(context) { context.findActivity() }
     val permissionFlow = rememberGovChatPermissionFlow()
     val downloader = remember(context.applicationContext) {
         GovChatAttachmentDownloader(context.applicationContext)
@@ -217,6 +220,15 @@ fun MainScreen(
     }
 
     var permissionPrompt by remember { mutableStateOf<PermissionPrompt?>(null) }
+
+    DisposableEffect(activity, state.activeCall?.callId) {
+        if (state.activeCall != null) {
+            activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        onDispose {
+            activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
 
     val requestPermission: (GovChatPermissionFeature, () -> Unit) -> Unit = { feature, onGranted ->
         permissionFlow.request(feature) { result ->
@@ -357,6 +369,7 @@ fun MainScreen(
             CallForegroundService.stop(context)
             return@LaunchedEffect
         }
+        IncomingCallNotifications.cancelAll(context)
         IncomingCallNotifications.cancel(context, active.callId)
         // On Android 14+ (targetSdk 34+), foreground service with microphone type
         // requires RECORD_AUDIO runtime permission to be granted.
@@ -2508,7 +2521,7 @@ private fun PipCallContent(
                 track = compactTrack.track,
                 webRtcEglContext = uiState.eglContext,
                 liveKitRoom = uiState.liveKitRoom,
-                mirror = compactTrack.isLocal,
+                mirror = shouldMirrorLocalVideo(isLocal = compactTrack.isLocal, uiState = uiState),
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -2528,6 +2541,15 @@ private data class CompactCallTrack(
     val track: CallVideoTrack,
     val isLocal: Boolean
 )
+
+private fun shouldMirrorLocalVideo(
+    isLocal: Boolean,
+    uiState: CallUiState
+): Boolean {
+    return isLocal &&
+        uiState.controls.isUsingFrontCamera &&
+        !uiState.controls.isScreenSharing
+}
 
 private fun resolveCompactCallTrack(uiState: CallUiState): CompactCallTrack? {
     val remoteTrack = uiState.remoteVideoTracks.firstOrNull() ?: uiState.remoteVideoTrack
@@ -2699,13 +2721,14 @@ private fun ActiveCallOverlay(
     onSwitchCamera: () -> Unit,
     onToggleScreenShare: () -> Unit
 ) {
-    val elapsedSeconds by produceState(initialValue = 0, key1 = call.callId) {
-        value = 0
+    val nowMillis by produceState(initialValue = System.currentTimeMillis(), key1 = call.callId) {
+        value = System.currentTimeMillis()
         while (true) {
             delay(1000)
-            value += 1
+            value = System.currentTimeMillis()
         }
     }
+    val elapsedSeconds = ((nowMillis - call.startedAtMillis).coerceAtLeast(0L) / 1000L).toInt()
 
     val phaseLabel = rememberCallPhaseLabel(
         call = call,
@@ -2810,7 +2833,7 @@ private fun ActiveCallOverlay(
                     track = mainVideoItem.track,
                     webRtcEglContext = uiState.eglContext,
                     liveKitRoom = uiState.liveKitRoom,
-                    mirror = mainVideoItem.isLocal,
+                    mirror = shouldMirrorLocalVideo(isLocal = mainVideoItem.isLocal, uiState = uiState),
                     modifier = Modifier.fillMaxSize()
                 )
             } else if (call.type == "video" && mainVideoItem != null) {
@@ -2837,7 +2860,7 @@ private fun ActiveCallOverlay(
                     track = uiState.localVideoTrack,
                     webRtcEglContext = uiState.eglContext,
                     liveKitRoom = uiState.liveKitRoom,
-                    mirror = true,
+                    mirror = shouldMirrorLocalVideo(isLocal = true, uiState = uiState),
                     zOrderMediaOverlay = true,
                     modifier = Modifier
                         .offset { pipOffset }
@@ -2901,7 +2924,7 @@ private fun ActiveCallOverlay(
                                         track = item.track,
                                         webRtcEglContext = uiState.eglContext,
                                         liveKitRoom = uiState.liveKitRoom,
-                                        mirror = item.isLocal,
+                                        mirror = shouldMirrorLocalVideo(isLocal = item.isLocal, uiState = uiState),
                                         zOrderMediaOverlay = true,
                                         modifier = Modifier.fillMaxSize()
                                     )
@@ -3097,7 +3120,7 @@ private fun MinimizedCallWindow(
                         track = compactTrack.track,
                         webRtcEglContext = uiState.eglContext,
                         liveKitRoom = uiState.liveKitRoom,
-                        mirror = compactTrack.isLocal,
+                        mirror = shouldMirrorLocalVideo(isLocal = compactTrack.isLocal, uiState = uiState),
                         modifier = Modifier.fillMaxSize()
                     )
                 }
@@ -3986,6 +4009,14 @@ private data class PermissionPrompt(
 
 private const val INITIAL_PERMISSION_PREFS_NAME = "govchat_permission_prefs"
 private const val INITIAL_PERMISSION_PREFS_KEY = "initial_runtime_permissions_requested_v1"
+
+private tailrec fun Context.findActivity(): Activity? {
+    return when (this) {
+        is Activity -> this
+        is ContextWrapper -> baseContext.findActivity()
+        else -> null
+    }
+}
 
 private fun resolveMediaUrl(rawUrl: String?): String? {
     if (rawUrl.isNullOrBlank()) return null

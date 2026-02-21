@@ -345,7 +345,8 @@ class MainViewModel(
                             chatName = chat.title,
                             type = type,
                             isGroup = false,
-                            phase = ActiveCallPhase.Outgoing
+                            phase = ActiveCallPhase.Outgoing,
+                            startedAtMillis = System.currentTimeMillis()
                         )
                     )
                 }
@@ -503,6 +504,7 @@ class MainViewModel(
 
             val callId = command.callId.orEmpty()
             if (callId.isNotBlank()) {
+                IncomingCallNotifications.cancelAll(applicationContext)
                 IncomingCallNotifications.cancel(applicationContext, callId)
             }
 
@@ -527,6 +529,7 @@ class MainViewModel(
     fun acceptIncomingCall(fromNotification: Boolean = false) {
         val incoming = mutableState.value.incomingCall ?: return
         if (mutableState.value.isCallActionInProgress) return
+        val callStartedAtMillis = System.currentTimeMillis()
 
         viewModelScope.launch {
             if (fromNotification) {
@@ -561,7 +564,8 @@ class MainViewModel(
                             chatName = incoming.chatName,
                             type = incoming.type,
                             isGroup = true,
-                            phase = ActiveCallPhase.Connecting
+                            phase = ActiveCallPhase.Connecting,
+                            startedAtMillis = callStartedAtMillis
                         )
                     )
                 }
@@ -604,7 +608,8 @@ class MainViewModel(
                             chatName = incoming.chatName,
                             type = incoming.type,
                             isGroup = false,
-                            phase = ActiveCallPhase.Connecting
+                            phase = ActiveCallPhase.Connecting,
+                            startedAtMillis = callStartedAtMillis
                         )
                     )
                 }
@@ -614,6 +619,7 @@ class MainViewModel(
             }
 
             result.onSuccess {
+                IncomingCallNotifications.cancelAll(applicationContext)
                 mutableState.update {
                     it.copy(
                         isCallActionInProgress = false,
@@ -624,7 +630,8 @@ class MainViewModel(
                             chatName = incoming.chatName,
                             type = incoming.type,
                             isGroup = incoming.isGroup,
-                            phase = if (incoming.isGroup) ActiveCallPhase.Active else ActiveCallPhase.Connecting
+                            phase = if (incoming.isGroup) ActiveCallPhase.Active else ActiveCallPhase.Connecting,
+                            startedAtMillis = callStartedAtMillis
                         )
                     )
                 }
@@ -658,6 +665,7 @@ class MainViewModel(
             if (!incoming.isGroup) {
                 declineCallUseCase(callId = incoming.callId)
             }
+            IncomingCallNotifications.cancelAll(applicationContext)
             IncomingCallNotifications.cancel(applicationContext, incoming.callId)
             mutableState.update { it.copy(incomingCall = null, isCallActionInProgress = false) }
         }
@@ -1055,7 +1063,8 @@ class MainViewModel(
                     chatName = chatName,
                     type = callType,
                     isGroup = true,
-                    phase = ActiveCallPhase.Active
+                    phase = ActiveCallPhase.Active,
+                    startedAtMillis = System.currentTimeMillis()
                 )
             )
         }
