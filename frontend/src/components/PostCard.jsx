@@ -1,4 +1,6 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import axios from 'axios';
+import { API_URL } from '@/config';
 import { resolveAssetUrl } from '@/shared/lib/resolveAssetUrl';
 
 function formatTime(value) {
@@ -52,7 +54,7 @@ function MediaBlock({ media }) {
   );
 }
 
-export default function PostCard({ item, onOpenComments }) {
+export default function PostCard({ item, token, onOpenComments, onLikeSuccess }) {
   const post = item?.post || item || {};
   const author = useMemo(() => {
     const raw = post?.authorId;
@@ -64,6 +66,41 @@ export default function PostCard({ item, onOpenComments }) {
   const likes = Number(post?.stats?.likes || 0);
   const comments = Number(post?.stats?.comments || 0);
 
+  const [isLiking, setIsLiking] = useState(false);
+  const [liked, setLiked] = useState(null);
+  const [likeDelta, setLikeDelta] = useState(0);
+
+  useEffect(() => {
+    setIsLiking(false);
+    setLiked(null);
+    setLikeDelta(0);
+  }, [post?._id, likes]);
+
+  const handleLike = async () => {
+    const targetId = post?._id;
+    if (!targetId || !token || isLiking) return;
+
+    setIsLiking(true);
+    try {
+      const res = await axios.post(
+        `${API_URL}/social/reactions/toggle`,
+        { targetType: 'post', targetId, reaction: 'like' },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      const nextActive = Boolean(res.data?.active);
+      setLiked(nextActive);
+      setLikeDelta(nextActive ? 1 : -1);
+      await onLikeSuccess?.();
+    } catch (_) {
+      // Feed-level error handling is enough, do not interrupt UX with alerts here.
+    } finally {
+      setIsLiking(false);
+    }
+  };
+
+  const displayedLikes = Math.max(0, likes + likeDelta);
+
   return (
     <article className="post-card">
       <div className="post-header">
@@ -71,14 +108,14 @@ export default function PostCard({ item, onOpenComments }) {
           {avatar ? (
             <img src={avatar} alt={author?.name} className="avatar-img" />
           ) : (
-            <div className="avatar-fallback">{author?.name?.[0] || '👤'}</div>
+            <div className="avatar-fallback">{author?.name?.[0] || 'U'}</div>
           )}
         </div>
         <div className="post-meta">
           <div className="author-name">{author?.name || 'Пользователь'}</div>
           <div className="post-time">{formatTime(post?.createdAt || item?.createdAt)}</div>
         </div>
-        <button className="more-btn">•••</button>
+        <button type="button" className="more-btn" aria-label="More actions">...</button>
       </div>
 
       {post?.text ? <div className="post-text">{post.text}</div> : null}
@@ -86,176 +123,217 @@ export default function PostCard({ item, onOpenComments }) {
       <MediaBlock media={post?.media} />
 
       <div className="post-footer">
-        <button className="action-btn like-btn">
-          <span className="icon">❤️</span>
-          <span className="count">{likes > 0 ? likes : ''}</span>
+        <button
+          type="button"
+          className={`action-btn like-btn ${liked ? 'active' : ''}`}
+          onClick={handleLike}
+          disabled={isLiking}
+          aria-label="Like post"
+        >
+          <span className="icon">L</span>
+          <span className="count">{displayedLikes > 0 ? displayedLikes : ''}</span>
         </button>
 
         <button
+          type="button"
           className="action-btn comment-btn"
           onClick={() => onOpenComments?.(post?._id)}
+          aria-label="Open comments"
         >
-          <span className="icon">💬</span>
+          <span className="icon">C</span>
           <span className="count">{comments > 0 ? comments : ''}</span>
         </button>
 
-        <button className="action-btn share-btn">
-          <span className="icon">↗️</span>
+        <button type="button" className="action-btn share-btn" aria-label="Share post">
+          <span className="icon">S</span>
         </button>
       </div>
 
       <style>{`
         .post-card {
-            background-color: var(--bg-card);
-            border-radius: var(--radius-card);
-            padding: 16px;
-            border: 1px solid var(--border-light);
-            margin-bottom: 16px;
+          background:
+            radial-gradient(circle at top left, rgba(99, 102, 241, 0.08), transparent 55%),
+            var(--bg-card);
+          border-radius: var(--radius-lg);
+          padding: var(--space-16);
+          border: 1px solid var(--border-color);
+          box-shadow: var(--shadow-lg);
         }
 
         .post-header {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            margin-bottom: 12px;
+          display: flex;
+          align-items: center;
+          gap: var(--space-12);
+          margin-bottom: var(--space-12);
         }
 
         .avatar-wrap {
-            width: 44px;
-            height: 44px;
-            flex-shrink: 0;
+          width: 44px;
+          height: 44px;
+          flex-shrink: 0;
         }
 
         .avatar-img {
-            width: 100%;
-            height: 100%;
-            border-radius: 50%;
-            object-fit: cover;
+          width: 100%;
+          height: 100%;
+          border-radius: 50%;
+          object-fit: cover;
         }
 
         .avatar-fallback {
-            width: 100%;
-            height: 100%;
-            border-radius: 50%;
-            background-color: var(--bg-surface);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: var(--text-secondary);
-            font-weight: 600;
+          width: 100%;
+          height: 100%;
+          border-radius: 50%;
+          background: linear-gradient(145deg, #243247, #1d293a);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: var(--text-secondary);
+          font-weight: 700;
         }
 
         .post-meta {
-            flex: 1;
+          flex: 1;
+          min-width: 0;
         }
 
         .author-name {
-            font-weight: 700;
-            color: var(--text-primary);
-            font-size: 15px;
+          font-weight: 700;
+          color: var(--text-primary);
+          font-size: 15px;
         }
 
         .post-time {
-            font-size: 13px;
-            color: var(--text-muted);
+          font-size: 12px;
+          color: var(--text-muted);
+          margin-top: 2px;
         }
 
         .more-btn {
-            color: var(--text-secondary);
-            padding: 4px;
-            border-radius: 50%;
+          width: 32px;
+          height: 32px;
+          color: var(--text-secondary);
+          border-radius: 10px;
+          border: 1px solid transparent;
+          transition: var(--transition-normal);
         }
 
         .more-btn:hover {
-            background-color: var(--bg-surface);
-            color: var(--text-primary);
+          background-color: var(--bg-hover);
+          color: var(--text-primary);
+          border-color: var(--border-color);
         }
 
         .post-text {
-            color: var(--text-primary);
-            font-size: 15px;
-            line-height: 1.5;
-            white-space: pre-wrap;
-            margin-bottom: 12px;
+          color: var(--text-primary);
+          font-size: 15px;
+          line-height: 1.6;
+          white-space: pre-wrap;
+          margin-bottom: var(--space-12);
+          word-break: break-word;
         }
 
         .media-grid {
-            display: grid;
-            gap: 4px;
-            border-radius: 12px;
-            overflow: hidden;
-            margin-bottom: 12px;
+          display: grid;
+          gap: var(--space-6);
+          border-radius: var(--radius-md);
+          overflow: hidden;
+          margin-bottom: var(--space-14);
         }
 
         .media-grid-1 { grid-template-columns: 1fr; }
         .media-grid-2 { grid-template-columns: 1fr 1fr; }
-        .media-grid-3 { 
-            grid-template-columns: 1fr 1fr; 
-            grid-template-areas: "a b" "a c";
+        .media-grid-3 {
+          grid-template-columns: 1fr 1fr;
+          grid-template-areas: "a b" "a c";
         }
         .media-grid-3 .media-item:first-child { grid-area: a; }
-        
         .media-grid-4 { grid-template-columns: 1fr 1fr; }
 
         .media-item {
-            position: relative;
-            background-color: var(--bg-surface);
-            aspect-ratio: 16/9; /* Default aspect ratio */
+          position: relative;
+          background-color: var(--bg-surface);
+          aspect-ratio: 16/9;
         }
-        
-        .media-grid-1 .media-item { aspect-ratio: auto; max-height: 500px; }
+
+        .media-grid-1 .media-item {
+          aspect-ratio: auto;
+          max-height: 500px;
+        }
 
         .media-content {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            display: block;
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          display: block;
         }
 
         .media-more-overlay {
-            position: absolute;
-            inset: 0;
-            background-color: rgba(0,0,0,0.5);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 20px;
-            font-weight: 700;
+          position: absolute;
+          inset: 0;
+          background-color: rgba(2, 6, 23, 0.55);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: white;
+          font-size: 20px;
+          font-weight: 700;
         }
 
         .post-footer {
-            display: flex;
-            gap: 4px;
+          display: flex;
+          gap: var(--space-8);
+          border-top: 1px solid var(--border-color);
+          padding-top: var(--space-12);
         }
 
         .action-btn {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            padding: 8px 12px;
-            border-radius: 20px;
-            color: var(--text-secondary);
-            font-size: 14px;
-            font-weight: 500;
-            transition: var(--transition-fast);
+          display: inline-flex;
+          align-items: center;
+          gap: var(--space-6);
+          padding: var(--space-8) var(--space-12);
+          border-radius: var(--radius-pill);
+          color: var(--text-secondary);
+          font-size: 14px;
+          font-weight: 600;
+          border: 1px solid transparent;
+          transition: var(--transition-normal);
         }
 
         .action-btn:hover {
-            background-color: var(--bg-surface);
-            color: var(--text-primary);
+          background-color: var(--bg-hover);
+          color: var(--text-primary);
+          border-color: var(--border-color);
+          transform: translateY(-1px);
+        }
+
+        .action-btn:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+          transform: none;
+        }
+
+        .like-btn.active {
+          color: #fb7185;
+          background-color: rgba(244, 63, 94, 0.15);
+          border-color: rgba(244, 63, 94, 0.25);
         }
 
         .like-btn:hover {
-            color: var(--danger);
-            background-color: rgba(239, 68, 68, 0.1);
+          color: #fb7185;
+          background-color: rgba(244, 63, 94, 0.12);
         }
 
         .icon {
-            font-size: 16px;
+          font-size: 14px;
+          line-height: 1;
         }
-        
+
+        .count {
+          min-width: 12px;
+        }
       `}</style>
     </article>
   );
 }
+

@@ -90,66 +90,86 @@ function App() {
   const buildRouteView = () => {
     const key = resolveRouteKey(route);
 
-    if (key === 'admin') {
-      return {
-        key,
-        showPrimaryNav: false,
-        withRightPanel: false,
-        rightPanel: null,
-        content: <AdminPage token={token} onBack={() => navigateTo('#/')} />
-      };
-    }
+    switch (key) {
+      case 'admin':
+        return {
+          key,
+          showPrimaryNav: false,
+          withRightPanel: false,
+          rightPanel: null,
+          content: <AdminPage token={token} onBack={() => navigateTo('#/')} />
+        };
 
-    if (key === 'messages') {
-      return {
-        key,
-        showPrimaryNav: true,
-        withRightPanel: false,
-        rightPanel: null,
-        content: <ChatPage token={token} onLogout={handleLogout} />
-      };
-    }
+      case 'messages':
+        return {
+          key,
+          showPrimaryNav: true,
+          withRightPanel: false,
+          rightPanel: null,
+          content: <ChatPage token={token} onLogout={handleLogout} />
+        };
 
-    const showRightPanel = key === 'feed' || key === 'search' || key === 'notifications';
-
-    return {
-      key,
-      showPrimaryNav: true,
-      withRightPanel: showRightPanel,
-      rightPanel: showRightPanel ? <RightPanel /> : null,
-      content: (
-        <>
-          {key === 'feed' ? (
-            <div className="page-frame">
-              <div className="page-rail page-rail--narrow">
-                <FeedPage token={token} />
-              </div>
-            </div>
-          ) : null}
-          {key === 'search' ? (
+      case 'search':
+        return {
+          key,
+          showPrimaryNav: true,
+          withRightPanel: true,
+          rightPanel: <RightPanel />,
+          content: (
             <div className="page-frame">
               <div className="page-rail page-rail--wide">
                 <SearchPage token={token} onOpenMessages={() => navigateTo('#/messages')} />
               </div>
             </div>
-          ) : null}
-          {key === 'notifications' ? (
+          )
+        };
+
+      case 'notifications':
+        return {
+          key,
+          showPrimaryNav: true,
+          withRightPanel: true,
+          rightPanel: <RightPanel />,
+          content: (
             <div className="page-frame">
               <div className="page-rail">
                 <NotificationsPage token={token} />
               </div>
             </div>
-          ) : null}
-          {key === 'profile' ? (
+          )
+        };
+
+      case 'profile':
+        return {
+          key,
+          showPrimaryNav: true,
+          withRightPanel: false,
+          rightPanel: null,
+          content: (
             <div className="page-frame">
               <div className="page-rail page-rail--profile">
                 <ProfileRoutePage token={token} onLogout={handleLogout} onClose={() => navigateTo('#/')} />
               </div>
             </div>
-          ) : null}
-        </>
-      )
-    };
+          )
+        };
+
+      case 'feed':
+      default:
+        return {
+          key: 'feed',
+          showPrimaryNav: true,
+          withRightPanel: true,
+          rightPanel: <RightPanel />,
+          content: (
+            <div className="page-frame">
+              <div className="page-rail page-rail--narrow">
+                <FeedPage token={token} />
+              </div>
+            </div>
+          )
+        };
+    }
   };
 
   const authView = (

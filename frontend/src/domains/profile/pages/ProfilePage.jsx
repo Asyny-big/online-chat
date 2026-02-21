@@ -14,7 +14,7 @@ function SkeletonLine({ w = 160 }) {
         width: typeof w === 'number' ? `${w}px` : w,
         height: 12,
         borderRadius: 999,
-        background: 'linear-gradient(90deg, rgba(148,163,184,0.12), rgba(148,163,184,0.2), rgba(148,163,184,0.12))',
+        background: 'linear-gradient(90deg, rgba(148,163,184,0.10), rgba(148,163,184,0.24), rgba(148,163,184,0.10))',
         backgroundSize: '200% 100%',
         animation: 'ppShimmer 1.15s ease-in-out infinite'
       }}
@@ -22,7 +22,7 @@ function SkeletonLine({ w = 160 }) {
   );
 }
 
-export default function ProfilePage({ token, onClose, onLogout }) {
+export default function ProfilePage({ token, onLogout }) {
   const [view, setView] = useState('home'); // home | tasks | shop | history
   const [profile, setProfile] = useState(null);
   const [avatarBroken, setAvatarBroken] = useState(false);
@@ -52,7 +52,7 @@ export default function ProfilePage({ token, onClose, onLogout }) {
   }, [token]);
 
   useEffect(() => {
-    fetchProfile();
+    void fetchProfile();
   }, [fetchProfile]);
 
   const headerTitle = useMemo(() => {
@@ -65,24 +65,23 @@ export default function ProfilePage({ token, onClose, onLogout }) {
   return (
     <EconomyStoreProvider token={token}>
       <div className="profile-page">
-        {/* Banner/Cover Area */}
-        <div className="profile-cover">
-          <div className="cover-gradient"></div>
-        </div>
+        <div className="profile-background-glow" />
 
         <div className="profile-container">
-          {/* Header / Navigation */}
           <div className="profile-nav-header">
-            {view !== 'home' && (
-              <button onClick={() => setView('home')} className="icon-btn back-btn">←</button>
-            )}
-            <h2 className="page-title">{headerTitle}</h2>
+            <div className="profile-left-header">
+              {view !== 'home' && (
+                <button type="button" onClick={() => setView('home')} className="icon-btn back-btn" aria-label="Назад">
+                  {'<'}
+                </button>
+              )}
+              <h2 className="page-title">{headerTitle}</h2>
+            </div>
             <div className="actions">
-              <button onClick={onLogout} className="btn btn-ghost danger-text">Выйти</button>
+              <button type="button" onClick={onLogout} className="btn btn-ghost danger-text">Выйти</button>
             </div>
           </div>
 
-          {/* User Info Card */}
           <div className="profile-header-card">
             <div className="profile-header-content">
               <div className="profile-avatar-wrapper">
@@ -111,9 +110,9 @@ export default function ProfilePage({ token, onClose, onLogout }) {
                 </div>
 
                 <div className="profile-details">
-                  {profileLoading ? <SkeletonLine w={120} /> : <span className="profile-phone">{profile?.phone}</span>}
+                  {profileLoading ? <SkeletonLine w={120} /> : <span className="profile-phone">{profile?.phone || 'Без номера'}</span>}
                   {profile?.createdAt && (
-                    <span className="profile-date">с {new Date(profile.createdAt).toLocaleDateString()}</span>
+                    <span className="profile-date">с {new Date(profile.createdAt).toLocaleDateString('ru-RU')}</span>
                   )}
                 </div>
 
@@ -122,7 +121,6 @@ export default function ProfilePage({ token, onClose, onLogout }) {
             </div>
           </div>
 
-          {/* Content Views */}
           <div className="profile-content">
             {view === 'home' && (
               <div className="dashboard-grid">
@@ -149,166 +147,212 @@ export default function ProfilePage({ token, onClose, onLogout }) {
         </div>
 
         <style>{`
-            .profile-page {
-                position: relative;
-                min-height: 100%;
-                background-color: var(--bg-primary);
+          .profile-page {
+            position: relative;
+            min-height: 100%;
+            padding: var(--space-8) 0 var(--space-24);
+            background:
+              radial-gradient(circle at 8% 12%, rgba(56, 189, 248, 0.15), transparent 38%),
+              radial-gradient(circle at 95% 4%, rgba(99, 102, 241, 0.18), transparent 32%),
+              var(--bg-primary);
+            overflow: hidden;
+          }
+
+          .profile-background-glow {
+            position: absolute;
+            top: -90px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: min(980px, 86vw);
+            height: 260px;
+            border-radius: 999px;
+            background: radial-gradient(circle, rgba(59, 130, 246, 0.24), transparent 72%);
+            filter: blur(32px);
+            pointer-events: none;
+          }
+
+          .profile-container {
+            max-width: 980px;
+            margin: 0 auto;
+            padding: 0 var(--space-12) var(--space-24);
+            position: relative;
+            z-index: 2;
+          }
+
+          .profile-nav-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: var(--space-12);
+            margin-bottom: var(--space-16);
+            min-height: 48px;
+          }
+
+          .profile-left-header {
+            display: flex;
+            align-items: center;
+            gap: var(--space-10);
+            min-width: 0;
+          }
+
+          .page-title {
+            font-size: 22px;
+            font-weight: 780;
+            color: var(--text-primary);
+            margin: 0;
+            letter-spacing: 0.01em;
+          }
+
+          .back-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            background: rgba(15, 23, 42, 0.7);
+          }
+
+          .profile-header-card {
+            background:
+              linear-gradient(180deg, rgba(15, 23, 42, 0.86), rgba(15, 23, 42, 0.72)),
+              var(--bg-card);
+            border-radius: var(--radius-xl);
+            padding: var(--space-20);
+            border: 1px solid var(--border-color);
+            margin-bottom: var(--space-16);
+            box-shadow: var(--shadow-xl);
+          }
+
+          .profile-header-content {
+            display: flex;
+            align-items: center;
+            gap: var(--space-16);
+          }
+
+          .profile-avatar-wrapper {
+            width: 104px;
+            height: 104px;
+            border-radius: 50%;
+            padding: 4px;
+            background: linear-gradient(145deg, rgba(59, 130, 246, 0.75), rgba(99, 102, 241, 0.8));
+            box-shadow: 0 10px 28px rgba(37, 99, 235, 0.35);
+            flex-shrink: 0;
+          }
+
+          .profile-avatar,
+          .profile-avatar-fallback {
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            object-fit: cover;
+            background-color: var(--bg-surface);
+          }
+
+          .profile-avatar-fallback {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 34px;
+            font-weight: 800;
+            color: var(--text-secondary);
+          }
+
+          .profile-info {
+            flex: 1;
+            min-width: 0;
+          }
+
+          .profile-name-row {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: var(--space-10);
+            margin-bottom: var(--space-8);
+          }
+
+          .profile-name {
+            font-size: 28px;
+            font-weight: 820;
+            color: var(--text-primary);
+            margin: 0;
+            letter-spacing: -0.01em;
+          }
+
+          .badge {
+            background-color: rgba(59, 130, 246, 0.2);
+            color: #bfdbfe;
+            font-size: 12px;
+            font-weight: 700;
+            padding: 4px 10px;
+            border-radius: 999px;
+            border: 1px solid rgba(96, 165, 250, 0.3);
+          }
+
+          .profile-details {
+            display: flex;
+            flex-wrap: wrap;
+            gap: var(--space-12);
+            color: var(--text-muted);
+            font-size: 14px;
+            font-weight: 600;
+          }
+
+          .profile-phone {
+            color: var(--text-secondary);
+          }
+
+          .profile-date {
+            color: var(--text-muted);
+          }
+
+          .error-text {
+            margin-top: var(--space-8);
+            color: #fda4af;
+            font-size: 13px;
+          }
+
+          .profile-content {
+            border-radius: var(--radius-xl);
+          }
+
+          .dashboard-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: var(--space-12);
+          }
+
+          .full-width {
+            grid-column: span 2;
+          }
+
+          .danger-text {
+            color: #fda4af;
+          }
+
+          .danger-text:hover {
+            background-color: rgba(244, 63, 94, 0.16);
+            color: #fecdd3;
+          }
+
+          @media (max-width: 768px) {
+            .dashboard-grid {
+              grid-template-columns: 1fr;
             }
 
-            .profile-cover {
-                height: 180px;
-                background: linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%);
-                position: relative;
-            }
-
-            .cover-gradient {
-                position: absolute;
-                inset: 0;
-                background: linear-gradient(to bottom, transparent, var(--bg-primary));
-                opacity: 0.8;
-            }
-
-            .profile-container {
-                max-width: 900px;
-                margin: 0 auto;
-                padding: 0 20px 40px;
-                position: relative;
-                margin-top: -60px; /* Overlap cover */
-                z-index: 10;
-            }
-
-            .profile-nav-header {
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-                margin-bottom: 20px;
-                height: 48px;
-            }
-
-            .page-title {
-                font-size: 20px;
-                font-weight: 700;
-                display: none; /* Hidden on desktop primarily */
-            }
-
-            .profile-header-card {
-                background-color: var(--bg-card);
-                border-radius: var(--radius-card);
-                padding: 24px;
-                border: 1px solid var(--border-light);
-                margin-bottom: 24px;
-                box-shadow: var(--shadow-lg);
+            .full-width,
+            .half-width {
+              grid-column: span 1;
             }
 
             .profile-header-content {
-                display: flex;
-                align-items: flex-end;
-                gap: 24px;
+              flex-direction: column;
+              text-align: center;
             }
 
-            .profile-avatar-wrapper {
-                width: 100px;
-                height: 100px;
-                border-radius: 50%;
-                padding: 4px;
-                background-color: var(--bg-card);
-                margin-top: -50px; /* Pull up */
-                position: relative;
-            }
-
-            .profile-avatar, .profile-avatar-fallback {
-                width: 100%;
-                height: 100%;
-                border-radius: 50%;
-                object-fit: cover;
-                background-color: var(--bg-surface);
-            }
-
-            .profile-avatar-fallback {
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                font-size: 32px;
-                font-weight: 700;
-                color: var(--text-secondary);
-            }
-
-            .profile-info {
-                flex: 1;
-                padding-bottom: 8px;
-            }
-
-            .profile-name-row {
-                display: flex;
-                align-items: center;
-                gap: 12px;
-                margin-bottom: 4px;
-            }
-
-            .profile-name {
-                font-size: 24px;
-                font-weight: 800;
-                color: var(--text-primary);
-                margin: 0;
-            }
-
-            .badge {
-                background-color: rgba(139, 92, 246, 0.2);
-                color: var(--accent);
-                font-size: 12px;
-                font-weight: 700;
-                padding: 2px 8px;
-                border-radius: 999px;
-            }
-
+            .profile-name-row,
             .profile-details {
-                display: flex;
-                gap: 16px;
-                color: var(--text-muted);
-                font-size: 14px;
-                font-weight: 500;
+              justify-content: center;
             }
-
-            .dashboard-grid {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 16px;
-            }
-
-            .full-width {
-                grid-column: span 2;
-            }
-
-            .danger-text {
-                color: var(--danger);
-            }
-            .danger-text:hover {
-                background-color: rgba(239, 68, 68, 0.1);
-            }
-
-            @media (max-width: 768px) {
-                .dashboard-grid {
-                    grid-template-columns: 1fr;
-                }
-                .full-width, .half-width {
-                    grid-column: span 1;
-                }
-                .profile-header-content {
-                    flex-direction: column;
-                    align-items: center;
-                    text-align: center;
-                    gap: 12px;
-                }
-                .profile-avatar-wrapper {
-                    margin-top: -60px;
-                }
-                .profile-name-row {
-                    justify-content: center;
-                }
-                .profile-details {
-                    justify-content: center;
-                }
-            }
+          }
         `}</style>
       </div>
     </EconomyStoreProvider>
