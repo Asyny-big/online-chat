@@ -50,7 +50,7 @@ export default function SearchPage({ token, onOpenMessages }) {
         <div style={styles.card}>
           <div style={styles.name}>{result.name || 'Пользователь'}</div>
           <div style={styles.meta}>{result.phone || ''}</div>
-          <button type="button" style={styles.secondary} onClick={onOpenMessages}>
+          <button type="button" style={styles.secondary} onClick={() => onOpenMessages?.(result)}>
             Открыть сообщения
           </button>
         </div>

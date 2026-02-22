@@ -12,7 +12,39 @@ import { consumePendingPushAction, pushEvents } from '@/mobile/pushNotifications
 
 const WALLET_UPDATE_EVENT = 'govchat:wallet-update';
 
-function ChatPageInner({ token, onLogout }) {
+function extractParticipantUserId(participant) {
+  return String(
+    participant?.user?._id
+      || participant?.user
+      || participant?._id
+      || participant?.id
+      || ''
+  ).trim();
+}
+
+function isPrivateChatWithUser(chat, targetUserId, viewerUserId = '') {
+  if (!chat || chat.type !== 'private') return false;
+  const normalizedTargetUserId = String(targetUserId || '').trim();
+  if (!normalizedTargetUserId) return false;
+
+  const participantIds = Array.isArray(chat.participants)
+    ? chat.participants.map(extractParticipantUserId).filter(Boolean)
+    : [];
+
+  if (!participantIds.includes(normalizedTargetUserId)) return false;
+
+  const normalizedViewerUserId = String(viewerUserId || '').trim();
+  if (!normalizedViewerUserId) return true;
+
+  return participantIds.includes(normalizedViewerUserId);
+}
+
+function ChatPageInner({
+  token,
+  onLogout,
+  pendingPrivateChatTarget = null,
+  onPendingPrivateChatHandled = null
+}) {
   const { showEarn } = useHrumToast();
   const [chats, setChats] = useState([]);
   const [selectedChat, setSelectedChat] = useState(null);
@@ -44,6 +76,7 @@ function ChatPageInner({ token, onLogout }) {
   const currentUserIdRef = useRef(currentUserId);
   const groupCallStateRef = useRef(groupCallState);
   const groupCallDataRef = useRef(groupCallData);
+  const handledPrivateChatRequestIdRef = useRef('');
 
   // Обновляем refs при изменении состояния
   useEffect(() => { chatsRef.current = chats; }, [chats]);
@@ -53,6 +86,69 @@ function ChatPageInner({ token, onLogout }) {
   useEffect(() => { currentUserIdRef.current = currentUserId; }, [currentUserId]);
   useEffect(() => { groupCallStateRef.current = groupCallState; }, [groupCallState]);
   useEffect(() => { groupCallDataRef.current = groupCallData; }, [groupCallData]);
+
+  useEffect(() => {
+    const target = pendingPrivateChatTarget;
+    const requestId = String(target?.requestId || '').trim();
+    const targetUserId = String(target?.userId || '').trim();
+
+    if (!token || !targetUserId) return;
+    if (requestId && handledPrivateChatRequestIdRef.current === requestId) return;
+
+    let cancelled = false;
+
+    const openOrCreatePrivateChat = async () => {
+      try {
+        const existingChat = chatsRef.current.find((chat) =>
+          isPrivateChatWithUser(chat, targetUserId, currentUserIdRef.current)
+        );
+
+        if (existingChat) {
+          if (!cancelled) {
+            setSelectedChat(existingChat);
+          }
+          return;
+        }
+
+        const response = await axios.post(
+          `${API_URL}/chats/private`,
+          { userId: targetUserId },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+
+        const privateChat = response?.data || null;
+        if (!privateChat || cancelled) return;
+
+        setChats((prev) => {
+          const existingIndex = prev.findIndex((chat) => chat._id === privateChat._id);
+          if (existingIndex >= 0) {
+            const next = [...prev];
+            next[existingIndex] = { ...next[existingIndex], ...privateChat };
+            return next;
+          }
+          return [privateChat, ...prev];
+        });
+
+        setSelectedChat(privateChat);
+      } catch (error) {
+        console.error('[ChatPage] Failed to open/create private chat from search:', error);
+        if (!cancelled) {
+          alert(error?.response?.data?.error || 'Не удалось открыть диалог');
+        }
+      } finally {
+        handledPrivateChatRequestIdRef.current = requestId || `${targetUserId}:${Date.now()}`;
+        if (!cancelled) {
+          onPendingPrivateChatHandled?.(requestId);
+        }
+      }
+    };
+
+    void openOrCreatePrivateChat();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token, pendingPrivateChatTarget, onPendingPrivateChatHandled]);
 
   const ensureChatSelected = useCallback(async (chatId, chatName = '') => {
     if (!chatId || !token) return null;

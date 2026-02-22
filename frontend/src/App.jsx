@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 import { API_URL } from './config';
 import ChatPage from './domains/messages/pages/ChatPage';
@@ -42,6 +42,7 @@ function App() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [route, setRoute] = useState(normalizeRoute(window.location.hash));
+  const [pendingPrivateChatTarget, setPendingPrivateChatTarget] = useState(null);
   const [navBadgeCounts, setNavBadgeCounts] = useState({ notifications: 0, messages: 0 });
   const prevUnreadRef = useRef({ notifications: 0, messages: 0 });
   const unreadInitializedRef = useRef(false);
@@ -183,6 +184,14 @@ function App() {
     }
   };
 
+  const handlePendingPrivateChatHandled = useCallback((requestId) => {
+    setPendingPrivateChatTarget((prev) => {
+      if (!prev) return null;
+      if (!requestId) return null;
+      return prev.requestId === requestId ? null : prev;
+    });
+  }, []);
+
   const buildRouteView = () => {
     const key = resolveRouteKey(route);
 
@@ -202,7 +211,14 @@ function App() {
           showPrimaryNav: true,
           withRightPanel: false,
           rightPanel: null,
-          content: <ChatPage token={token} onLogout={handleLogout} />
+          content: (
+            <ChatPage
+              token={token}
+              onLogout={handleLogout}
+              pendingPrivateChatTarget={pendingPrivateChatTarget}
+              onPendingPrivateChatHandled={handlePendingPrivateChatHandled}
+            />
+          )
         };
 
       case 'search':
@@ -214,7 +230,20 @@ function App() {
           content: (
             <div className="page-frame">
               <div className="page-rail page-rail--wide">
-                <SearchPage token={token} onOpenMessages={() => navigateTo('#/messages')} />
+                <SearchPage
+                  token={token}
+                  onOpenMessages={(user) => {
+                    const targetUserId = String(user?._id || user?.id || '').trim();
+                    if (targetUserId) {
+                      setPendingPrivateChatTarget({
+                        requestId: `search-${Date.now()}`,
+                        userId: targetUserId,
+                        userName: String(user?.name || '')
+                      });
+                    }
+                    navigateTo('#/messages');
+                  }}
+                />
               </div>
             </div>
           )
