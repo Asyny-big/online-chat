@@ -9,6 +9,10 @@ const MESSAGE_TYPE = {
   CALL_CANCELLED: 'CALL_CANCELLED'
 };
 
+const MESSAGE_CHANNEL_ID = 'govchat_messages';
+const MESSAGE_TTL_MS = 90 * 1000;
+const CALL_TTL_MS = 30 * 1000;
+
 class NotificationService {
   constructor({ userSockets, io }) {
     this.userSockets = userSockets;
@@ -192,6 +196,64 @@ class NotificationService {
     return aliveSocketIds.length > 0;
   }
 
+  resolveDeliveryProfile({ payloadType, forceWakeup }) {
+    const isChatMessagePayload = [
+      MESSAGE_TYPE.MESSAGE,
+      MESSAGE_TYPE.GROUP_MESSAGE,
+      MESSAGE_TYPE.ATTACHMENT
+    ].includes(payloadType);
+
+    if (forceWakeup || payloadType === MESSAGE_TYPE.INCOMING_CALL) {
+      return {
+        android: {
+          priority: 'high',
+          ttl: CALL_TTL_MS,
+          directBootOk: true
+        },
+        includeNotification: false,
+        apnsHeaders: { 'apns-priority': '10' },
+        ttlMs: CALL_TTL_MS
+      };
+    }
+
+    if (payloadType === MESSAGE_TYPE.CALL_CANCELLED) {
+      return {
+        android: {
+          priority: 'high',
+          ttl: CALL_TTL_MS
+        },
+        includeNotification: false,
+        apnsHeaders: { 'apns-priority': '10' },
+        ttlMs: CALL_TTL_MS
+      };
+    }
+
+    if (isChatMessagePayload) {
+      return {
+        android: {
+          priority: 'high',
+          ttl: MESSAGE_TTL_MS,
+          notification: {
+            channelId: MESSAGE_CHANNEL_ID
+          }
+        },
+        includeNotification: true,
+        apnsHeaders: { 'apns-priority': '10' },
+        ttlMs: MESSAGE_TTL_MS
+      };
+    }
+
+    return {
+      android: {
+        priority: 'high',
+        ttl: MESSAGE_TTL_MS
+      },
+      includeNotification: false,
+      apnsHeaders: undefined,
+      ttlMs: MESSAGE_TTL_MS
+    };
+  }
+
   async sendToRecipients({
     userIds,
     payloadType,
@@ -237,29 +299,33 @@ class NotificationService {
 
     if (!tokenRows.length) return { sent: 0, skipped: 'no_device_tokens' };
 
+    const dispatchTimestampMs = Date.now();
+    const pushTraceId = `${String(payloadType || 'push').toLowerCase()}-${dispatchTimestampMs}-${Math.random().toString(36).slice(2, 8)}`;
+    const deliveryProfile = this.resolveDeliveryProfile({ payloadType, forceWakeup });
+
     const baseData = {
       ...Object.fromEntries(
         Object.entries(data || {}).map(([key, value]) => [key, value == null ? '' : String(value)])
       ),
       title: title || '',
-      body: body || ''
+      body: body || '',
+      pushTraceId,
+      pushSentAt: String(dispatchTimestampMs),
+      pushTtlSeconds: String(Math.floor(deliveryProfile.ttlMs / 1000))
     };
 
     const multicast = {
       tokens: tokenRows.map((row) => row.token),
       data: baseData,
-      android: forceWakeup
+      notification: deliveryProfile.includeNotification
         ? {
-            priority: 'high',
-            ttl: 0,
-            directBootOk: true
+            title: title || '',
+            body: body || ''
           }
-        : {
-            priority: 'high',
-            ttl: 24 * 60 * 60 * 1000
-          },
+        : undefined,
+      android: deliveryProfile.android,
       apns: {
-        headers: forceWakeup ? { 'apns-priority': '10' } : undefined,
+        headers: deliveryProfile.apnsHeaders,
         payload: {
           aps: {
             'content-available': 1
@@ -267,6 +333,18 @@ class NotificationService {
         }
       }
     };
+
+    console.info('[Push] dispatch:', {
+      pushTraceId,
+      payloadType,
+      recipients: targetUserIds.length,
+      tokens: tokenRows.length,
+      forceWakeup,
+      androidPriority: deliveryProfile.android.priority,
+      ttlMs: deliveryProfile.ttlMs,
+      includeNotification: deliveryProfile.includeNotification,
+      timestamp: new Date(dispatchTimestampMs).toISOString()
+    });
 
     const response = await messaging.sendEachForMulticast(multicast);
     const invalidTokens = [];
@@ -289,6 +367,7 @@ class NotificationService {
 
     if (failed.length) {
       console.warn('[Push] send failures:', {
+        pushTraceId,
         payloadType,
         failedCount: failed.length,
         sample: failed.slice(0, 3)
@@ -301,11 +380,21 @@ class NotificationService {
       }
     }
 
+    console.info('[Push] delivery result:', {
+      pushTraceId,
+      payloadType,
+      sent: response.successCount,
+      failed: response.failureCount,
+      tokens: tokenRows.length
+    });
+
     return {
       sent: response.successCount,
       failed: response.failureCount,
       targetRecipients: targetUserIds.length,
-      tokens: tokenRows.length
+      tokens: tokenRows.length,
+      pushTraceId,
+      pushSentAt: dispatchTimestampMs
     };
   }
 }
