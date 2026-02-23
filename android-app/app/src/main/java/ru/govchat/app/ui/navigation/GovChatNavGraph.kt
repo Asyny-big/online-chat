@@ -120,6 +120,8 @@ fun GovChatNavGraph(
             )
             val state = viewModel.state.collectAsStateWithLifecycle().value
             val callUiState = viewModel.callUiState.collectAsStateWithLifecycle().value
+            val recordingElapsedSeconds = viewModel.recordingElapsedSeconds.collectAsStateWithLifecycle().value
+            val uploadProgress = viewModel.uploadProgress.collectAsStateWithLifecycle().value
             val canEnterPip = state.activeCall?.type == "video"
 
             LaunchedEffect(canEnterPip) {
@@ -147,6 +149,9 @@ fun GovChatNavGraph(
 
             MainScreen(
                 state = state,
+                recordingElapsedSeconds = recordingElapsedSeconds,
+                uploadProgress = uploadProgress,
+                recordingCommands = viewModel.recordingCommands,
                 callUiState = callUiState,
                 isInPictureInPictureMode = isInPictureInPictureMode,
                 onRefresh = viewModel::refreshChats,
@@ -155,6 +160,14 @@ fun GovChatNavGraph(
                 onSendText = viewModel::sendTextMessage,
                 onInputChanged = viewModel::onInputChanged,
                 onSendAttachment = viewModel::sendAttachment,
+                onToggleRecordingMode = viewModel::toggleRecordingMode,
+                onRecordingStarted = viewModel::onRecordingStarted,
+                onRecordingLocked = viewModel::onRecordingLocked,
+                onRecordingCancelled = viewModel::onRecordingCancelled,
+                onRecordingFinished = viewModel::onRecordingFinished,
+                onCancelUpload = viewModel::cancelUpload,
+                onRetryFailedRecordingUpload = viewModel::retryFailedRecordingUpload,
+                onDismissFailedRecordingUpload = viewModel::clearFailedRecordingUpload,
                 onLoadOlderMessages = viewModel::loadOlderMessages,
                 onStartCall = viewModel::startCall,
                 onStartGroupCall = viewModel::startGroupCall,

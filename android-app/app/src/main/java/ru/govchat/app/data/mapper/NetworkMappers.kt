@@ -96,6 +96,8 @@ fun WebRtcIceConfigDto.toDomain(): WebRtcConfig {
 private fun ru.govchat.app.core.network.LastMessageDto?.toDisplayText(): String {
     if (this == null) return "ÐÐµÑ‚ ÑÐ¾Ð¾Ð±Ñ‰ÐµÐ½Ð¸Ð¹"
     return when (type.orEmpty()) {
+        "voice" -> "Ãîëîñîâîå ñîîáùåíèå"
+        "video_note" -> "Âèäåî-êðóæîê"
         "audio" -> "ðŸŽ¤ Ð“Ð¾Ð»Ð¾ÑÐ¾Ð²Ð¾Ðµ ÑÐ¾Ð¾Ð±Ñ‰ÐµÐ½Ð¸Ðµ"
         "image" -> "ðŸ“· Ð˜Ð·Ð¾Ð±Ñ€Ð°Ð¶ÐµÐ½Ð¸Ðµ"
         "video" -> "ðŸŽ¥ Ð’Ð¸Ð´ÐµÐ¾"
@@ -128,7 +130,8 @@ private fun AttachmentDto?.toDomain(): MessageAttachment? {
         url = this!!.url.orEmpty(),
         originalName = originalName.orEmpty(),
         mimeType = mimeType,
-        sizeBytes = size
+        sizeBytes = size,
+        durationMs = durationMs ?: durationSeconds?.times(1000)
     )
 }
 
@@ -174,6 +177,8 @@ fun String.toMessageType(): MessageType {
         "image" -> MessageType.Image
         "video" -> MessageType.Video
         "audio" -> MessageType.Audio
+        "voice" -> MessageType.Voice
+        "video_note" -> MessageType.VideoNote
         "file" -> MessageType.File
         "system" -> MessageType.System
         else -> MessageType.Text
@@ -223,3 +228,4 @@ private fun Any?.toUserProfileOrNull(): UserProfile? {
         else -> null
     }
 }
+

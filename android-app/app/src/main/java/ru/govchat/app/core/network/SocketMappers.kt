@@ -31,7 +31,12 @@ internal fun JSONObject.toSocketMessage(chatIdHint: String = ""): ChatMessage? {
                 url = url,
                 originalName = it.optString("originalName"),
                 mimeType = it.optString("mimeType").takeIf { value -> value.isNotBlank() },
-                sizeBytes = it.optLong("size").takeIf { size -> size > 0L }
+                sizeBytes = it.optLong("size").takeIf { size -> size > 0L },
+                durationMs = when {
+                    it.has("durationMs") -> it.optLong("durationMs").takeIf { duration -> duration > 0L }
+                    it.has("duration") -> it.optLong("duration").takeIf { duration -> duration > 0L }?.times(1000)
+                    else -> null
+                }
             )
         }
     }
@@ -62,6 +67,8 @@ internal fun JSONObject.toSocketChatPreview(): ChatPreview? {
     val lastMessage = optJSONObject("lastMessage")
 
     val subtitle = when (lastMessage?.optString("type").orEmpty()) {
+        "voice" -> "Ãîëîñîâîå ñîîáùåíèå"
+        "video_note" -> "Âèäåî-êğóæîê"
         "audio" -> "ğŸ¤ Ğ“Ğ¾Ğ»Ğ¾ÑĞ¾Ğ²Ğ¾Ğµ ÑĞ¾Ğ¾Ğ±Ñ‰ĞµĞ½Ğ¸Ğµ"
         "image" -> "ğŸ“· Ğ˜Ğ·Ğ¾Ğ±Ñ€Ğ°Ğ¶ĞµĞ½Ğ¸Ğµ"
         "video" -> "ğŸ¥ Ğ’Ğ¸Ğ´ĞµĞ¾"
@@ -139,8 +146,11 @@ private fun String.toSocketMessageType(): MessageType {
         "image" -> MessageType.Image
         "video" -> MessageType.Video
         "audio" -> MessageType.Audio
+        "voice" -> MessageType.Voice
+        "video_note" -> MessageType.VideoNote
         "file" -> MessageType.File
         "system" -> MessageType.System
         else -> MessageType.Text
     }
 }
+

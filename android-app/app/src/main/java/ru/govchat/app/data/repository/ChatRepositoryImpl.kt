@@ -1,4 +1,4 @@
-package ru.govchat.app.data.repository
+﻿package ru.govchat.app.data.repository
 
 import android.content.Context
 import android.net.Uri
@@ -17,6 +17,7 @@ import ru.govchat.app.core.network.CreateGroupChatRequest
 import ru.govchat.app.core.storage.SessionStorage
 import ru.govchat.app.data.mapper.toDomain
 import ru.govchat.app.data.mapper.toParticipantsDomain
+import ru.govchat.app.domain.model.AttachmentType
 import ru.govchat.app.domain.model.CallJoinParticipant
 import ru.govchat.app.domain.model.CallSignalPayload
 import ru.govchat.app.domain.model.ChatMessage
@@ -26,6 +27,7 @@ import ru.govchat.app.domain.model.RealtimeEvent
 import ru.govchat.app.domain.model.UserProfile
 import ru.govchat.app.domain.model.WebRtcConfig
 import ru.govchat.app.domain.repository.ChatRepository
+import java.io.File
 import java.time.Instant
 
 class ChatRepositoryImpl(
@@ -64,7 +66,7 @@ class ChatRepositoryImpl(
             }
         }.recoverCatching { error ->
             throw when (error) {
-                is TimeoutCancellationException -> IllegalStateException("Таймаут отправки сообщения")
+                is TimeoutCancellationException -> IllegalStateException("РўР°Р№РјР°СѓС‚ РѕС‚РїСЂР°РІРєРё СЃРѕРѕР±С‰РµРЅРёСЏ")
                 else -> error
             }
         }
@@ -188,33 +190,40 @@ class ChatRepositoryImpl(
     override suspend fun sendAttachmentMessage(
         chatId: String,
         attachmentUri: String,
+        attachmentType: AttachmentType?,
+        durationMs: Long?,
         onProgress: (Int) -> Unit
     ): Result<ChatMessage> {
         val uri = runCatching { Uri.parse(attachmentUri) }.getOrNull()
-            ?: return Result.failure(IllegalArgumentException("Не удалось открыть файл"))
-
+            ?: return Result.failure(IllegalArgumentException("Unable to open file"))
         val meta = resolveAttachmentMeta(uri)
-            ?: return Result.failure(IllegalArgumentException("Не удалось прочитать файл"))
-
-        if (meta.sizeBytes != null && meta.sizeBytes > MAX_ATTACHMENT_SIZE_BYTES) {
-            return Result.failure(IllegalArgumentException("Максимальный размер файла: 100 МБ"))
+            ?: return Result.failure(IllegalArgumentException("Unable to resolve file metadata"))
+        val measuredSizeBytes = meta.sizeBytes ?: measureSizeWithCap(uri, MAX_ATTACHMENT_SIZE_BYTES + 1L)
+        if (measuredSizeBytes <= 0L) {
+            return Result.failure(IllegalArgumentException("File is empty"))
         }
-
+        if (measuredSizeBytes > MAX_ATTACHMENT_SIZE_BYTES) {
+            return Result.failure(IllegalArgumentException("Maximum file size is 100 MB"))
+        }
+        val effectiveType = attachmentType ?: resolveMessageType(mimeType = meta.mimeType, fileName = meta.fileName)
+        if (!isMimeCompatible(effectiveType, meta.mimeType, meta.fileName)) {
+            return Result.failure(
+                IllegalArgumentException("MIME type does not match attachment type: ${effectiveType.socketValue}")
+            )
+        }
         onProgress(0)
-
         val uploadResult = runAuthorized {
             val requestBody = UriUploadRequestBody(
                 contentResolver = appContext.contentResolver,
                 uri = uri,
                 mediaType = meta.mimeType?.toMediaTypeOrNull(),
-                contentLength = meta.sizeBytes ?: -1L
+                contentLength = measuredSizeBytes
             ) { written, total ->
                 if (total > 0L) {
                     val progress = ((written * 100) / total).toInt().coerceIn(0, 100)
                     onProgress(progress)
                 }
             }
-
             val part = MultipartBody.Part.createFormData(
                 "file",
                 meta.fileName,
@@ -222,33 +231,39 @@ class ChatRepositoryImpl(
             )
             api.uploadFile(part)
         }
-
         return uploadResult.fold(
             onSuccess = { upload ->
                 onProgress(100)
-                val messageType = resolveMessageType(mimeType = meta.mimeType, fileName = meta.fileName)
                 val attachment = JSONObject()
                     .put("url", upload.url)
                     .put("originalName", upload.originalName)
                     .put("mimeType", upload.mimeType ?: meta.mimeType)
-                    .put("size", upload.size ?: meta.sizeBytes ?: 0L)
-
+                    .put("size", upload.size ?: measuredSizeBytes)
+                durationMs?.takeIf { it > 0L }?.let { safeDuration ->
+                    attachment.put("durationMs", safeDuration)
+                }
                 runCatching {
                     withTimeout(SOCKET_SEND_TIMEOUT_MS) {
                         socketGateway.sendAttachmentMessage(
                             chatId = chatId,
-                            type = messageType,
+                            type = effectiveType.socketValue,
                             attachment = attachment
                         ).getOrThrow()
                     }
                 }.recoverCatching { error ->
                     throw when (error) {
-                        is TimeoutCancellationException -> IllegalStateException("Таймаут отправки вложения")
+                        is TimeoutCancellationException -> IllegalStateException("Attachment send timeout")
                         else -> error
                     }
                 }
             },
-            onFailure = { Result.failure(it) }
+            onFailure = { error ->
+                if (error is HttpException && error.code() == HTTP_PAYLOAD_TOO_LARGE) {
+                    Result.failure(IllegalStateException("Payload too large (413)"))
+                } else {
+                    Result.failure(error)
+                }
+            }
         )
     }
 
@@ -340,6 +355,23 @@ class ChatRepositoryImpl(
     }
 
     private fun resolveAttachmentMeta(uri: Uri): LocalAttachmentMeta? {
+        if (uri.scheme.equals("file", ignoreCase = true)) {
+            val file = runCatching { uri.path?.let(::File) }.getOrNull() ?: return null
+            if (!file.exists() || !file.isFile) return null
+            val extension = file.extension.lowercase()
+            val mimeType = when (extension) {
+                in IMAGE_EXTENSIONS -> "image/$extension"
+                in VIDEO_EXTENSIONS -> "video/$extension"
+                in AUDIO_EXTENSIONS -> "audio/$extension"
+                else -> null
+            }
+            return LocalAttachmentMeta(
+                fileName = file.name.takeIf { it.isNotBlank() } ?: "attachment_${System.currentTimeMillis()}",
+                mimeType = mimeType,
+                sizeBytes = file.length().takeIf { it > 0L }
+            )
+        }
+
         var fileName: String? = null
         var sizeBytes: Long? = null
 
@@ -374,18 +406,54 @@ class ChatRepositoryImpl(
         )
     }
 
-    private fun resolveMessageType(mimeType: String?, fileName: String): String {
+    private fun resolveMessageType(mimeType: String?, fileName: String): AttachmentType {
         val safeMime = mimeType.orEmpty().lowercase()
-        if (safeMime.startsWith("image/")) return "image"
-        if (safeMime.startsWith("video/")) return "video"
-        if (safeMime.startsWith("audio/")) return "audio"
+        if (safeMime.startsWith("image/")) return AttachmentType.Image
+        if (safeMime.startsWith("video/")) return AttachmentType.Video
+        if (safeMime.startsWith("audio/")) return AttachmentType.Audio
 
         val extension = fileName.substringAfterLast('.', "").lowercase()
-        if (extension in IMAGE_EXTENSIONS) return "image"
-        if (extension in VIDEO_EXTENSIONS) return "video"
-        if (extension in AUDIO_EXTENSIONS) return "audio"
+        if (extension in IMAGE_EXTENSIONS) return AttachmentType.Image
+        if (extension in VIDEO_EXTENSIONS) return AttachmentType.Video
+        if (extension in AUDIO_EXTENSIONS) return AttachmentType.Audio
 
-        return "file"
+        return AttachmentType.File
+    }
+
+    private fun isMimeCompatible(
+        attachmentType: AttachmentType,
+        mimeType: String?,
+        fileName: String
+    ): Boolean {
+        val normalizedMime = mimeType?.lowercase().orEmpty()
+        val extension = fileName.substringAfterLast('.', "").lowercase()
+        return when (attachmentType) {
+            AttachmentType.Image -> normalizedMime.startsWith("image/") || extension in IMAGE_EXTENSIONS
+            AttachmentType.Video -> normalizedMime.startsWith("video/") || extension in VIDEO_EXTENSIONS
+            AttachmentType.Audio -> normalizedMime.startsWith("audio/") || extension in AUDIO_EXTENSIONS
+            AttachmentType.File -> true
+            AttachmentType.Voice -> normalizedMime.startsWith("audio/") || extension in AUDIO_EXTENSIONS
+            AttachmentType.VideoNote -> normalizedMime.startsWith("video/") || extension in VIDEO_EXTENSIONS
+        }
+    }
+
+    private fun measureSizeWithCap(uri: Uri, capBytes: Long): Long {
+        return runCatching {
+            appContext.contentResolver.openInputStream(uri)?.use { input ->
+                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                var total = 0L
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read <= 0) break
+                    total += read
+                    if (total > capBytes) {
+                        total = capBytes
+                        break
+                    }
+                }
+                total
+            } ?: -1L
+        }.getOrElse { -1L }
     }
 
     private data class LocalAttachmentMeta(
@@ -397,9 +465,11 @@ class ChatRepositoryImpl(
     private companion object {
         const val MAX_ATTACHMENT_SIZE_BYTES = 100L * 1024L * 1024L
         const val SOCKET_SEND_TIMEOUT_MS = 20_000L
+        const val HTTP_PAYLOAD_TOO_LARGE = 413
 
         val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "svg")
         val VIDEO_EXTENSIONS = setOf("mp4", "webm", "mov", "avi", "mkv", "m4v")
         val AUDIO_EXTENSIONS = setOf("mp3", "ogg", "wav", "m4a", "aac", "webm")
     }
 }
+

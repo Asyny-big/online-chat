@@ -67,6 +67,8 @@ import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
@@ -152,6 +154,7 @@ import coil.request.CachePolicy
 import coil.request.ImageRequest
 import coil.size.Precision
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import livekit.org.webrtc.RendererCommon as LiveKitRendererCommon
@@ -181,6 +184,9 @@ import kotlin.math.abs
 @Composable
 fun MainScreen(
     state: MainUiState,
+    recordingElapsedSeconds: Int,
+    uploadProgress: Int?,
+    recordingCommands: Flow<RecordingCommand>,
     callUiState: CallUiState,
     isInPictureInPictureMode: Boolean,
     onRefresh: () -> Unit,
@@ -189,6 +195,14 @@ fun MainScreen(
     onSendText: (String) -> Unit,
     onInputChanged: (String) -> Unit,
     onSendAttachment: (Uri) -> Unit,
+    onToggleRecordingMode: () -> Unit,
+    onRecordingStarted: (RecordingMode) -> Long?,
+    onRecordingLocked: () -> Unit,
+    onRecordingCancelled: () -> Unit,
+    onRecordingFinished: (Long, Uri, Long) -> Unit,
+    onCancelUpload: () -> Unit,
+    onRetryFailedRecordingUpload: () -> Unit,
+    onDismissFailedRecordingUpload: () -> Unit,
     onLoadOlderMessages: () -> Unit,
     onStartCall: (String) -> Unit,
     onStartGroupCall: (String) -> Unit,
@@ -297,6 +311,15 @@ fun MainScreen(
             listOf(GovChatPermissionFeature.Microphone)
         }
         requestPermissionsInOrder(features, onGranted)
+    }
+    val ensureVoiceRecordingPermission: (() -> Unit) -> Unit = { onGranted ->
+        requestPermission(GovChatPermissionFeature.Microphone, onGranted)
+    }
+    val ensureVideoRecordingPermissions: (() -> Unit) -> Unit = { onGranted ->
+        requestPermissionsInOrder(
+            listOf(GovChatPermissionFeature.Camera, GovChatPermissionFeature.Microphone),
+            onGranted
+        )
     }
 
     val mediaProjectionManager = remember(context) {
@@ -441,10 +464,23 @@ fun MainScreen(
                 } else {
                     ChatContent(
                         state = state,
+                        recordingElapsedSeconds = recordingElapsedSeconds,
+                        uploadProgress = uploadProgress,
+                        recordingCommands = recordingCommands,
                         onBack = onBackFromChat,
                         onSendText = onSendText,
                         onInputChanged = onInputChanged,
                         onSendAttachment = onSendAttachment,
+                        onToggleRecordingMode = onToggleRecordingMode,
+                        onRecordingStarted = onRecordingStarted,
+                        onRecordingLocked = onRecordingLocked,
+                        onRecordingCancelled = onRecordingCancelled,
+                        onRecordingFinished = onRecordingFinished,
+                        onCancelUpload = onCancelUpload,
+                        onRetryFailedRecordingUpload = onRetryFailedRecordingUpload,
+                        onDismissFailedRecordingUpload = onDismissFailedRecordingUpload,
+                        ensureVoiceRecordingPermission = ensureVoiceRecordingPermission,
+                        ensureVideoRecordingPermissions = ensureVideoRecordingPermissions,
                         onLoadOlderMessages = onLoadOlderMessages,
                         onStartCall = { type ->
                             requestCallPermissions(type) {
@@ -1850,10 +1886,23 @@ private fun ChatRow(
 @Composable
 private fun ChatContent(
     state: MainUiState,
+    recordingElapsedSeconds: Int,
+    uploadProgress: Int?,
+    recordingCommands: Flow<RecordingCommand>,
     onBack: () -> Unit,
     onSendText: (String) -> Unit,
     onInputChanged: (String) -> Unit,
     onSendAttachment: (Uri) -> Unit,
+    onToggleRecordingMode: () -> Unit,
+    onRecordingStarted: (RecordingMode) -> Long?,
+    onRecordingLocked: () -> Unit,
+    onRecordingCancelled: () -> Unit,
+    onRecordingFinished: (Long, Uri, Long) -> Unit,
+    onCancelUpload: () -> Unit,
+    onRetryFailedRecordingUpload: () -> Unit,
+    onDismissFailedRecordingUpload: () -> Unit,
+    ensureVoiceRecordingPermission: (() -> Unit) -> Unit,
+    ensureVideoRecordingPermissions: (() -> Unit) -> Unit,
     onLoadOlderMessages: () -> Unit,
     onStartCall: (String) -> Unit,
     onStartGroupCall: (String) -> Unit,
@@ -1871,6 +1920,15 @@ private fun ChatContent(
     }
     var imagePreviewStartIndex by remember(chat.id) { mutableIntStateOf(-1) }
     val listState = rememberLazyListState()
+    val playbackCoordinator = remember(chat.id) { PlaybackCoordinator() }
+    var activePlaybackMessageId by remember(chat.id) { mutableStateOf<String?>(null) }
+
+    DisposableEffect(chat.id) {
+        onDispose {
+            playbackCoordinator.release()
+            activePlaybackMessageId = null
+        }
+    }
 
     BackHandler(enabled = imagePreviewStartIndex >= 0) {
         imagePreviewStartIndex = -1
@@ -2121,6 +2179,9 @@ private fun ChatContent(
                 isLoadingOlderMessages = state.isLoadingOlderMessages,
                 hasOlderMessages = state.hasOlderMessages,
                 onLoadOlderMessages = onLoadOlderMessages,
+                playbackCoordinator = playbackCoordinator,
+                activePlaybackMessageId = activePlaybackMessageId,
+                onActivePlaybackChanged = { activePlaybackMessageId = it },
                 onAttachmentClick = { message, type, attachment ->
                     if (type == MessageType.Image && !attachment?.url.isNullOrBlank()) {
                         val previewIndex = imageMessages.indexOfFirst { it.id == message.id }
@@ -2150,19 +2211,25 @@ private fun ChatContent(
                         .navigationBarsPadding()
                         .imePadding()
                 ) {
-                    if (state.uploadProgress != null) {
+                    if (uploadProgress != null) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 12.dp, vertical = 6.dp)
                         ) {
-                            Text(
-                                text = "Загрузка вложения...",
-                                color = Color(0xFF8296AC),
-                                style = MaterialTheme.typography.bodySmall
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "Загрузка вложения...",
+                                    color = Color(0xFF8296AC),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TextButton(onClick = onCancelUpload) {
+                                    Text("Отмена")
+                                }
+                            }
                             LinearProgressIndicator(
-                                progress = state.uploadProgress / 100f,
+                                progress = uploadProgress / 100f,
                                 modifier = Modifier.fillMaxWidth(),
                                 color = Color(0xFF5EB5F7)
                             )
@@ -2230,7 +2297,7 @@ private fun ChatContent(
                                 }
                                 Button(
                                     onClick = sendSelectedMedia,
-                                    enabled = state.uploadProgress == null
+                                    enabled = uploadProgress == null
                                 ) {
                                     Text("Отправить")
                                 }
@@ -2238,96 +2305,40 @@ private fun ChatContent(
                         }
                     }
 
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 6.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Attachment button
-                        IconButton(
-                            onClick = {
-                                openMediaLauncher.launch(
-                                    PickVisualMediaRequest(
-                                        ActivityResultContracts.PickVisualMedia.ImageOnly
-                                    )
+                    MessageInput(
+                        draft = draft,
+                        onDraftChanged = { value ->
+                            draft = value
+                            onInputChanged(value)
+                        },
+                        onSendText = { value ->
+                            if (value.isBlank()) return@MessageInput
+                            onSendText(value)
+                            draft = ""
+                        },
+                        onOpenAttachmentPicker = {
+                            openMediaLauncher.launch(
+                                PickVisualMediaRequest(
+                                    ActivityResultContracts.PickVisualMedia.ImageOnly
                                 )
-                            },
-                            modifier = Modifier.size(40.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.AttachFile,
-                                contentDescription = "Прикрепить",
-                                tint = Color(0xFF8296AC),
-                                modifier = Modifier.size(22.dp)
                             )
-                        }
-
-                        // Rounded text field
-                        TextField(
-                            value = draft,
-                            onValueChange = {
-                                draft = it
-                                onInputChanged(it)
-                            },
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(horizontal = 4.dp),
-                            placeholder = {
-                                Text(
-                                    if (state.uploadProgress != null) "Загрузка файла..." else "Сообщение",
-                                    color = Color(0xFF6B7D8E)
-                                )
-                            },
-                            singleLine = true,
-                            colors = TextFieldDefaults.colors(
-                                focusedContainerColor = Color(0xFF242F3D),
-                                unfocusedContainerColor = Color(0xFF242F3D),
-                                cursorColor = Color(0xFF5EB5F7),
-                                focusedIndicatorColor = Color.Transparent,
-                                unfocusedIndicatorColor = Color.Transparent,
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White
-                            ),
-                            shape = RoundedCornerShape(24.dp),
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                            keyboardActions = KeyboardActions(
-                                onSend = {
-                                    if (draft.isNotBlank()) {
-                                        onSendText(draft)
-                                        draft = ""
-                                    }
-                                }
-                            )
-                        )
-
-                        // Send button (appears when draft is not blank)
-                        val sendAlpha by animateFloatAsState(
-                            targetValue = if (draft.isNotBlank() || selectedMediaUris.isNotEmpty()) 1f else 0.4f,
-                            animationSpec = tween(150),
-                            label = "sendAlpha"
-                        )
-                        IconButton(
-                            onClick = {
-                                if (draft.isNotBlank()) {
-                                    onSendText(draft)
-                                    draft = ""
-                                }
-                                if (selectedMediaUris.isNotEmpty()) {
-                                    sendSelectedMedia()
-                                }
-                            },
-                            enabled = draft.isNotBlank() || selectedMediaUris.isNotEmpty(),
-                            modifier = Modifier.size(40.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.Send,
-                                contentDescription = "Отправить",
-                                tint = Color(0xFF5EB5F7).copy(alpha = sendAlpha),
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                    }
+                        },
+                        recordingMode = state.recordingMode,
+                        recordingState = state.recordingState,
+                        recordingElapsedSeconds = recordingElapsedSeconds,
+                        recordingCommands = recordingCommands,
+                        failedRecordingUpload = state.failedRecordingUpload,
+                        onToggleRecordingMode = onToggleRecordingMode,
+                        onRecordingStarted = onRecordingStarted,
+                        onRecordingLocked = onRecordingLocked,
+                        onRecordingCancelled = onRecordingCancelled,
+                        onRecordingFinished = onRecordingFinished,
+                        onCancelUpload = onCancelUpload,
+                        onRetryFailedRecordingUpload = onRetryFailedRecordingUpload,
+                        onDismissFailedRecordingUpload = onDismissFailedRecordingUpload,
+                        ensureVoicePermission = ensureVoiceRecordingPermission,
+                        ensureVideoPermission = ensureVideoRecordingPermissions
+                    )
                 }
         }
     }
@@ -2353,6 +2364,9 @@ private fun ChatMessagesList(
     isLoadingOlderMessages: Boolean,
     hasOlderMessages: Boolean,
     onLoadOlderMessages: () -> Unit,
+    playbackCoordinator: PlaybackCoordinator,
+    activePlaybackMessageId: String?,
+    onActivePlaybackChanged: (String?) -> Unit,
     onAttachmentClick: (ChatMessage, MessageType, MessageAttachment?) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -2426,6 +2440,9 @@ private fun ChatMessagesList(
             MessageBubble(
                 message = message,
                 isMine = message.senderId == currentUserId,
+                playbackCoordinator = playbackCoordinator,
+                activePlaybackMessageId = activePlaybackMessageId,
+                onActivePlaybackChanged = onActivePlaybackChanged,
                 onAttachmentClick = { type, attachment ->
                     onAttachmentClick(message, type, attachment)
                 }
@@ -3758,6 +3775,9 @@ private fun CallVideoView(
 private fun MessageBubble(
     message: ChatMessage,
     isMine: Boolean,
+    playbackCoordinator: PlaybackCoordinator,
+    activePlaybackMessageId: String?,
+    onActivePlaybackChanged: (String?) -> Unit,
     onAttachmentClick: (MessageType, MessageAttachment?) -> Unit
 ) {
     val alignment = if (isMine) Alignment.End else Alignment.Start
@@ -3795,6 +3815,9 @@ private fun MessageBubble(
 
                 MessageBody(
                     message = message,
+                    playbackCoordinator = playbackCoordinator,
+                    activePlaybackMessageId = activePlaybackMessageId,
+                    onActivePlaybackChanged = onActivePlaybackChanged,
                     onAttachmentClick = { onAttachmentClick(message.type, message.attachment) }
                 )
 
@@ -3833,6 +3856,9 @@ private fun MessageBubble(
 @Composable
 private fun MessageBody(
     message: ChatMessage,
+    playbackCoordinator: PlaybackCoordinator,
+    activePlaybackMessageId: String?,
+    onActivePlaybackChanged: (String?) -> Unit,
     onAttachmentClick: () -> Unit
 ) {
     when (message.type) {
@@ -3865,11 +3891,28 @@ private fun MessageBody(
             }
         }
 
+        MessageType.VideoNote -> {
+            VideoNoteMessageBody(
+                message = message,
+                onClick = onAttachmentClick
+            )
+        }
+
         MessageType.Audio -> {
             AttachmentLink(
                 title = message.attachment?.originalName?.ifBlank { "Голосовое сообщение" } ?: "Голосовое сообщение",
                 subtitle = "Скачать аудио",
                 onClick = onAttachmentClick
+            )
+        }
+
+        MessageType.Voice -> {
+            VoiceMessageBody(
+                message = message,
+                playbackCoordinator = playbackCoordinator,
+                isActive = activePlaybackMessageId == message.id,
+                onActivePlaybackChanged = onActivePlaybackChanged,
+                onFallbackClick = onAttachmentClick
             )
         }
 
@@ -3889,6 +3932,155 @@ private fun MessageBody(
         MessageType.Text -> {
             Text(text = message.text, color = Color.White)
         }
+    }
+}
+
+@Composable
+private fun VoiceMessageBody(
+    message: ChatMessage,
+    playbackCoordinator: PlaybackCoordinator,
+    isActive: Boolean,
+    onActivePlaybackChanged: (String?) -> Unit,
+    onFallbackClick: () -> Unit
+) {
+    val audioUrl = resolveMediaUrl(message.attachment?.url)
+    if (audioUrl == null) {
+        AttachmentLink(
+            title = "Голосовое сообщение",
+            subtitle = "Скачать аудио",
+            onClick = onFallbackClick
+        )
+        return
+    }
+    val isPlaying = isActive
+
+    val waveformBars = remember(message.id) {
+        listOf(5.dp, 9.dp, 7.dp, 12.dp, 8.dp, 14.dp, 10.dp, 12.dp, 8.dp, 6.dp, 11.dp, 9.dp)
+    }
+
+    Surface(
+        color = Color(0x33000000),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onFallbackClick() }
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = Color(0xFF5EB5F7),
+                modifier = Modifier
+                    .size(34.dp)
+                    .clickable {
+                        playbackCoordinator.toggle(
+                            messageId = message.id,
+                            url = audioUrl,
+                            onActiveChanged = onActivePlaybackChanged,
+                            onError = onFallbackClick
+                        )
+                    }
+            ) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                    Icon(
+                        imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                        contentDescription = if (isPlaying) "Пауза" else "Воспроизвести",
+                        tint = Color.White,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.size(8.dp))
+
+            Row(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                verticalAlignment = Alignment.Bottom
+            ) {
+                waveformBars.forEach { height ->
+                    Box(
+                        modifier = Modifier
+                            .width(3.dp)
+                            .height(height)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(
+                                if (isPlaying) Color(0xFF9ED7FF) else Color(0xFF6B7D8E)
+                            )
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.size(8.dp))
+            Text(
+                text = formatMediaDuration(message.attachment?.durationMs),
+                color = Color(0xFFD6E4F5),
+                fontSize = 12.sp
+            )
+        }
+    }
+}
+
+@Composable
+private fun VideoNoteMessageBody(
+    message: ChatMessage,
+    onClick: () -> Unit
+) {
+    val videoUrl = resolveMediaUrl(message.attachment?.url)
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Surface(
+            shape = CircleShape,
+            color = Color(0x33000000),
+            modifier = Modifier
+                .size(140.dp)
+                .clip(CircleShape)
+                .clickable { onClick() }
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                if (videoUrl != null) {
+                    AsyncImage(
+                        model = rememberImageRequest(
+                            data = videoUrl,
+                            downsamplePx = 640
+                        ),
+                        imageLoader = rememberGovChatImageLoader(),
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color(0xFF0F172A))
+                    )
+                }
+
+                Surface(
+                    color = Color(0xAA0F172A),
+                    shape = CircleShape,
+                    modifier = Modifier.size(42.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Filled.Videocam,
+                            contentDescription = "Открыть видео-кружок",
+                            tint = Color.White
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = "Видео-кружок • ${formatMediaDuration(message.attachment?.durationMs)}",
+            color = Color(0xFFD6E4F5),
+            style = MaterialTheme.typography.bodySmall
+        )
     }
 }
 
@@ -4280,6 +4472,14 @@ private fun formatTime(epochMillis: Long): String {
         val formatter = java.text.SimpleDateFormat("HH:mm", java.util.Locale("ru", "RU"))
         formatter.format(java.util.Date(epochMillis))
     }.getOrDefault("")
+}
+
+private fun formatMediaDuration(durationMs: Long?): String {
+    val totalSeconds = (durationMs ?: 0L).div(1000L).toInt()
+    if (totalSeconds <= 0) return "--:--"
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return "%d:%02d".format(minutes, seconds)
 }
 
 private fun formatCallDuration(totalSeconds: Int): String {

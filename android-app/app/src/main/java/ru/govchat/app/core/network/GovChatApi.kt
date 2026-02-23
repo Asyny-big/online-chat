@@ -140,7 +140,10 @@ data class AttachmentDto(
     val url: String? = null,
     val originalName: String? = null,
     val mimeType: String? = null,
-    val size: Long? = null
+    val size: Long? = null,
+    val durationMs: Long? = null,
+    @Json(name = "duration")
+    val durationSeconds: Long? = null
 )
 
 data class ReadByDto(

@@ -109,8 +109,10 @@ class GovChatAttachmentDownloader(
 
         return when (messageType) {
             MessageType.Image -> "image/*"
-            MessageType.Video -> "video/*"
-            MessageType.Audio -> "audio/*"
+            MessageType.Video,
+            MessageType.VideoNote -> "video/*"
+            MessageType.Audio,
+            MessageType.Voice -> "audio/*"
             else -> "application/octet-stream"
         }
     }
@@ -124,6 +126,8 @@ class GovChatAttachmentDownloader(
             MessageType.Image -> "image"
             MessageType.Video -> "video"
             MessageType.Audio -> "audio"
+            MessageType.Voice -> "voice"
+            MessageType.VideoNote -> "video_note"
             MessageType.File -> "file"
             MessageType.System -> "system"
             MessageType.Text -> "message"

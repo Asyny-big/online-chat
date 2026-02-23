@@ -5,15 +5,21 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.SystemClock
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -22,11 +28,13 @@ import ru.govchat.app.BuildConfig
 import ru.govchat.app.core.call.CallManager
 import ru.govchat.app.core.call.CallUiPhase
 import ru.govchat.app.core.call.CallUiState
+import ru.govchat.app.core.media.TempMediaStore
 import ru.govchat.app.core.notification.IncomingCallNotifications
 import ru.govchat.app.core.notification.NotificationCommand
 import ru.govchat.app.core.notification.NotificationIntents
 import ru.govchat.app.core.storage.ChatMessagesCacheStorage
 import ru.govchat.app.core.ui.viewModelFactory
+import ru.govchat.app.domain.model.AttachmentType
 import ru.govchat.app.domain.model.ChatMessage
 import ru.govchat.app.domain.model.ChatType
 import ru.govchat.app.domain.model.MessageDeliveryStatus
@@ -82,8 +90,16 @@ class MainViewModel(
 ) : ViewModel() {
 
     private val applicationContext = appContext.applicationContext
+    private val tempMediaStore = TempMediaStore(applicationContext)
+    private val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val mutableState = MutableStateFlow(MainUiState(isLoadingChats = true))
     val state: StateFlow<MainUiState> = mutableState.asStateFlow()
+    private val mutableUploadProgress = MutableStateFlow<Int?>(null)
+    val uploadProgress: StateFlow<Int?> = mutableUploadProgress.asStateFlow()
+    private val mutableRecordingElapsedSeconds = MutableStateFlow(0)
+    val recordingElapsedSeconds: StateFlow<Int> = mutableRecordingElapsedSeconds.asStateFlow()
+    private val mutableRecordingCommands = MutableSharedFlow<RecordingCommand>(extraBufferCapacity = 4)
+    val recordingCommands = mutableRecordingCommands.asSharedFlow()
     private val callManager = CallManager(
         appContext = applicationContext
     )
@@ -91,6 +107,9 @@ class MainViewModel(
 
     private var typingStopJob: Job? = null
     private var callControlsAutoHideJob: Job? = null
+    private var recordingTickerJob: Job? = null
+    private var uploadJob: Job? = null
+    private var activeRecordingSession: RecordingSession? = null
     private var tokenInitialized = false
     private val handledNotificationEventIds = LinkedHashSet<String>()
     private val messagesCache: MutableMap<String, List<ChatMessage>> = LinkedHashMap()
@@ -98,6 +117,9 @@ class MainViewModel(
 
     init {
         callManager.bind(viewModelScope)
+        viewModelScope.launch(Dispatchers.IO) {
+            tempMediaStore.cleanupExpired()
+        }
         viewModelScope.launch {
             callUiState.collect { call ->
                 if (call.phase == CallUiPhase.Active) {
@@ -223,16 +245,21 @@ class MainViewModel(
 
     fun clearSelectedChat() {
         typingStopJob?.cancel()
+        recordingTickerJob?.cancel()
+        uploadJob?.cancel()
+        activeRecordingSession = null
+        mutableUploadProgress.value = null
+        mutableRecordingElapsedSeconds.value = 0
         val selected = mutableState.value.selectedChatId ?: return
         chatRepository.stopTyping(selected)
         mutableState.update {
             it.copy(
                 selectedChatId = null,
                 messages = emptyList(),
-                uploadProgress = null,
                 isLoadingMessages = false,
                 isLoadingOlderMessages = false,
-                hasOlderMessages = false
+                hasOlderMessages = false,
+                recordingState = RecordingState.Idle
             )
         }
     }
@@ -275,28 +302,240 @@ class MainViewModel(
         val chatId = mutableState.value.selectedChatId ?: return
 
         stopTypingNow()
-        viewModelScope.launch {
-            mutableState.update { it.copy(isSending = true, uploadProgress = 0, errorMessage = null) }
-            sendAttachmentMessageUseCase(
-                chatId = chatId,
-                attachmentUri = uri.toString()
-            ) { progress ->
-                mutableState.update { it.copy(uploadProgress = progress.coerceIn(0, 100)) }
-            }.onSuccess { message ->
-                val normalized = normalizeDeliveryStatus(message)
-                appendMessage(normalized)
-                updateChatWithMessage(chatId, normalized)
-                mutableState.update { it.copy(isSending = false, uploadProgress = null) }
-            }.onFailure { error ->
+        uploadAttachment(
+            chatId = chatId,
+            uri = uri,
+            attachmentType = null,
+            durationMs = null,
+            onUploadFailed = null
+        )
+    }
+
+    fun toggleRecordingMode() {
+        if (mutableState.value.recordingState != RecordingState.Idle) return
+        mutableState.update { current ->
+            val nextMode = when (current.recordingMode) {
+                RecordingMode.Voice -> RecordingMode.Video
+                RecordingMode.Video -> RecordingMode.Voice
+                RecordingMode.None -> RecordingMode.Voice
+            }
+            current.copy(recordingMode = nextMode)
+        }
+    }
+
+    fun onRecordingStarted(mode: RecordingMode): Long? {
+        if (mode == RecordingMode.None) return null
+        val current = mutableState.value
+        if (current.recordingState != RecordingState.Idle) return null
+        val chatId = current.selectedChatId ?: return null
+        val session = RecordingSession(
+            id = SystemClock.elapsedRealtimeNanos(),
+            chatId = chatId,
+            mode = mode
+        )
+        activeRecordingSession = session
+        mutableRecordingElapsedSeconds.value = 0
+
+        mutableState.update {
+            it.copy(
+                recordingMode = mode,
+                recordingState = RecordingState.Recording,
+                failedRecordingUpload = null,
+                errorMessage = null
+            )
+        }
+        startRecordingTicker()
+        return session.id
+    }
+
+    fun onRecordingLocked() {
+        mutableState.update { current ->
+            if (current.recordingState != RecordingState.Recording) current
+            else current.copy(recordingState = RecordingState.Locked)
+        }
+    }
+
+    fun onRecordingCancelled() {
+        stopRecordingTicker(resetElapsed = true)
+        activeRecordingSession = null
+        mutableState.update { current ->
+            if (current.recordingState == RecordingState.Uploading) current
+            else current.copy(recordingState = RecordingState.Idle)
+        }
+    }
+
+    fun onRecordingFinished(sessionId: Long, uri: Uri, durationMs: Long) {
+        val session = activeRecordingSession
+        if (session == null || session.id != sessionId) {
+            tempMediaStore.deleteLocalRecordingFile(uri)
+            return
+        }
+
+        stopTypingNow()
+        stopRecordingTicker(resetElapsed = false)
+        mutableRecordingElapsedSeconds.value = (durationMs / 1000L).toInt().coerceAtLeast(0)
+        mutableState.update {
+            it.copy(
+                recordingMode = session.mode,
+                recordingState = RecordingState.Uploading,
+                failedRecordingUpload = null
+            )
+        }
+        uploadAttachment(
+            chatId = session.chatId,
+            uri = uri,
+            attachmentType = session.mode.toAttachmentType(),
+            durationMs = durationMs,
+            onUploadFailed = { errorMessage ->
                 mutableState.update {
                     it.copy(
-                        isSending = false,
-                        uploadProgress = null,
-                        errorMessage = error.message ?: "Р В РЎвЂєР РЋРІвЂљВ¬Р В РЎвЂР В Р’В±Р В РЎвЂќР В Р’В° Р В Р’В·Р В Р’В°Р В РЎвЂ“Р РЋР вЂљР РЋРЎвЂњР В Р’В·Р В РЎвЂќР В РЎвЂ Р РЋРІР‚С›Р В Р’В°Р В РІвЂћвЂ“Р В Р’В»Р В Р’В°"
+                        failedRecordingUpload = FailedRecordingUploadUi(
+                            chatId = session.chatId,
+                            uri = uri.toString(),
+                            attachmentType = session.mode.toAttachmentType()
+                                ?: AttachmentType.File,
+                            durationMs = durationMs,
+                            errorMessage = errorMessage
+                        )
                     )
                 }
             }
+        )
+    }
+
+    fun retryFailedRecordingUpload() {
+        val failed = mutableState.value.failedRecordingUpload ?: return
+        mutableRecordingElapsedSeconds.value = (failed.durationMs / 1000L).toInt().coerceAtLeast(0)
+        mutableState.update {
+            it.copy(
+                recordingState = RecordingState.Uploading,
+                failedRecordingUpload = null
+            )
         }
+        uploadAttachment(
+            chatId = failed.chatId,
+            uri = Uri.parse(failed.uri),
+            attachmentType = failed.attachmentType,
+            durationMs = failed.durationMs,
+            onUploadFailed = { errorMessage ->
+                mutableState.update {
+                    it.copy(
+                        failedRecordingUpload = failed.copy(errorMessage = errorMessage)
+                    )
+                }
+            }
+        )
+    }
+
+    fun clearFailedRecordingUpload() {
+        mutableState.value.failedRecordingUpload?.let { failed ->
+            tempMediaStore.deleteLocalRecordingFile(Uri.parse(failed.uri))
+        }
+        mutableState.update { it.copy(failedRecordingUpload = null) }
+    }
+
+    fun cancelUpload() {
+        uploadJob?.cancel()
+        uploadJob = null
+        activeRecordingSession = null
+        mutableUploadProgress.value = null
+        mutableState.update {
+            it.copy(
+                isSending = false,
+                recordingState = RecordingState.Idle
+            )
+        }
+    }
+
+    private fun uploadAttachment(
+        chatId: String,
+        uri: Uri,
+        attachmentType: AttachmentType?,
+        durationMs: Long?,
+        onUploadFailed: ((String) -> Unit)?
+    ) {
+        if (uploadJob?.isActive == true && onUploadFailed != null) {
+            onUploadFailed?.invoke("Upload already in progress")
+            return
+        }
+        uploadJob = viewModelScope.launch {
+            mutableState.update { it.copy(isSending = true, errorMessage = null) }
+            mutableUploadProgress.value = 0
+            val uploadResult = sendAttachmentMessageUseCase(
+                chatId = chatId,
+                attachmentUri = uri.toString(),
+                attachmentType = attachmentType,
+                durationMs = durationMs
+            ) { progress ->
+                mutableUploadProgress.value = progress.coerceIn(0, 100)
+            }
+            uploadResult.onSuccess { message ->
+                val normalized = normalizeDeliveryStatus(message)
+                appendMessage(normalized)
+                updateChatWithMessage(chatId, normalized)
+                tempMediaStore.deleteLocalRecordingFile(uri)
+                activeRecordingSession = null
+                mutableUploadProgress.value = null
+                mutableRecordingElapsedSeconds.value = 0
+                mutableState.update {
+                    it.copy(
+                        isSending = false,
+                        recordingState = RecordingState.Idle,
+                        failedRecordingUpload = null
+                    )
+                }
+                uploadJob = null
+            }.onFailure { error ->
+                val errorText = when {
+                    error is CancellationException -> "Upload cancelled"
+                    error.message?.contains("413") == true -> "File too large (413)"
+                    else -> error.message ?: "Не удалось загрузить вложение"
+                }
+                activeRecordingSession = null
+                mutableUploadProgress.value = null
+                mutableRecordingElapsedSeconds.value = 0
+                mutableState.update {
+                    it.copy(
+                        isSending = false,
+                        recordingState = RecordingState.Idle,
+                        errorMessage = errorText
+                    )
+                }
+                onUploadFailed?.invoke(errorText)
+                uploadJob = null
+            }
+        }
+    }
+
+    private fun startRecordingTicker() {
+        recordingTickerJob?.cancel()
+        recordingTickerJob = viewModelScope.launch {
+            while (true) {
+                delay(1_000L)
+                val recordingState = mutableState.value.recordingState
+                if (
+                    recordingState != RecordingState.Recording &&
+                    recordingState != RecordingState.Locked
+                ) {
+                    continue
+                }
+                mutableRecordingElapsedSeconds.update { it + 1 }
+            }
+        }
+    }
+
+    private fun stopRecordingTicker(resetElapsed: Boolean) {
+        recordingTickerJob?.cancel()
+        recordingTickerJob = null
+        if (resetElapsed) {
+            mutableRecordingElapsedSeconds.value = 0
+        }
+    }
+
+    private fun requestRecordingPreempt(command: RecordingCommand) {
+        val recordingState = mutableState.value.recordingState
+        if (recordingState != RecordingState.Recording && recordingState != RecordingState.Locked) return
+        mutableRecordingCommands.tryEmit(command)
     }
 
     fun onInputChanged(text: String) {
@@ -327,6 +566,7 @@ class MainViewModel(
             startGroupCall(type)
             return
         }
+        requestRecordingPreempt(RecordingCommand.StopAndSend)
 
         viewModelScope.launch {
             mutableState.update {
@@ -397,6 +637,7 @@ class MainViewModel(
     fun startGroupCall(type: String) {
         val chat = mutableState.value.selectedChat ?: return
         if (chat.type != ChatType.GROUP) return
+        requestRecordingPreempt(RecordingCommand.StopAndSend)
 
         viewModelScope.launch {
             mutableState.update {
@@ -544,6 +785,7 @@ class MainViewModel(
     fun acceptIncomingCall(fromNotification: Boolean = false) {
         val incoming = mutableState.value.incomingCall ?: return
         if (mutableState.value.isCallActionInProgress) return
+        requestRecordingPreempt(RecordingCommand.StopAndSend)
         val callStartedAtMillis = System.currentTimeMillis()
 
         viewModelScope.launch {
@@ -835,6 +1077,7 @@ class MainViewModel(
                     if (mutableState.value.activeCall != null) {
                         return@collect
                     }
+                    requestRecordingPreempt(RecordingCommand.StopAndSend)
                     val currentUserId = mutableState.value.currentUserId
                     if (event.initiatorId.isNotBlank() && event.initiatorId == currentUserId) {
                         return@collect
@@ -1655,9 +1898,9 @@ class MainViewModel(
 
     override fun onCleared() {
         callControlsAutoHideJob?.cancel()
-        // viewModelScope is already cancelled when onCleared runs,
-        // so use GlobalScope to ensure WebRTC resources are released.
-        GlobalScope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
+        recordingTickerJob?.cancel()
+        uploadJob?.cancel()
+        cleanupScope.launch {
             runCatching { callManager.close() }
         }
         super.onCleared()
@@ -1728,8 +1971,18 @@ private data class ChatPagingState(
     val hasMore: Boolean
 )
 
+private fun RecordingMode.toAttachmentType(): AttachmentType? {
+    return when (this) {
+        RecordingMode.None -> null
+        RecordingMode.Voice -> AttachmentType.Voice
+        RecordingMode.Video -> AttachmentType.VideoNote
+    }
+}
+
 private fun ChatMessage.toChatSubtitle(): String {
     return when (type) {
+        MessageType.Voice -> "Голосовое сообщение"
+        MessageType.VideoNote -> "Видео-кружок"
         MessageType.Audio -> "РЎР‚РЎСџР вЂ№Р’В¤ Р В РІР‚СљР В РЎвЂўР В Р’В»Р В РЎвЂўР РЋР С“Р В РЎвЂўР В Р вЂ Р В РЎвЂўР В Р’Вµ Р РЋР С“Р В РЎвЂўР В РЎвЂўР В Р’В±Р РЋРІР‚В°Р В Р’ВµР В Р вЂ¦Р В РЎвЂР В Р’Вµ"
         MessageType.Image -> "РЎР‚РЎСџРІР‚СљР’В· Р В Р’ВР В Р’В·Р В РЎвЂўР В Р’В±Р РЋР вЂљР В Р’В°Р В Р’В¶Р В Р’ВµР В Р вЂ¦Р В РЎвЂР В Р’Вµ"
         MessageType.Video -> "РЎР‚РЎСџР вЂ№РўС’ Р В РІР‚в„ўР В РЎвЂР В РўвЂР В Р’ВµР В РЎвЂў"

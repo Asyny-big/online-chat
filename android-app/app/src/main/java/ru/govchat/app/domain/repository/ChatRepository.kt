@@ -1,6 +1,7 @@
 package ru.govchat.app.domain.repository
 
 import kotlinx.coroutines.flow.Flow
+import ru.govchat.app.domain.model.AttachmentType
 import ru.govchat.app.domain.model.CallJoinParticipant
 import ru.govchat.app.domain.model.CallSignalPayload
 import ru.govchat.app.domain.model.ChatMessage
@@ -32,6 +33,8 @@ interface ChatRepository {
     suspend fun sendAttachmentMessage(
         chatId: String,
         attachmentUri: String,
+        attachmentType: AttachmentType? = null,
+        durationMs: Long? = null,
         onProgress: (Int) -> Unit
     ): Result<ChatMessage>
     suspend fun markMessagesRead(chatId: String, messageIds: List<String>)

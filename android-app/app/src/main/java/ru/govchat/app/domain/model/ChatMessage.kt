@@ -17,7 +17,8 @@ data class MessageAttachment(
     val url: String,
     val originalName: String,
     val mimeType: String?,
-    val sizeBytes: Long?
+    val sizeBytes: Long?,
+    val durationMs: Long? = null
 )
 
 enum class MessageType {
@@ -25,6 +26,8 @@ enum class MessageType {
     Image,
     Video,
     Audio,
+    Voice,
+    VideoNote,
     File,
     System
 }
