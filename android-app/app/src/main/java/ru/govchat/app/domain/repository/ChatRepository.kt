@@ -12,7 +12,11 @@ import ru.govchat.app.domain.model.WebRtcConfig
 
 interface ChatRepository {
     suspend fun loadDialogs(): Result<List<ChatPreview>>
-    suspend fun loadMessages(chatId: String): Result<List<ChatMessage>>
+    suspend fun loadMessages(
+        chatId: String,
+        beforeMillis: Long? = null,
+        limit: Int = 30
+    ): Result<List<ChatMessage>>
     suspend fun sendTextMessage(chatId: String, text: String): Result<ChatMessage>
     suspend fun startCall(chatId: String, type: String): Result<String>
     suspend fun acceptCall(callId: String): Result<Unit>

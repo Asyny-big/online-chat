@@ -26,6 +26,7 @@ import ru.govchat.app.domain.model.RealtimeEvent
 import ru.govchat.app.domain.model.UserProfile
 import ru.govchat.app.domain.model.WebRtcConfig
 import ru.govchat.app.domain.repository.ChatRepository
+import java.time.Instant
 
 class ChatRepositoryImpl(
     private val appContext: Context,
@@ -40,9 +41,18 @@ class ChatRepositoryImpl(
         }
     }
 
-    override suspend fun loadMessages(chatId: String): Result<List<ChatMessage>> {
+    override suspend fun loadMessages(
+        chatId: String,
+        beforeMillis: Long?,
+        limit: Int
+    ): Result<List<ChatMessage>> {
         return runAuthorized {
-            api.getMessages(chatId = chatId).map { it.toDomain(chatIdFallback = chatId) }
+            val beforeIso = beforeMillis?.let { Instant.ofEpochMilli(it).toString() }
+            api.getMessages(
+                chatId = chatId,
+                before = beforeIso,
+                limit = limit
+            ).map { it.toDomain(chatIdFallback = chatId) }
         }
     }
 

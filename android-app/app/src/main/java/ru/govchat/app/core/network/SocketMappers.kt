@@ -82,11 +82,29 @@ internal fun JSONObject.toSocketChatPreview(): ChatPreview? {
             ?: "Чат",
         subtitle = subtitle,
         avatarUrl = optString("displayAvatar").takeIf { it.isNotBlank() },
+        peerUserId = resolvePeerUserId(type = type, participants = participants),
         isOnline = optString("displayStatus") == "online",
         unreadCount = unreadCount,
         participantCount = participantCount,
         updatedAtMillis = optString("updatedAt").toEpochMillisOrZero()
     )
+}
+
+private fun resolvePeerUserId(type: ChatType, participants: JSONArray?): String? {
+    if (type != ChatType.PRIVATE || participants == null) return null
+    for (index in 0 until participants.length()) {
+        val participant = participants.optJSONObject(index) ?: continue
+        val user = participant.opt("user")
+        val id = when (user) {
+            is JSONObject -> user.optString("_id").takeIf { it.isNotBlank() }
+                ?: user.optString("id").takeIf { it.isNotBlank() }
+
+            is String -> user.takeIf { it.isNotBlank() }
+            else -> null
+        }
+        if (!id.isNullOrBlank()) return id
+    }
+    return null
 }
 
 private fun parseReadByIds(readBy: JSONArray?): Set<String> {

@@ -28,7 +28,11 @@ interface GovChatApi {
     suspend fun getChat(@Path("chatId") chatId: String): ChatDto
 
     @GET("messages/{chatId}")
-    suspend fun getMessages(@Path("chatId") chatId: String): List<MessageDto>
+    suspend fun getMessages(
+        @Path("chatId") chatId: String,
+        @Query("before") before: String? = null,
+        @Query("limit") limit: Int = 30
+    ): List<MessageDto>
 
     @GET("webrtc/ice")
     suspend fun getWebRtcIceConfig(): WebRtcIceConfigDto

@@ -1,6 +1,5 @@
 ﻿package ru.govchat.app.ui.screens.main
 
-import android.graphics.BitmapFactory
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -105,6 +104,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -119,8 +119,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -145,10 +143,16 @@ import io.livekit.android.room.Room
 import io.livekit.android.room.track.Track as LiveKitTrack
 import io.livekit.android.room.track.TrackPublication as LiveKitTrackPublication
 import io.livekit.android.room.track.VideoTrack as LiveKitMediaVideoTrack
-import kotlinx.coroutines.Dispatchers
+import coil.ImageLoader
+import coil.compose.AsyncImage
+import coil.disk.DiskCache
+import coil.memory.MemoryCache
+import coil.request.CachePolicy
+import coil.request.ImageRequest
+import coil.size.Precision
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import livekit.org.webrtc.RendererCommon as LiveKitRendererCommon
 import livekit.org.webrtc.SurfaceViewRenderer as LiveKitSurfaceViewRenderer
 import org.webrtc.EglBase
@@ -184,6 +188,7 @@ fun MainScreen(
     onSendText: (String) -> Unit,
     onInputChanged: (String) -> Unit,
     onSendAttachment: (Uri) -> Unit,
+    onLoadOlderMessages: () -> Unit,
     onStartCall: (String) -> Unit,
     onStartGroupCall: (String) -> Unit,
     onConfirmJoinExistingGroupCall: () -> Unit,
@@ -439,6 +444,7 @@ fun MainScreen(
                         onSendText = onSendText,
                         onInputChanged = onInputChanged,
                         onSendAttachment = onSendAttachment,
+                        onLoadOlderMessages = onLoadOlderMessages,
                         onStartCall = { type ->
                             requestCallPermissions(type) {
                                 onStartCall(type)
@@ -983,39 +989,24 @@ private fun ProfileTabContent(
                     ),
                 contentAlignment = Alignment.Center
             ) {
-                if (profile?.avatarUrl != null) {
-                    val avatarUrl = resolveAvatarUrl(profile.avatarUrl)
-                    val bmpState by produceState<ImageBitmap?>(null, avatarUrl) {
-                        value = withContext(Dispatchers.IO) {
-                            runCatching {
-                                java.net.URL(avatarUrl).openStream().use { stream ->
-                                    BitmapFactory.decodeStream(stream)?.asImageBitmap()
-                                }
-                            }.getOrNull()
-                        }
-                    }
-                    val bmp = bmpState
-                    if (bmp != null) {
-                        androidx.compose.foundation.Image(
-                            bitmap = bmp,
-                            contentDescription = "Аватар",
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
-                    } else {
-                        Text(
-                            text = (profile.name.firstOrNull() ?: '?').uppercase(),
-                            color = Color.White,
-                            fontSize = 30.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                } else {
-                    Text(
-                        text = (profile?.name?.firstOrNull() ?: '?').uppercase(),
-                        color = Color.White,
-                        fontSize = 30.sp,
-                        fontWeight = FontWeight.Bold
+                val fallbackLetter = (profile?.name?.firstOrNull() ?: '?').uppercase()
+                val avatarUrl = resolveAvatarUrl(profile?.avatarUrl)
+                Text(
+                    text = fallbackLetter,
+                    color = Color.White,
+                    fontSize = 30.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                if (avatarUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = rememberImageRequest(
+                            data = avatarUrl,
+                            downsamplePx = 320
+                        ),
+                        imageLoader = rememberGovChatImageLoader(),
+                        contentDescription = "Аватар",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
                     )
                 }
             }
@@ -1862,6 +1853,7 @@ private fun ChatContent(
     onSendText: (String) -> Unit,
     onInputChanged: (String) -> Unit,
     onSendAttachment: (Uri) -> Unit,
+    onLoadOlderMessages: () -> Unit,
     onStartCall: (String) -> Unit,
     onStartGroupCall: (String) -> Unit,
     onAttachmentClick: (MessageType, MessageAttachment?) -> Unit
@@ -1913,10 +1905,27 @@ private fun ChatContent(
         }
     }
 
-    LaunchedEffect(state.messages.size) {
+    val lastMessageId = state.messages.lastOrNull()?.id
+
+    LaunchedEffect(chat.id, lastMessageId) {
         if (state.messages.isNotEmpty()) {
             listState.animateScrollToItem(state.messages.lastIndex)
         }
+    }
+
+    LaunchedEffect(
+        chat.id,
+        state.hasOlderMessages,
+        state.isLoadingMessages,
+        state.isLoadingOlderMessages
+    ) {
+        if (!state.hasOlderMessages || state.isLoadingMessages || state.isLoadingOlderMessages) return@LaunchedEffect
+        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
+            .collect { (index, offset) ->
+                if (index <= 2 && offset < 40) {
+                    onLoadOlderMessages()
+                }
+            }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -2134,7 +2143,27 @@ private fun ChatContent(
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(state.messages, key = { it.id }) { message ->
+                if (state.isLoadingOlderMessages) {
+                    item(key = "messages_loading_older") {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            CircularProgressIndicator(
+                                color = Color(0xFF3B82F6),
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp
+                            )
+                        }
+                    }
+                }
+                items(
+                    items = state.messages,
+                    key = { it.id },
+                    contentType = { it.type }
+                ) { message ->
                     MessageBubble(
                         message = message,
                         isMine = message.senderId == state.currentUserId,
@@ -2367,20 +2396,7 @@ private fun IncomingCallFullScreenOverlay(
     onAccept: () -> Unit,
     onDecline: () -> Unit
 ) {
-    val resolvedAvatarUrl = remember(avatarUrl) { resolveAvatarUrl(avatarUrl) }
-    val avatarBitmap by produceState<ImageBitmap?>(initialValue = null, key1 = resolvedAvatarUrl) {
-        value = if (resolvedAvatarUrl == null) {
-            null
-        } else {
-            withContext(Dispatchers.IO) {
-                runCatching {
-                    java.net.URL(resolvedAvatarUrl).openStream().use { stream ->
-                        BitmapFactory.decodeStream(stream)?.asImageBitmap()
-                    }
-                }.getOrNull()
-            }
-        }
-    }
+    val resolvedAvatarUrl = remember(avatarUrl) { resolveAvatarUrl(avatarUrl).ifBlank { null } }
 
     val pulseTransition = rememberInfiniteTransition(label = "incomingCallPulse")
     val pulseScale by pulseTransition.animateFloat(
@@ -2479,18 +2495,21 @@ private fun IncomingCallFullScreenOverlay(
                             .border(width = 2.dp, color = Color(0xFF334155), shape = CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
-                        if (avatarBitmap != null) {
-                            androidx.compose.foundation.Image(
-                                bitmap = avatarBitmap!!,
+                        Text(
+                            text = peerName.firstOrNull()?.uppercase() ?: "?",
+                            color = Color.White,
+                            style = MaterialTheme.typography.headlineLarge
+                        )
+                        if (!resolvedAvatarUrl.isNullOrBlank()) {
+                            AsyncImage(
+                                model = rememberImageRequest(
+                                    data = resolvedAvatarUrl,
+                                    downsamplePx = 528
+                                ),
+                                imageLoader = rememberGovChatImageLoader(),
                                 contentDescription = peerName,
                                 modifier = Modifier.fillMaxSize(),
                                 contentScale = ContentScale.Crop
-                            )
-                        } else {
-                            Text(
-                                text = peerName.firstOrNull()?.uppercase() ?: "?",
-                                color = Color.White,
-                                style = MaterialTheme.typography.headlineLarge
                             )
                         }
                     }
@@ -3273,20 +3292,7 @@ private fun CallParticipantVideoPlaceholder(
     val avatarSize = if (compact) 34.dp else 56.dp
     val titleStyle = if (compact) MaterialTheme.typography.labelSmall else MaterialTheme.typography.titleMedium
     val subtitleStyle = if (compact) MaterialTheme.typography.labelSmall else MaterialTheme.typography.bodySmall
-    val resolvedAvatarUrl = remember(avatarUrl) { resolveAvatarUrl(avatarUrl) }
-    val avatarBitmap by produceState<ImageBitmap?>(initialValue = null, key1 = resolvedAvatarUrl) {
-        value = if (resolvedAvatarUrl == null) {
-            null
-        } else {
-            withContext(Dispatchers.IO) {
-                runCatching {
-                    java.net.URL(resolvedAvatarUrl).openStream().use { stream ->
-                        BitmapFactory.decodeStream(stream)?.asImageBitmap()
-                    }
-                }.getOrNull()
-            }
-        }
-    }
+    val resolvedAvatarUrl = remember(avatarUrl) { resolveAvatarUrl(avatarUrl).ifBlank { null } }
     Box(
         modifier = modifier.background(Color(0xFF0F172A)),
         contentAlignment = Alignment.Center
@@ -3299,18 +3305,21 @@ private fun CallParticipantVideoPlaceholder(
                     .background(Color(0xFF334155)),
                 contentAlignment = Alignment.Center
             ) {
-                if (avatarBitmap != null) {
-                    androidx.compose.foundation.Image(
-                        bitmap = avatarBitmap!!,
+                Text(
+                    text = title.firstOrNull()?.uppercase() ?: "?",
+                    color = Color.White,
+                    style = if (compact) MaterialTheme.typography.labelMedium else MaterialTheme.typography.titleLarge
+                )
+                if (!resolvedAvatarUrl.isNullOrBlank()) {
+                    AsyncImage(
+                        model = rememberImageRequest(
+                            data = resolvedAvatarUrl,
+                            downsamplePx = if (compact) 96 else 160
+                        ),
+                        imageLoader = rememberGovChatImageLoader(),
                         contentDescription = title,
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop
-                    )
-                } else {
-                    Text(
-                        text = title.firstOrNull()?.uppercase() ?: "?",
-                        color = Color.White,
-                        style = if (compact) MaterialTheme.typography.labelMedium else MaterialTheme.typography.titleLarge
                     )
                 }
             }
@@ -3879,29 +3888,18 @@ private fun RemoteImagePreview(
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Crop
 ) {
-    val bitmap by produceState<ImageBitmap?>(initialValue = null, key1 = imageUrl) {
-        value = withContext(Dispatchers.IO) {
-            runCatching {
-                val connection = java.net.URL(imageUrl).openConnection()
-                connection.getInputStream().use { stream ->
-                    BitmapFactory.decodeStream(stream)?.asImageBitmap()
-                }
-            }.getOrNull()
-        }
-    }
-
-    if (bitmap == null) {
-        Box(
-            modifier = modifier.background(Color(0xFF1E293B)),
-            contentAlignment = Alignment.Center
-        ) {
-            CircularProgressIndicator(color = Color(0xFF3B82F6), modifier = Modifier.size(24.dp))
-        }
-    } else {
-        androidx.compose.foundation.Image(
-            bitmap = bitmap!!,
+    Box(
+        modifier = modifier.background(Color(0xFF1E293B)),
+        contentAlignment = Alignment.Center
+    ) {
+        AsyncImage(
+            model = rememberImageRequest(
+                data = imageUrl,
+                downsamplePx = 1080
+            ),
+            imageLoader = rememberGovChatImageLoader(),
             contentDescription = null,
-            modifier = modifier,
+            modifier = Modifier.fillMaxSize(),
             contentScale = contentScale
         )
     }
@@ -3912,33 +3910,18 @@ private fun LocalImagePreview(
     uri: Uri,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
-    val bitmap by produceState<ImageBitmap?>(initialValue = null, key1 = uri) {
-        value = withContext(Dispatchers.IO) {
-            runCatching {
-                context.contentResolver.openInputStream(uri)?.use { stream ->
-                    BitmapFactory.decodeStream(stream)?.asImageBitmap()
-                }
-            }.getOrNull()
-        }
-    }
-
-    if (bitmap == null) {
-        Box(
-            modifier = modifier.background(Color(0xFF0F172A)),
-            contentAlignment = Alignment.Center
-        ) {
-            CircularProgressIndicator(
-                color = Color(0xFF3B82F6),
-                modifier = Modifier.size(18.dp),
-                strokeWidth = 2.dp
-            )
-        }
-    } else {
-        androidx.compose.foundation.Image(
-            bitmap = bitmap!!,
+    Box(
+        modifier = modifier.background(Color(0xFF0F172A)),
+        contentAlignment = Alignment.Center
+    ) {
+        AsyncImage(
+            model = rememberImageRequest(
+                data = uri,
+                downsamplePx = 360
+            ),
+            imageLoader = rememberGovChatImageLoader(),
             contentDescription = null,
-            modifier = modifier,
+            modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop
         )
     }
@@ -4095,6 +4078,58 @@ private fun ImagesGalleryDialog(
                 }
             }
         }
+    }
+}
+
+private object GovChatImageLoaderHolder {
+    @Volatile
+    private var imageLoader: ImageLoader? = null
+
+    fun get(context: Context): ImageLoader {
+        return imageLoader ?: synchronized(this) {
+            imageLoader ?: ImageLoader.Builder(context)
+                .memoryCache {
+                    MemoryCache.Builder(context)
+                        .maxSizePercent(0.25)
+                        .build()
+                }
+                .diskCache {
+                    DiskCache.Builder()
+                        .directory(context.cacheDir.resolve("govchat_coil_cache"))
+                        .maxSizePercent(0.03)
+                        .build()
+                }
+                .respectCacheHeaders(false)
+                .build()
+                .also { imageLoader = it }
+        }
+    }
+}
+
+@Composable
+private fun rememberGovChatImageLoader(): ImageLoader {
+    val appContext = LocalContext.current.applicationContext
+    return remember(appContext) {
+        GovChatImageLoaderHolder.get(appContext)
+    }
+}
+
+@Composable
+private fun rememberImageRequest(
+    data: Any?,
+    downsamplePx: Int
+): ImageRequest {
+    val context = LocalContext.current
+    return remember(context, data, downsamplePx) {
+        ImageRequest.Builder(context)
+            .data(data)
+            .crossfade(true)
+            .precision(Precision.INEXACT)
+            .size(downsamplePx)
+            .memoryCachePolicy(CachePolicy.ENABLED)
+            .diskCachePolicy(CachePolicy.ENABLED)
+            .networkCachePolicy(CachePolicy.ENABLED)
+            .build()
     }
 }
 

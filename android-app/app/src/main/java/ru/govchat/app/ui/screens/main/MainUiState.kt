@@ -11,6 +11,8 @@ data class MainUiState(
     val selectedChatId: String? = null,
     val isLoadingChats: Boolean = false,
     val isLoadingMessages: Boolean = false,
+    val isLoadingOlderMessages: Boolean = false,
+    val hasOlderMessages: Boolean = false,
     val isRealtimeConnected: Boolean = false,
     val isSending: Boolean = false,
     val uploadProgress: Int? = null,

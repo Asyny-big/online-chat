@@ -1,4 +1,4 @@
-package ru.govchat.app.ui.screens.main
+﻿package ru.govchat.app.ui.screens.main
 
 import android.Manifest
 import android.content.Context
@@ -25,6 +25,7 @@ import ru.govchat.app.core.call.CallUiState
 import ru.govchat.app.core.notification.IncomingCallNotifications
 import ru.govchat.app.core.notification.NotificationCommand
 import ru.govchat.app.core.notification.NotificationIntents
+import ru.govchat.app.core.storage.ChatMessagesCacheStorage
 import ru.govchat.app.core.ui.viewModelFactory
 import ru.govchat.app.domain.model.ChatMessage
 import ru.govchat.app.domain.model.ChatType
@@ -75,6 +76,7 @@ class MainViewModel(
     private val searchUserByPhoneUseCase: SearchUserByPhoneUseCase,
     private val createChatUseCase: CreateChatUseCase,
     private val createGroupChatUseCase: CreateGroupChatUseCase,
+    private val messagesDiskCache: ChatMessagesCacheStorage,
     private val chatRepository: ChatRepository,
     private val authRepository: AuthRepository
 ) : ViewModel() {
@@ -91,6 +93,8 @@ class MainViewModel(
     private var callControlsAutoHideJob: Job? = null
     private var tokenInitialized = false
     private val handledNotificationEventIds = LinkedHashSet<String>()
+    private val messagesCache: MutableMap<String, List<ChatMessage>> = LinkedHashMap()
+    private val pagingByChat: MutableMap<String, ChatPagingState> = LinkedHashMap()
 
     init {
         callManager.bind(viewModelScope)
@@ -139,7 +143,7 @@ class MainViewModel(
                     mutableState.update {
                         it.copy(
                             isLoadingChats = false,
-                            errorMessage = error.message ?: "Р С›РЎв‚¬Р С‘Р В±Р С”Р В° Р В·Р В°Р С–РЎР‚РЎС“Р В·Р С”Р С‘ РЎвЂЎР В°РЎвЂљР С•Р Р†"
+                            errorMessage = error.message ?: "Р В РЎвЂєР РЋРІвЂљВ¬Р В РЎвЂР В Р’В±Р В РЎвЂќР В Р’В° Р В Р’В·Р В Р’В°Р В РЎвЂ“Р РЋР вЂљР РЋРЎвЂњР В Р’В·Р В РЎвЂќР В РЎвЂ Р РЋРІР‚РЋР В Р’В°Р РЋРІР‚С™Р В РЎвЂўР В Р вЂ "
                         )
                     }
                 }
@@ -149,20 +153,28 @@ class MainViewModel(
     fun selectChat(chatId: String) {
         val current = mutableState.value.selectedChatId
         if (current == chatId) return
+        val memoryCached = messagesCache[chatId].orEmpty()
+        val hasMemoryCache = memoryCached.isNotEmpty()
 
         mutableState.update {
             it.copy(
                 selectedChatId = chatId,
-                messages = emptyList(),
+                messages = memoryCached,
                 chats = it.chats.map { chat ->
                     if (chat.id == chatId) chat.copy(unreadCount = 0) else chat
                 },
+                isLoadingMessages = !hasMemoryCache,
+                isLoadingOlderMessages = false,
+                hasOlderMessages = pagingByChat[chatId]?.hasMore ?: hasMemoryCache,
                 errorMessage = null
             )
         }
 
         viewModelScope.launch {
             chatRepository.joinChat(chatId)
+            if (!hasMemoryCache) {
+                showDiskCacheIfAvailable(chatId)
+            }
             loadMessages(chatId)
 
             val chatType = mutableState.value.chats.firstOrNull { it.id == chatId }?.type
@@ -202,7 +214,7 @@ class MainViewModel(
                     mutableState.update {
                         it.copy(
                             isLoadingGroupParticipants = false,
-                            groupParticipantsErrorMessage = error.message ?: "РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РіСЂСѓР·РёС‚СЊ СѓС‡Р°СЃС‚РЅРёРєРѕРІ"
+                            groupParticipantsErrorMessage = error.message ?: "Р СњР Вµ РЎС“Р Т‘Р В°Р В»Р С•РЎРѓРЎРЉ Р В·Р В°Р С–РЎР‚РЎС“Р В·Р С‘РЎвЂљРЎРЉ РЎС“РЎвЂЎР В°РЎРѓРЎвЂљР Р…Р С‘Р С”Р С•Р Р†"
                         )
                     }
                 }
@@ -217,7 +229,10 @@ class MainViewModel(
             it.copy(
                 selectedChatId = null,
                 messages = emptyList(),
-                uploadProgress = null
+                uploadProgress = null,
+                isLoadingMessages = false,
+                isLoadingOlderMessages = false,
+                hasOlderMessages = false
             )
         }
     }
@@ -249,7 +264,7 @@ class MainViewModel(
                     mutableState.update {
                         it.copy(
                             isSending = false,
-                            errorMessage = error.message ?: "Р С›РЎв‚¬Р С‘Р В±Р С”Р В° Р С•РЎвЂљР С—РЎР‚Р В°Р Р†Р С”Р С‘"
+                            errorMessage = error.message ?: "Р В РЎвЂєР РЋРІвЂљВ¬Р В РЎвЂР В Р’В±Р В РЎвЂќР В Р’В° Р В РЎвЂўР РЋРІР‚С™Р В РЎвЂ”Р РЋР вЂљР В Р’В°Р В Р вЂ Р В РЎвЂќР В РЎвЂ"
                         )
                     }
                 }
@@ -277,7 +292,7 @@ class MainViewModel(
                     it.copy(
                         isSending = false,
                         uploadProgress = null,
-                        errorMessage = error.message ?: "Р С›РЎв‚¬Р С‘Р В±Р С”Р В° Р В·Р В°Р С–РЎР‚РЎС“Р В·Р С”Р С‘ РЎвЂћР В°Р в„–Р В»Р В°"
+                        errorMessage = error.message ?: "Р В РЎвЂєР РЋРІвЂљВ¬Р В РЎвЂР В Р’В±Р В РЎвЂќР В Р’В° Р В Р’В·Р В Р’В°Р В РЎвЂ“Р РЋР вЂљР РЋРЎвЂњР В Р’В·Р В РЎвЂќР В РЎвЂ Р РЋРІР‚С›Р В Р’В°Р В РІвЂћвЂ“Р В Р’В»Р В Р’В°"
                     )
                 }
             }
@@ -539,7 +554,7 @@ class MainViewModel(
                     mutableState.update {
                         it.copy(
                             isCallActionInProgress = false,
-                            callErrorMessage = "Нужны разрешения на микрофон и камеру для принятия звонка"
+                            callErrorMessage = "РќСѓР¶РЅС‹ СЂР°Р·СЂРµС€РµРЅРёСЏ РЅР° РјРёРєСЂРѕС„РѕРЅ Рё РєР°РјРµСЂСѓ РґР»СЏ РїСЂРёРЅСЏС‚РёСЏ Р·РІРѕРЅРєР°"
                         )
                     }
                     return@launch
@@ -740,7 +755,7 @@ class MainViewModel(
         viewModelScope.launch {
             callManager.toggleMicrophone().onFailure { error ->
                 mutableState.update {
-                    it.copy(callErrorMessage = error.message ?: "Не удалось переключить микрофон")
+                    it.copy(callErrorMessage = error.message ?: "РќРµ СѓРґР°Р»РѕСЃСЊ РїРµСЂРµРєР»СЋС‡РёС‚СЊ РјРёРєСЂРѕС„РѕРЅ")
                 }
             }
             showCallControlsTemporarily()
@@ -752,7 +767,7 @@ class MainViewModel(
         viewModelScope.launch {
             callManager.toggleCamera().onFailure { error ->
                 mutableState.update {
-                    it.copy(callErrorMessage = error.message ?: "Не удалось переключить камеру")
+                    it.copy(callErrorMessage = error.message ?: "РќРµ СѓРґР°Р»РѕСЃСЊ РїРµСЂРµРєР»СЋС‡РёС‚СЊ РєР°РјРµСЂСѓ")
                 }
             }
             showCallControlsTemporarily()
@@ -763,7 +778,7 @@ class MainViewModel(
         if (mutableState.value.activeCall == null) return
         viewModelScope.launch {
             callManager.switchCamera().onFailure { error ->
-                mutableState.update { it.copy(callErrorMessage = error.message ?: "Р СњР Вµ РЎС“Р Т‘Р В°Р В»Р С•РЎРѓРЎРЉ Р С—Р ВµРЎР‚Р ВµР С”Р В»РЎР‹РЎвЂЎР С‘РЎвЂљРЎРЉ Р С”Р В°Р СР ВµРЎР‚РЎС“") }
+                mutableState.update { it.copy(callErrorMessage = error.message ?: "Р В РЎСљР В Р’Вµ Р РЋРЎвЂњР В РўвЂР В Р’В°Р В Р’В»Р В РЎвЂўР РЋР С“Р РЋР Р‰ Р В РЎвЂ”Р В Р’ВµР РЋР вЂљР В Р’ВµР В РЎвЂќР В Р’В»Р РЋР вЂ№Р РЋРІР‚РЋР В РЎвЂР РЋРІР‚С™Р РЋР Р‰ Р В РЎвЂќР В Р’В°Р В РЎВР В Р’ВµР РЋР вЂљР РЋРЎвЂњ") }
             }
             showCallControlsTemporarily()
         }
@@ -813,7 +828,7 @@ class MainViewModel(
                 }
 
                 is RealtimeEvent.UserStatusChanged -> {
-                    refreshChats()
+                    applyUserStatusChange(event)
                 }
 
                 is RealtimeEvent.IncomingCall -> {
@@ -833,7 +848,7 @@ class MainViewModel(
                         type = event.type.ifBlank { "audio" },
                         isGroup = event.isGroup,
                         initiatorId = event.initiatorId,
-                        initiatorName = event.initiatorName.ifBlank { "Контакт" },
+                        initiatorName = event.initiatorName.ifBlank { "РљРѕРЅС‚Р°РєС‚" },
                         participantCount = event.participantCount
                     )
                     mutableState.update {
@@ -849,7 +864,7 @@ class MainViewModel(
                 }
 
                 is RealtimeEvent.MessagesRead -> {
-                    applyMessagesRead(event.userId, event.messageIds)
+                    applyMessagesRead(event.chatId, event.userId, event.messageIds)
                 }
 
                 is RealtimeEvent.TypingUpdated -> {
@@ -861,6 +876,8 @@ class MainViewModel(
                 }
 
                 is RealtimeEvent.ChatDeleted -> {
+                    messagesCache.remove(event.chatId)
+                    pagingByChat.remove(event.chatId)
                     mutableState.update { current ->
                         val removedSelected = current.selectedChatId == event.chatId
                         current.copy(
@@ -872,6 +889,7 @@ class MainViewModel(
                 }
 
                 is RealtimeEvent.MessageDeleted -> {
+                    removeMessageFromCache(event.chatId, event.messageId)
                     mutableState.update { current ->
                         if (current.selectedChatId != event.chatId) return@update current
                         current.copy(messages = current.messages.filterNot { it.id == event.messageId })
@@ -1166,7 +1184,7 @@ class MainViewModel(
                 }
                 .onFailure { error ->
                     mutableState.update {
-                        it.copy(errorMessage = error.message ?: "РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ С‡Р°С‚")
+                        it.copy(errorMessage = error.message ?: "Р СњР Вµ РЎС“Р Т‘Р В°Р В»Р С•РЎРѓРЎРЉ РЎРѓР С•Р В·Р Т‘Р В°РЎвЂљРЎРЉ РЎвЂЎР В°РЎвЂљ")
                     }
                 }
         }
@@ -1182,7 +1200,7 @@ class MainViewModel(
                 }
                 .onFailure { error ->
                     mutableState.update {
-                        it.copy(errorMessage = error.message ?: "РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ РіСЂСѓРїРїСѓ")
+                        it.copy(errorMessage = error.message ?: "Р СњР Вµ РЎС“Р Т‘Р В°Р В»Р С•РЎРѓРЎРЉ РЎРѓР С•Р В·Р Т‘Р В°РЎвЂљРЎРЉ Р С–РЎР‚РЎС“Р С—Р С—РЎС“")
                     }
                 }
         }
@@ -1215,7 +1233,7 @@ class MainViewModel(
                     type = command.callType.orEmpty().ifBlank { "audio" },
                     isGroup = command.isGroupCall,
                     initiatorId = command.initiatorId.orEmpty(),
-                    initiatorName = command.initiatorName.orEmpty().ifBlank { "Контакт" },
+                    initiatorName = command.initiatorName.orEmpty().ifBlank { "РљРѕРЅС‚Р°РєС‚" },
                     participantCount = 0
                 ),
                 callErrorMessage = null,
@@ -1234,40 +1252,166 @@ class MainViewModel(
         return true
     }
 
-    private suspend fun loadMessages(chatId: String) {
-        mutableState.update { it.copy(isLoadingMessages = true, errorMessage = null) }
+    fun loadOlderMessages() {
+        val current = mutableState.value
+        val chatId = current.selectedChatId ?: return
+        if (current.isLoadingMessages || current.isLoadingOlderMessages) return
 
-        loadMessagesUseCase(chatId = chatId)
-            .onSuccess { loaded ->
-                val normalized = loaded.map { normalizeDeliveryStatus(it) }
+        val pagingState = pagingByChat[chatId]
+        if (pagingState != null && !pagingState.hasMore) return
+
+        val beforeMillis = pagingState?.oldestLoadedMillis
+            ?: messagesForChat(chatId).firstOrNull()?.createdAtMillis
+            ?: return
+
+        viewModelScope.launch {
+            mutableState.update { it.copy(isLoadingOlderMessages = true, errorMessage = null) }
+            loadMessagesUseCase(
+                chatId = chatId,
+                beforeMillis = beforeMillis,
+                limit = MESSAGES_PAGE_SIZE
+            ).onSuccess { loaded ->
+                val normalized = loaded
+                    .map { normalizeDeliveryStatus(it) }
+                    .sortedBy { it.createdAtMillis }
+                val merged = mergeMessages(
+                    base = messagesForChat(chatId),
+                    incoming = normalized
+                )
+                val hasMore = loaded.size >= MESSAGES_PAGE_SIZE
+                pagingByChat[chatId] = ChatPagingState(
+                    oldestLoadedMillis = merged.firstOrNull()?.createdAtMillis,
+                    hasMore = hasMore
+                )
+                updateMessagesCache(chatId, merged)
+
+                if (mutableState.value.selectedChatId == chatId) {
+                    mutableState.update {
+                        it.copy(
+                            messages = merged,
+                            isLoadingOlderMessages = false,
+                            hasOlderMessages = hasMore
+                        )
+                    }
+                }
+            }.onFailure { error ->
+                mutableState.update {
+                    it.copy(
+                        isLoadingOlderMessages = false,
+                        errorMessage = error.message ?: "Не удалось загрузить предыдущие сообщения"
+                    )
+                }
+            }
+        }
+    }
+
+    private suspend fun loadMessages(chatId: String) {
+        if (mutableState.value.selectedChatId == chatId && mutableState.value.messages.isEmpty()) {
+            mutableState.update {
+                it.copy(
+                    isLoadingMessages = true,
+                    isLoadingOlderMessages = false,
+                    errorMessage = null
+                )
+            }
+        } else {
+            mutableState.update { it.copy(errorMessage = null) }
+        }
+
+        loadMessagesUseCase(
+            chatId = chatId,
+            beforeMillis = null,
+            limit = MESSAGES_PAGE_SIZE
+        ).onSuccess { loaded ->
+            val normalized = loaded
+                .map { normalizeDeliveryStatus(it) }
+                .sortedBy { it.createdAtMillis }
+            val merged = mergeMessages(
+                base = messagesForChat(chatId),
+                incoming = normalized
+            )
+            val hasMore = loaded.size >= MESSAGES_PAGE_SIZE
+            pagingByChat[chatId] = ChatPagingState(
+                oldestLoadedMillis = merged.firstOrNull()?.createdAtMillis,
+                hasMore = hasMore
+            )
+            updateMessagesCache(chatId, merged)
+
+            if (mutableState.value.selectedChatId == chatId) {
                 mutableState.update {
                     it.copy(
                         isLoadingMessages = false,
-                        messages = normalized
-                    )
-                }
-                maybeMarkMessagesRead(chatId, normalized)
-            }
-            .onFailure { error ->
-                mutableState.update {
-                    it.copy(
-                        isLoadingMessages = false,
-                        errorMessage = error.message ?: "Р С›РЎв‚¬Р С‘Р В±Р С”Р В° Р В·Р В°Р С–РЎР‚РЎС“Р В·Р С”Р С‘ РЎРѓР С•Р С•Р В±РЎвЂ°Р ВµР Р…Р С‘Р в„–"
+                        isLoadingOlderMessages = false,
+                        hasOlderMessages = hasMore,
+                        messages = merged
                     )
                 }
             }
+            maybeMarkMessagesRead(chatId, normalized)
+        }.onFailure { error ->
+            mutableState.update {
+                it.copy(
+                    isLoadingMessages = false,
+                    isLoadingOlderMessages = false,
+                    errorMessage = error.message ?: "Не удалось загрузить сообщения"
+                )
+            }
+        }
+    }
+
+    private suspend fun showDiskCacheIfAvailable(chatId: String) {
+        val diskCached = messagesDiskCache.readMessages(chatId)
+            .map { normalizeDeliveryStatus(it) }
+            .sortedBy { it.createdAtMillis }
+        if (diskCached.isEmpty()) return
+
+        val merged = mergeMessages(
+            base = messagesForChat(chatId),
+            incoming = diskCached
+        )
+        updateMessagesCache(chatId, merged)
+        pagingByChat[chatId] = ChatPagingState(
+            oldestLoadedMillis = merged.firstOrNull()?.createdAtMillis,
+            hasMore = merged.size >= MESSAGES_PAGE_SIZE
+        )
+
+        if (mutableState.value.selectedChatId == chatId) {
+            mutableState.update {
+                it.copy(
+                    messages = merged,
+                    isLoadingMessages = false,
+                    hasOlderMessages = merged.size >= MESSAGES_PAGE_SIZE
+                )
+            }
+            maybeMarkMessagesRead(chatId, merged)
+        }
     }
 
     private fun appendMessage(message: ChatMessage) {
+        val chatId = message.chatId
+        val merged = mergeMessages(
+            base = messagesForChat(chatId),
+            incoming = listOf(message)
+        )
+        updateMessagesCache(chatId, merged)
+        pagingByChat[chatId] = pagingByChat[chatId]?.copy(
+            oldestLoadedMillis = merged.firstOrNull()?.createdAtMillis
+        ) ?: ChatPagingState(
+            oldestLoadedMillis = merged.firstOrNull()?.createdAtMillis,
+            hasMore = merged.size >= MESSAGES_PAGE_SIZE
+        )
+
         mutableState.update { current ->
-            if (current.selectedChatId != message.chatId) return@update current
-            if (current.messages.any { it.id == message.id }) return@update current
-            current.copy(messages = current.messages + message)
+            if (current.selectedChatId != chatId) return@update current
+            current.copy(messages = merged)
         }
     }
 
     private fun removeMessage(messageId: String) {
+        val chatId = mutableState.value.selectedChatId ?: return
+        removeMessageFromCache(chatId = chatId, messageId = messageId)
         mutableState.update { current ->
+            if (current.selectedChatId != chatId) return@update current
             current.copy(messages = current.messages.filterNot { it.id == messageId })
         }
     }
@@ -1306,22 +1450,24 @@ class MainViewModel(
         }
     }
 
-    private fun applyMessagesRead(userId: String, messageIds: List<String>) {
+    private fun applyMessagesRead(chatId: String, userId: String, messageIds: List<String>) {
         if (messageIds.isEmpty()) return
+        val source = messagesForChat(chatId)
+        if (source.isEmpty()) return
         val currentUserId = mutableState.value.currentUserId.orEmpty()
-        mutableState.update { current ->
-            current.copy(
-                messages = current.messages.map { message ->
-                    if (message.id !in messageIds) return@map message
-                    val nextReadBy = message.readByUserIds + userId
-                    val nextStatus = if (message.senderId == currentUserId && userId != currentUserId) {
-                        MessageDeliveryStatus.Read
-                    } else {
-                        message.deliveryStatus
-                    }
-                    message.copy(readByUserIds = nextReadBy, deliveryStatus = nextStatus)
-                }
-            )
+        val updated = source.map { message ->
+            if (message.id !in messageIds) return@map message
+            val nextReadBy = message.readByUserIds + userId
+            val nextStatus = if (message.senderId == currentUserId && userId != currentUserId) {
+                MessageDeliveryStatus.Read
+            } else {
+                message.deliveryStatus
+            }
+            message.copy(readByUserIds = nextReadBy, deliveryStatus = nextStatus)
+        }
+        updateMessagesCache(chatId, updated)
+        if (mutableState.value.selectedChatId == chatId) {
+            mutableState.update { it.copy(messages = updated) }
         }
     }
 
@@ -1336,15 +1482,81 @@ class MainViewModel(
 
         viewModelScope.launch {
             chatRepository.markMessagesRead(chatId = chatId, messageIds = unreadIncomingIds)
-            mutableState.update { current ->
-                current.copy(
-                    messages = current.messages.map { message ->
-                        if (message.id !in unreadIncomingIds) {
-                            message
-                        } else {
-                            message.copy(readByUserIds = message.readByUserIds + currentUserId)
-                        }
-                    }
+            val updated = messagesForChat(chatId).map { message ->
+                if (message.id !in unreadIncomingIds) {
+                    message
+                } else {
+                    message.copy(readByUserIds = message.readByUserIds + currentUserId)
+                }
+            }
+            updateMessagesCache(chatId, updated)
+            if (mutableState.value.selectedChatId == chatId) {
+                mutableState.update { it.copy(messages = updated) }
+            }
+        }
+    }
+
+    private fun applyUserStatusChange(event: RealtimeEvent.UserStatusChanged) {
+        if (event.userId.isBlank()) return
+        val isOnline = event.status.equals("online", ignoreCase = true)
+        mutableState.update { current ->
+            var hasUpdates = false
+            val chats = current.chats.map { chat ->
+                if (chat.peerUserId == event.userId && chat.isOnline != isOnline) {
+                    hasUpdates = true
+                    chat.copy(isOnline = isOnline)
+                } else {
+                    chat
+                }
+            }
+            if (!hasUpdates) current else current.copy(chats = chats)
+        }
+    }
+
+    private fun messagesForChat(chatId: String): List<ChatMessage> {
+        return messagesCache[chatId]
+            ?: if (mutableState.value.selectedChatId == chatId) mutableState.value.messages else emptyList()
+    }
+
+    private fun mergeMessages(base: List<ChatMessage>, incoming: List<ChatMessage>): List<ChatMessage> {
+        if (base.isEmpty()) {
+            return incoming.distinctBy { it.id }.sortedBy { it.createdAtMillis }
+        }
+        if (incoming.isEmpty()) {
+            return base.distinctBy { it.id }.sortedBy { it.createdAtMillis }
+        }
+        val byId = LinkedHashMap<String, ChatMessage>(base.size + incoming.size)
+        base.forEach { byId[it.id] = it }
+        incoming.forEach { byId[it.id] = it }
+        return byId.values.sortedBy { it.createdAtMillis }
+    }
+
+    private fun updateMessagesCache(chatId: String, messages: List<ChatMessage>) {
+        val normalized = messages
+            .distinctBy { it.id }
+            .sortedBy { it.createdAtMillis }
+        messagesCache[chatId] = normalized
+        persistMessagesToDisk(chatId, normalized)
+    }
+
+    private fun removeMessageFromCache(chatId: String, messageId: String) {
+        val updated = messagesForChat(chatId).filterNot { it.id == messageId }
+        messagesCache[chatId] = updated
+        pagingByChat[chatId]?.let { paging ->
+            pagingByChat[chatId] = paging.copy(
+                oldestLoadedMillis = updated.firstOrNull()?.createdAtMillis
+            )
+        }
+        persistMessagesToDisk(chatId, updated)
+    }
+
+    private fun persistMessagesToDisk(chatId: String, messages: List<ChatMessage>) {
+        viewModelScope.launch {
+            runCatching {
+                messagesDiskCache.saveMessages(
+                    chatId = chatId,
+                    messages = messages,
+                    maxCount = DISK_CACHE_MESSAGES_LIMIT
                 )
             }
         }
@@ -1456,6 +1668,8 @@ class MainViewModel(
         private const val CALL_CONTROLS_AUTO_HIDE_MS = 3_500L
         private const val ICE_CONFIG_TIMEOUT_MS = 3_000L
         private const val MAX_HANDLED_NOTIFICATION_EVENTS = 128
+        private const val MESSAGES_PAGE_SIZE = 30
+        private const val DISK_CACHE_MESSAGES_LIMIT = 100
 
         fun factory(
             appContext: Context,
@@ -1477,6 +1691,7 @@ class MainViewModel(
             searchUserByPhoneUseCase: SearchUserByPhoneUseCase,
             createChatUseCase: CreateChatUseCase,
             createGroupChatUseCase: CreateGroupChatUseCase,
+            messagesDiskCache: ChatMessagesCacheStorage,
             chatRepository: ChatRepository,
             authRepository: AuthRepository
         ) = viewModelFactory {
@@ -1500,6 +1715,7 @@ class MainViewModel(
                 searchUserByPhoneUseCase = searchUserByPhoneUseCase,
                 createChatUseCase = createChatUseCase,
                 createGroupChatUseCase = createGroupChatUseCase,
+                messagesDiskCache = messagesDiskCache,
                 chatRepository = chatRepository,
                 authRepository = authRepository
             )
@@ -1507,15 +1723,21 @@ class MainViewModel(
     }
 }
 
+private data class ChatPagingState(
+    val oldestLoadedMillis: Long?,
+    val hasMore: Boolean
+)
+
 private fun ChatMessage.toChatSubtitle(): String {
     return when (type) {
-        MessageType.Audio -> "СЂСџР‹В¤ Р вЂњР С•Р В»Р С•РЎРѓР С•Р Р†Р С•Р Вµ РЎРѓР С•Р С•Р В±РЎвЂ°Р ВµР Р…Р С‘Р Вµ"
-        MessageType.Image -> "СЂСџвЂњВ· Р ВР В·Р С•Р В±РЎР‚Р В°Р В¶Р ВµР Р…Р С‘Р Вµ"
-        MessageType.Video -> "СЂСџР‹Тђ Р вЂ™Р С‘Р Т‘Р ВµР С•"
-        MessageType.File -> "СЂСџвЂњР‹ Р В¤Р В°Р в„–Р В»"
-        MessageType.System -> text.ifBlank { "Р РЋР С‘РЎРѓРЎвЂљР ВµР СР Р…Р С•Р Вµ РЎРѓР С•Р С•Р В±РЎвЂ°Р ВµР Р…Р С‘Р Вµ" }
-        MessageType.Text -> text.ifBlank { "Р РЋР С•Р С•Р В±РЎвЂ°Р ВµР Р…Р С‘Р Вµ" }
+        MessageType.Audio -> "РЎР‚РЎСџР вЂ№Р’В¤ Р В РІР‚СљР В РЎвЂўР В Р’В»Р В РЎвЂўР РЋР С“Р В РЎвЂўР В Р вЂ Р В РЎвЂўР В Р’Вµ Р РЋР С“Р В РЎвЂўР В РЎвЂўР В Р’В±Р РЋРІР‚В°Р В Р’ВµР В Р вЂ¦Р В РЎвЂР В Р’Вµ"
+        MessageType.Image -> "РЎР‚РЎСџРІР‚СљР’В· Р В Р’ВР В Р’В·Р В РЎвЂўР В Р’В±Р РЋР вЂљР В Р’В°Р В Р’В¶Р В Р’ВµР В Р вЂ¦Р В РЎвЂР В Р’Вµ"
+        MessageType.Video -> "РЎР‚РЎСџР вЂ№РўС’ Р В РІР‚в„ўР В РЎвЂР В РўвЂР В Р’ВµР В РЎвЂў"
+        MessageType.File -> "РЎР‚РЎСџРІР‚СљР вЂ№ Р В Р’В¤Р В Р’В°Р В РІвЂћвЂ“Р В Р’В»"
+        MessageType.System -> text.ifBlank { "Р В Р Р‹Р В РЎвЂР РЋР С“Р РЋРІР‚С™Р В Р’ВµР В РЎВР В Р вЂ¦Р В РЎвЂўР В Р’Вµ Р РЋР С“Р В РЎвЂўР В РЎвЂўР В Р’В±Р РЋРІР‚В°Р В Р’ВµР В Р вЂ¦Р В РЎвЂР В Р’Вµ" }
+        MessageType.Text -> text.ifBlank { "Р В Р Р‹Р В РЎвЂўР В РЎвЂўР В Р’В±Р РЋРІР‚В°Р В Р’ВµР В Р вЂ¦Р В РЎвЂР В Р’Вµ" }
     }
 }
+
 
 

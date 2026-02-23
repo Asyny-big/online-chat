@@ -86,6 +86,7 @@ dependencies {
     implementation(libs.livekit.android)
     implementation(libs.ktor.client.okhttp)
     implementation(libs.ktor.client.websockets)
+    implementation(libs.coil.compose)
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)

@@ -14,6 +14,7 @@ import ru.govchat.app.BuildConfig
 import ru.govchat.app.core.network.AuthInterceptor
 import ru.govchat.app.core.network.GovChatApi
 import ru.govchat.app.core.network.SocketGateway
+import ru.govchat.app.core.storage.ChatMessagesCacheStorage
 import ru.govchat.app.core.storage.SessionStorage
 import ru.govchat.app.data.repository.AuthRepositoryImpl
 import ru.govchat.app.data.repository.ChatRepositoryImpl
@@ -51,6 +52,9 @@ class AppContainer(application: Application) {
     val sessionStorage: SessionStorage = SessionStorage(
         appContext = application.applicationContext,
         applicationScope = applicationScope
+    )
+    val chatMessagesCacheStorage: ChatMessagesCacheStorage = ChatMessagesCacheStorage(
+        appContext = application.applicationContext
     )
 
     private val authInterceptor = AuthInterceptor(sessionStorage)

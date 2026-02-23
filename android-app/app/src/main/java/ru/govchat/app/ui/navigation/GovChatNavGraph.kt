@@ -113,6 +113,7 @@ fun GovChatNavGraph(
                     searchUserByPhoneUseCase = container.searchUserByPhoneUseCase,
                     createChatUseCase = container.createChatUseCase,
                     createGroupChatUseCase = container.createGroupChatUseCase,
+                    messagesDiskCache = container.chatMessagesCacheStorage,
                     chatRepository = container.chatRepository,
                     authRepository = container.authRepository
                 )
@@ -154,6 +155,7 @@ fun GovChatNavGraph(
                 onSendText = viewModel::sendTextMessage,
                 onInputChanged = viewModel::onInputChanged,
                 onSendAttachment = viewModel::sendAttachment,
+                onLoadOlderMessages = viewModel::loadOlderMessages,
                 onStartCall = viewModel::startCall,
                 onStartGroupCall = viewModel::startGroupCall,
                 onConfirmJoinExistingGroupCall = viewModel::confirmJoinExistingGroupCall,

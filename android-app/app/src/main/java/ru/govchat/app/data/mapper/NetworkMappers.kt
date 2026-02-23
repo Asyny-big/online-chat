@@ -53,6 +53,7 @@ fun ChatDto.toDomain(): ChatPreview {
         title = displayName ?: name ?: "Чат",
         subtitle = lastMessageText,
         avatarUrl = displayAvatar,
+        peerUserId = resolvePeerUserId(),
         isOnline = displayStatus == "online",
         unreadCount = unreadCount ?: 0,
         participantCount = participantSize,
@@ -130,6 +131,43 @@ private fun AttachmentDto?.toDomain(): MessageAttachment? {
         sizeBytes = size
     )
 }
+
+private fun ChatDto.resolvePeerUserId(): String? {
+    if (type.lowercase() != "private") return null
+
+    val participantsResolved = participants.mapNotNull { participant ->
+        val user = participant.user ?: return@mapNotNull null
+        when (user) {
+            is Map<*, *> -> {
+                val id = (user["_id"] as? String) ?: (user["id"] as? String)
+                val name = (user["name"] as? String).orEmpty()
+                id?.takeIf { it.isNotBlank() }?.let { ParticipantSnapshot(id = it, name = name) }
+            }
+
+            is JSONObject -> {
+                val id = user.optString("_id").takeIf { it.isNotBlank() }
+                    ?: user.optString("id").takeIf { it.isNotBlank() }
+                val name = user.optString("name")
+                id?.let { ParticipantSnapshot(id = it, name = name) }
+            }
+
+            is String -> user.takeIf { it.isNotBlank() }?.let { ParticipantSnapshot(id = it, name = "") }
+            else -> null
+        }
+    }
+
+    if (participantsResolved.isEmpty()) return null
+    val display = displayName.orEmpty()
+    if (display.isNotBlank()) {
+        participantsResolved.firstOrNull { it.name == display }?.let { return it.id }
+    }
+    return participantsResolved.first().id
+}
+
+private data class ParticipantSnapshot(
+    val id: String,
+    val name: String
+)
 
 fun String.toMessageType(): MessageType {
     return when (lowercase()) {
