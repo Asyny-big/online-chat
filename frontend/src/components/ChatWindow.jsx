@@ -621,6 +621,44 @@ function ChatWindow({
         .audio-wrapper { display: flex; align-items: center; gap: 8px; min-width: 200px; padding: 4px 0; }
         .audio-icon { font-size: 20px; }
         .audio-player { height: 36px; flex: 1; outline: none; }
+        .audio-duration { font-size: 12px; opacity: 0.75; min-width: 38px; text-align: right; }
+
+        .video-note-wrapper { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+        .video-note-button {
+          border: none; background: transparent; padding: 0; cursor: pointer;
+          width: 164px; height: 164px; border-radius: 50%;
+          position: relative; overflow: hidden;
+          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+        }
+        .video-note-thumb {
+          width: 100%; height: 100%; border-radius: 50%;
+          object-fit: cover; display: block; background: rgba(255, 255, 255, 0.08);
+        }
+        .video-note-play {
+          position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+          font-size: 34px; color: #fff; text-shadow: 0 2px 16px rgba(0, 0, 0, 0.6);
+          pointer-events: none;
+        }
+        .video-note-overlay {
+          position: fixed; inset: 0; background: rgba(0, 0, 0, 0.82);
+          display: flex; align-items: center; justify-content: center; z-index: 12000;
+          padding: 16px;
+        }
+        .video-note-modal {
+          width: min(92vw, 560px); aspect-ratio: 1 / 1;
+          border-radius: 20px; overflow: hidden; position: relative;
+          box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+          background: #111827;
+        }
+        .video-note-modal-video {
+          width: 100%; height: 100%; object-fit: contain; background: #000;
+        }
+        .video-note-close {
+          position: absolute; top: 10px; right: 10px; z-index: 2;
+          width: 30px; height: 30px; border-radius: 50%;
+          border: none; background: rgba(0, 0, 0, 0.55); color: #fff; cursor: pointer;
+          font-size: 20px; line-height: 1;
+        }
 
         /* File */
         .file-link {
@@ -704,6 +742,8 @@ function ChatWindow({
 function MessageBubble({ message, isMine, onDelete, token }) {
   const [showMenu, setShowMenu] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isVideoNoteOpen, setIsVideoNoteOpen] = useState(false);
+  const [audioDurationSec, setAudioDurationSec] = useState(null);
   const { type: rawType = 'text', text, attachment, createdAt, sender } = message;
 
   const type = (() => {
@@ -745,6 +785,22 @@ function MessageBubble({ message, isMine, onDelete, token }) {
   };
 
   const displayOriginalName = normalizeFilename(attachment?.originalName) || 'Файл';
+
+  useEffect(() => {
+    if (!isVideoNoteOpen) return undefined;
+    const handleEsc = (event) => {
+      if (event.key === 'Escape') {
+        setIsVideoNoteOpen(false);
+      }
+    };
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.addEventListener('keydown', handleEsc);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.removeEventListener('keydown', handleEsc);
+    };
+  }, [isVideoNoteOpen]);
 
   const downloadAttachment = async () => {
     try {
@@ -810,10 +866,85 @@ function MessageBubble({ message, isMine, onDelete, token }) {
         return (
           <div className="audio-wrapper">
             <span className="audio-icon">🎤</span>
-            <audio controls preload="auto" className="audio-player">
+            <audio
+              controls
+              preload="metadata"
+              className="audio-player"
+              onLoadedMetadata={(event) => {
+                const duration = Number(event.currentTarget?.duration);
+                if (Number.isFinite(duration) && duration > 0) {
+                  setAudioDurationSec(Math.round(duration));
+                }
+              }}
+            >
               <source src={audioUrl} type={audioMimeType} />
               Ваш браузер не поддерживает аудио
             </audio>
+            <span className="audio-duration">{formatMediaDuration(audioDurationSec)}</span>
+          </div>
+        );
+      case 'voice':
+        return (
+          <div className="audio-wrapper">
+            <span className="audio-icon">🎙️</span>
+            <audio
+              controls
+              preload="metadata"
+              className="audio-player"
+              onLoadedMetadata={(event) => {
+                const duration = Number(event.currentTarget?.duration);
+                if (Number.isFinite(duration) && duration > 0) {
+                  setAudioDurationSec(Math.round(duration));
+                }
+              }}
+            >
+              <source src={getMediaUrl(attachment?.url)} type={attachment?.mimeType || 'audio/mp4'} />
+            </audio>
+            <span className="audio-duration">{formatMediaDuration(audioDurationSec)}</span>
+          </div>
+        );
+      case 'video_note':
+        return (
+          <div className="video-note-wrapper">
+            <button
+              type="button"
+              className="video-note-button"
+              onClick={() => setIsVideoNoteOpen(true)}
+              title="Открыть видеокружок"
+            >
+              <video
+                src={getMediaUrl(attachment?.url)}
+                preload="metadata"
+                muted
+                playsInline
+                className="video-note-thumb"
+              />
+              <span className="video-note-play">▶</span>
+            </button>
+            {text && <div className="media-caption">{text}</div>}
+            {isVideoNoteOpen && (
+              <div className="video-note-overlay" onClick={() => setIsVideoNoteOpen(false)}>
+                <div className="video-note-modal" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    type="button"
+                    className="video-note-close"
+                    onClick={() => setIsVideoNoteOpen(false)}
+                    aria-label="Закрыть"
+                  >
+                    ×
+                  </button>
+                  <video
+                    src={getMediaUrl(attachment?.url)}
+                    controls
+                    autoPlay
+                    playsInline
+                    preload="metadata"
+                    className="video-note-modal-video"
+                    controlsList="nodownload"
+                  />
+                </div>
+              </div>
+            )}
           </div>
         );
       case 'file':
@@ -906,6 +1037,14 @@ function MessageBubble({ message, isMine, onDelete, token }) {
       </div>
     </div>
   );
+}
+
+function formatMediaDuration(totalSeconds) {
+  const seconds = Number(totalSeconds);
+  if (!Number.isFinite(seconds) || seconds <= 0) return '--:--';
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
 function formatFileSize(bytes) {
