@@ -44,6 +44,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -1905,29 +1906,6 @@ private fun ChatContent(
         }
     }
 
-    val lastMessageId = state.messages.lastOrNull()?.id
-
-    LaunchedEffect(chat.id, lastMessageId) {
-        if (state.messages.isNotEmpty()) {
-            listState.animateScrollToItem(state.messages.lastIndex)
-        }
-    }
-
-    LaunchedEffect(
-        chat.id,
-        state.hasOlderMessages,
-        state.isLoadingMessages,
-        state.isLoadingOlderMessages
-    ) {
-        if (!state.hasOlderMessages || state.isLoadingMessages || state.isLoadingOlderMessages) return@LaunchedEffect
-        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
-            .collect { (index, offset) ->
-                if (index <= 2 && offset < 40) {
-                    onLoadOlderMessages()
-                }
-            }
-    }
-
     Column(modifier = Modifier.fillMaxSize()) {
         // ── Telegram-style Chat Header ──
         Surface(
@@ -2135,51 +2113,29 @@ private fun ChatContent(
                 CircularProgressIndicator(color = Color(0xFF3B82F6))
             }
         } else {
-            LazyColumn(
-                state = listState,
+            ChatMessagesList(
+                chatId = chat.id,
+                messages = state.messages,
+                currentUserId = state.currentUserId,
+                listState = listState,
+                isLoadingOlderMessages = state.isLoadingOlderMessages,
+                hasOlderMessages = state.hasOlderMessages,
+                onLoadOlderMessages = onLoadOlderMessages,
+                onAttachmentClick = { message, type, attachment ->
+                    if (type == MessageType.Image && !attachment?.url.isNullOrBlank()) {
+                        val previewIndex = imageMessages.indexOfFirst { it.id == message.id }
+                        if (previewIndex >= 0) {
+                            imagePreviewStartIndex = previewIndex
+                        }
+                    } else {
+                        onAttachmentClick(type, attachment)
+                    }
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                if (state.isLoadingOlderMessages) {
-                    item(key = "messages_loading_older") {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp),
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            CircularProgressIndicator(
-                                color = Color(0xFF3B82F6),
-                                modifier = Modifier.size(18.dp),
-                                strokeWidth = 2.dp
-                            )
-                        }
-                    }
-                }
-                items(
-                    items = state.messages,
-                    key = { it.id },
-                    contentType = { it.type }
-                ) { message ->
-                    MessageBubble(
-                        message = message,
-                        isMine = message.senderId == state.currentUserId,
-                        onAttachmentClick = { type, attachment ->
-                            if (type == MessageType.Image && !attachment?.url.isNullOrBlank()) {
-                                val previewIndex = imageMessages.indexOfFirst { it.id == message.id }
-                                if (previewIndex >= 0) {
-                                    imagePreviewStartIndex = previewIndex
-                                }
-                            } else {
-                                onAttachmentClick(type, attachment)
-                            }
-                        }
-                    )
-                }
-            }
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+            )
         }
 
         Divider(color = Color(0xFF334155))
@@ -2385,6 +2341,112 @@ private fun ChatContent(
                 onAttachmentClick(message.type, message.attachment)
             }
         )
+    }
+}
+
+@Composable
+private fun ChatMessagesList(
+    chatId: String,
+    messages: List<ChatMessage>,
+    currentUserId: String?,
+    listState: LazyListState,
+    isLoadingOlderMessages: Boolean,
+    hasOlderMessages: Boolean,
+    onLoadOlderMessages: () -> Unit,
+    onAttachmentClick: (ChatMessage, MessageType, MessageAttachment?) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val displayMessages = remember(messages) { messages.asReversed() }
+    val latestMessageId = messages.lastOrNull()?.id
+    var initialScrollPerformed by remember(chatId) { mutableStateOf(false) }
+    var shouldAutoScrollOnNewMessage by remember(chatId) { mutableStateOf(true) }
+    var lastObservedLatestMessageId by remember(chatId) { mutableStateOf<String?>(null) }
+    var paginationTriggered by remember(chatId) { mutableStateOf(false) }
+
+    LaunchedEffect(chatId) {
+        snapshotFlow { listState.isNearBottomForReverseLayout() }
+            .collect { isNearBottom ->
+                shouldAutoScrollOnNewMessage = isNearBottom
+            }
+    }
+
+    LaunchedEffect(chatId, latestMessageId, initialScrollPerformed) {
+        if (messages.isEmpty()) return@LaunchedEffect
+
+        if (!initialScrollPerformed) {
+            listState.scrollToItem(0)
+            initialScrollPerformed = true
+            lastObservedLatestMessageId = latestMessageId
+            return@LaunchedEffect
+        }
+
+        val hasNewMessage = lastObservedLatestMessageId != null &&
+            lastObservedLatestMessageId != latestMessageId
+        if (hasNewMessage && shouldAutoScrollOnNewMessage) {
+            listState.animateScrollToItem(0)
+        }
+        lastObservedLatestMessageId = latestMessageId
+    }
+
+    LaunchedEffect(chatId, hasOlderMessages, isLoadingOlderMessages, displayMessages.size) {
+        if (!hasOlderMessages || isLoadingOlderMessages) return@LaunchedEffect
+        snapshotFlow {
+            val totalItemsCount = listState.layoutInfo.totalItemsCount
+            val maxVisibleIndex = listState.layoutInfo.visibleItemsInfo.maxOfOrNull { it.index } ?: -1
+            totalItemsCount to maxVisibleIndex
+        }.collect { (totalItemsCount, maxVisibleIndex) ->
+            if (totalItemsCount <= 0) return@collect
+            val nearOlderMessagesEdge = maxVisibleIndex >= totalItemsCount - 3
+            if (nearOlderMessagesEdge && !paginationTriggered) {
+                paginationTriggered = true
+                onLoadOlderMessages()
+            } else if (!nearOlderMessagesEdge) {
+                paginationTriggered = false
+            }
+        }
+    }
+
+    LaunchedEffect(chatId, isLoadingOlderMessages) {
+        if (!isLoadingOlderMessages) {
+            paginationTriggered = false
+        }
+    }
+
+    LazyColumn(
+        state = listState,
+        modifier = modifier,
+        reverseLayout = true,
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        items(
+            items = displayMessages,
+            key = { it.id },
+            contentType = { it.type }
+        ) { message ->
+            MessageBubble(
+                message = message,
+                isMine = message.senderId == currentUserId,
+                onAttachmentClick = { type, attachment ->
+                    onAttachmentClick(message, type, attachment)
+                }
+            )
+        }
+        if (isLoadingOlderMessages) {
+            item(key = "messages_loading_older") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    CircularProgressIndicator(
+                        color = Color(0xFF3B82F6),
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -4184,6 +4246,11 @@ private data class PermissionPrompt(
 
 private const val INITIAL_PERMISSION_PREFS_NAME = "govchat_permission_prefs"
 private const val INITIAL_PERMISSION_PREFS_KEY = "initial_runtime_permissions_requested_v1"
+
+private fun LazyListState.isNearBottomForReverseLayout(): Boolean {
+    if (firstVisibleItemIndex > 1) return false
+    return firstVisibleItemScrollOffset <= 40
+}
 
 private tailrec fun Context.findActivity(): Activity? {
     return when (this) {
