@@ -215,6 +215,7 @@ module.exports = function (io) {
     socket.on('message:send', async (data, callback) => {
       try {
         const { chatId, text, type = 'text', attachment } = data;
+        const messageType = String(type || 'text').toLowerCase();
 
         const chat = await verifyAccess(chatId);
         if (!chat) {
@@ -224,7 +225,7 @@ module.exports = function (io) {
         const message = await Message.create({
           chat: chatId,
           sender: userId,
-          type,
+          type: messageType,
           text: text || '',
           attachment,
           readBy: [{ user: userId }]
@@ -233,11 +234,15 @@ module.exports = function (io) {
         await message.populate('sender', 'name phone avatarUrl');
 
         chat.lastMessage = {
-          text: text || (type === 'audio' ? '🎤 Голосовое' : '📎 Вложение'),
+          text: text || (
+            ['audio', 'voice'].includes(messageType)
+              ? '🎤 Голосовое'
+              : (messageType === 'video_note' ? '🎥 Видеокружок' : '📎 Вложение')
+          ),
           senderId: userId,
           senderName: socket.user.name,
           createdAt: message.createdAt,
-          type
+          type: messageType
         };
         await chat.save();
 
@@ -266,7 +271,7 @@ module.exports = function (io) {
             targetId: message._id,
             meta: {
               chatId: String(chatId),
-              messageType: String(type || 'text')
+              messageType
             }
           });
         }).catch((error) => {
@@ -274,8 +279,7 @@ module.exports = function (io) {
         });
 
         Promise.resolve().then(async () => {
-          const messageType = String(type || '').toLowerCase();
-          const isAttachment = !!attachment || ['audio', 'image', 'video', 'file'].includes(messageType);
+          const isAttachment = !!attachment || ['audio', 'voice', 'image', 'video', 'video_note', 'file'].includes(messageType);
 
           if (isAttachment) {
             const pushResult = await notificationService.sendAttachmentNotification({

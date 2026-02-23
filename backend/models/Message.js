@@ -15,7 +15,7 @@ const messageSchema = new mongoose.Schema({
   // Тип сообщения
   type: {
     type: String,
-    enum: ['text', 'file', 'audio', 'image', 'video', 'system'],
+    enum: ['text', 'file', 'audio', 'image', 'video', 'voice', 'video_note', 'system'],
     default: 'text'
   },
   // Текст сообщения
