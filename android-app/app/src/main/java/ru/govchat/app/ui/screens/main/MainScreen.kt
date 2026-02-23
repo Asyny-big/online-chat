@@ -9,7 +9,6 @@ import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.view.WindowManager
-import android.widget.VideoView
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -27,6 +26,7 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -143,6 +143,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
 import io.livekit.android.room.participant.RemoteParticipant
 import io.livekit.android.room.Room
 import io.livekit.android.room.track.Track as LiveKitTrack
@@ -159,6 +163,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import livekit.org.webrtc.RendererCommon as LiveKitRendererCommon
@@ -172,6 +178,7 @@ import ru.govchat.app.core.call.CallUiPhase
 import ru.govchat.app.core.call.CallUiState
 import ru.govchat.app.core.call.CallVideoTrack
 import ru.govchat.app.core.file.GovChatAttachmentDownloader
+import ru.govchat.app.core.media.MediaCacheManager
 import ru.govchat.app.core.notification.IncomingCallNotifications
 import ru.govchat.app.core.permission.GovChatPermissionFeature
 import ru.govchat.app.core.permission.rememberGovChatPermissionFlow
@@ -1923,7 +1930,6 @@ private fun ChatContent(
         }
     }
     var imagePreviewStartIndex by remember(chat.id) { mutableIntStateOf(-1) }
-    var videoNotePreviewMessage by remember(chat.id) { mutableStateOf<ChatMessage?>(null) }
     val listState = rememberLazyListState()
     val playbackCoordinator = remember(chat.id) { PlaybackCoordinator() }
     var activePlaybackMessageId by remember(chat.id) { mutableStateOf<String?>(null) }
@@ -1937,9 +1943,6 @@ private fun ChatContent(
 
     BackHandler(enabled = imagePreviewStartIndex >= 0) {
         imagePreviewStartIndex = -1
-    }
-    BackHandler(enabled = videoNotePreviewMessage != null) {
-        videoNotePreviewMessage = null
     }
     BackHandler(enabled = imagePreviewStartIndex < 0 && showParticipantsDialog) {
         showParticipantsDialog = false
@@ -2196,8 +2199,6 @@ private fun ChatContent(
                         if (previewIndex >= 0) {
                             imagePreviewStartIndex = previewIndex
                         }
-                    } else if (type == MessageType.VideoNote && !attachment?.url.isNullOrBlank()) {
-                        videoNotePreviewMessage = message
                     } else {
                         onAttachmentClick(type, attachment)
                     }
@@ -2363,13 +2364,6 @@ private fun ChatContent(
             }
         )
     }
-
-    videoNotePreviewMessage?.let { previewMessage ->
-        VideoNotePreviewDialog(
-            message = previewMessage,
-            onDismiss = { videoNotePreviewMessage = null }
-        )
-    }
 }
 
 @Composable
@@ -2387,12 +2381,15 @@ private fun ChatMessagesList(
     onAttachmentClick: (ChatMessage, MessageType, MessageAttachment?) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val appContext = LocalContext.current.applicationContext
     val displayMessages = remember(messages) { messages.asReversed() }
     val latestMessageId = messages.lastOrNull()?.id
     var initialScrollPerformed by remember(chatId) { mutableStateOf(false) }
     var shouldAutoScrollOnNewMessage by remember(chatId) { mutableStateOf(true) }
     var lastObservedLatestMessageId by remember(chatId) { mutableStateOf<String?>(null) }
     var paginationTriggered by remember(chatId) { mutableStateOf(false) }
+    var visibleMessageIds by remember(chatId) { mutableStateOf<Set<String>>(emptySet()) }
+    var autoplayVideoNoteId by remember(chatId) { mutableStateOf<String?>(null) }
 
     LaunchedEffect(chatId) {
         snapshotFlow { listState.isNearBottomForReverseLayout() }
@@ -2443,6 +2440,41 @@ private fun ChatMessagesList(
         }
     }
 
+    LaunchedEffect(chatId, displayMessages, playbackCoordinator) {
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo.map { it.index to it.key } }
+            .map { visibleInfo ->
+                val sortedByIndex = visibleInfo.sortedBy { it.first }
+                val visibleIds = sortedByIndex.mapNotNull { (_, key) -> key as? String }.toSet()
+                val autoplayCandidate = sortedByIndex
+                    .mapNotNull { (index, _) -> displayMessages.getOrNull(index) }
+                    .firstOrNull { it.type == MessageType.VideoNote }
+                    ?.id
+                val visibleVideoUrls = sortedByIndex
+                    .mapNotNull { (index, _) ->
+                        displayMessages.getOrNull(index)
+                            ?.takeIf { it.type == MessageType.VideoNote }
+                            ?.attachment
+                            ?.url
+                            ?.let(::resolveMediaUrl)
+                    }
+                    .distinct()
+                    .sorted()
+                Triple(visibleIds, autoplayCandidate, visibleVideoUrls)
+            }
+            .distinctUntilChanged()
+            .collect { (ids, autoplayId, visibleUrls) ->
+                visibleMessageIds = ids
+                autoplayVideoNoteId = autoplayId
+                visibleUrls.forEach { url ->
+                    MediaCacheManager.prefetch(appContext, url)
+                }
+                val activeVideoId = playbackCoordinator.activeVideoId()
+                if (activeVideoId != null && activeVideoId !in ids) {
+                    playbackCoordinator.stopActiveVideo(onActivePlaybackChanged)
+                }
+            }
+    }
+
     LazyColumn(
         state = listState,
         modifier = modifier,
@@ -2460,6 +2492,8 @@ private fun ChatMessagesList(
                 playbackCoordinator = playbackCoordinator,
                 activePlaybackMessageId = activePlaybackMessageId,
                 onActivePlaybackChanged = onActivePlaybackChanged,
+                isVisibleInViewport = visibleMessageIds.contains(message.id),
+                shouldAutoplayVideoNote = autoplayVideoNoteId == message.id,
                 onAttachmentClick = { type, attachment ->
                     onAttachmentClick(message, type, attachment)
                 }
@@ -3795,6 +3829,8 @@ private fun MessageBubble(
     playbackCoordinator: PlaybackCoordinator,
     activePlaybackMessageId: String?,
     onActivePlaybackChanged: (String?) -> Unit,
+    isVisibleInViewport: Boolean,
+    shouldAutoplayVideoNote: Boolean,
     onAttachmentClick: (MessageType, MessageAttachment?) -> Unit
 ) {
     val alignment = if (isMine) Alignment.End else Alignment.Start
@@ -3835,6 +3871,8 @@ private fun MessageBubble(
                     playbackCoordinator = playbackCoordinator,
                     activePlaybackMessageId = activePlaybackMessageId,
                     onActivePlaybackChanged = onActivePlaybackChanged,
+                    isVisibleInViewport = isVisibleInViewport,
+                    shouldAutoplayVideoNote = shouldAutoplayVideoNote,
                     onAttachmentClick = { onAttachmentClick(message.type, message.attachment) }
                 )
 
@@ -3876,6 +3914,8 @@ private fun MessageBody(
     playbackCoordinator: PlaybackCoordinator,
     activePlaybackMessageId: String?,
     onActivePlaybackChanged: (String?) -> Unit,
+    isVisibleInViewport: Boolean,
+    shouldAutoplayVideoNote: Boolean,
     onAttachmentClick: () -> Unit
 ) {
     when (message.type) {
@@ -3909,9 +3949,13 @@ private fun MessageBody(
         }
 
         MessageType.VideoNote -> {
-            VideoNoteMessageBody(
+            VideoNoteMessageBubble(
                 message = message,
-                onClick = onAttachmentClick
+                onFallbackClick = onAttachmentClick,
+                playbackCoordinator = playbackCoordinator,
+                onActivePlaybackChanged = onActivePlaybackChanged,
+                isVisibleInViewport = isVisibleInViewport,
+                shouldAutoplay = shouldAutoplayVideoNote
             )
         }
 
@@ -4045,199 +4089,210 @@ private fun VoiceMessageBody(
 }
 
 @Composable
-private fun VideoNoteMessageBody(
+private fun VideoNoteMessageBubble(
     message: ChatMessage,
-    onClick: () -> Unit
+    onFallbackClick: () -> Unit,
+    playbackCoordinator: PlaybackCoordinator,
+    onActivePlaybackChanged: (String?) -> Unit,
+    isVisibleInViewport: Boolean,
+    shouldAutoplay: Boolean
 ) {
     val videoUrl = resolveMediaUrl(message.attachment?.url)
     val resolvedDurationMs = rememberResolvedMediaDuration(
         initialDurationMs = message.attachment?.durationMs,
         mediaUrl = videoUrl
     )
+    val context = LocalContext.current
+    val exoPlayer = remember(videoUrl) {
+        videoUrl?.let { url ->
+            MediaCacheManager.createPlayer(context).apply {
+                repeatMode = Player.REPEAT_MODE_ONE
+                setMediaItem(MediaCacheManager.mediaItem(url))
+                prepare()
+                playWhenReady = false
+            }
+        }
+    }
+    var isPlaying by remember(message.id) { mutableStateOf(false) }
+    var progress by remember(message.id) { mutableStateOf(0f) }
+    var measuredDurationMs by remember(message.id) { mutableStateOf(0L) }
 
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Surface(
-            shape = CircleShape,
-            color = Color(0x33000000),
-            modifier = Modifier
-                .size(140.dp)
-                .clip(CircleShape)
-                .clickable { onClick() }
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                if (videoUrl != null) {
-                    AsyncImage(
-                        model = rememberImageRequest(
-                            data = videoUrl,
-                            downsamplePx = 640
-                        ),
-                        imageLoader = rememberGovChatImageLoader(),
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color(0xFF0F172A))
-                    )
+    DisposableEffect(exoPlayer, message.id) {
+        val player = exoPlayer
+        if (player == null) {
+            onDispose { }
+        } else {
+            val listener = object : Player.Listener {
+                override fun onIsPlayingChanged(playing: Boolean) {
+                    isPlaying = playing
                 }
 
-                Surface(
-                    color = Color(0xAA0F172A),
-                    shape = CircleShape,
-                    modifier = Modifier.size(42.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Filled.Videocam,
-                            contentDescription = "Открыть видео-кружок",
-                            tint = Color.White
-                        )
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    if (playbackState == Player.STATE_READY) {
+                        measuredDurationMs = player.duration.takeIf { it > 0L } ?: measuredDurationMs
                     }
                 }
+
+                override fun onPlayerError(error: PlaybackException) {
+                    isPlaying = false
+                    progress = 0f
+                    if (playbackCoordinator.activeVideoId() == message.id) {
+                        playbackCoordinator.deactivateVideo(message.id, onActivePlaybackChanged)
+                    }
+                }
+            }
+            player.addListener(listener)
+            onDispose {
+                player.removeListener(listener)
+                if (playbackCoordinator.activeVideoId() == message.id) {
+                    playbackCoordinator.deactivateVideo(message.id, onActivePlaybackChanged)
+                }
+                player.release()
+            }
+        }
+    }
+
+    LaunchedEffect(exoPlayer, isVisibleInViewport, shouldAutoplay) {
+        val player = exoPlayer ?: return@LaunchedEffect
+        if (!isVisibleInViewport) {
+            if (playbackCoordinator.activeVideoId() == message.id) {
+                player.pause()
+                player.seekTo(0L)
+                progress = 0f
+                playbackCoordinator.deactivateVideo(message.id, onActivePlaybackChanged)
+            }
+            return@LaunchedEffect
+        }
+
+        if (shouldAutoplay) {
+            val activated = playbackCoordinator.activateVideo(
+                messageId = message.id,
+                player = player,
+                onActiveChanged = onActivePlaybackChanged
+            )
+            if (activated) {
+                player.playWhenReady = true
+                player.play()
+            }
+        }
+    }
+
+    LaunchedEffect(exoPlayer, isVisibleInViewport) {
+        val player = exoPlayer ?: return@LaunchedEffect
+        while (isVisibleInViewport) {
+            val duration = player.duration.takeIf { it > 0L } ?: measuredDurationMs
+            val current = player.currentPosition.coerceAtLeast(0L)
+            measuredDurationMs = duration
+            progress = if (duration > 0L) {
+                (current.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
+            } else {
+                0f
+            }
+            delay(120L)
+        }
+    }
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            modifier = Modifier
+                .size(200.dp)
+                .aspectRatio(1f)
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = Color(0x33000000),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(CircleShape)
+                    .clickable {
+                        val player = exoPlayer
+                        if (videoUrl == null || player == null) {
+                            onFallbackClick()
+                        } else {
+                            val isActiveVideo = playbackCoordinator.activeVideoId() == message.id
+                            if (isActiveVideo && player.isPlaying) {
+                                player.pause()
+                                playbackCoordinator.deactivateVideo(message.id, onActivePlaybackChanged)
+                            } else {
+                                playbackCoordinator.activateVideo(
+                                    messageId = message.id,
+                                    player = player,
+                                    onActiveChanged = onActivePlaybackChanged
+                                )
+                                player.playWhenReady = true
+                                player.play()
+                            }
+                        }
+                    }
+            ) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                    if (exoPlayer != null) {
+                        AndroidView(
+                            factory = { viewContext ->
+                                PlayerView(viewContext).apply {
+                                    useController = false
+                                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                                    player = exoPlayer
+                                    layoutParams = android.view.ViewGroup.LayoutParams(
+                                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                                        android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                                    )
+                                }
+                            },
+                            update = { playerView ->
+                                if (playerView.player !== exoPlayer) {
+                                    playerView.player = exoPlayer
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .aspectRatio(1f)
+                                .clip(CircleShape)
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color(0xFF0F172A))
+                        )
+                    }
+
+                    Surface(
+                        color = Color(0xAA0F172A),
+                        shape = CircleShape,
+                        modifier = Modifier.size(44.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                                contentDescription = if (isPlaying) "Пауза" else "Воспроизвести",
+                                tint = Color.White,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (isPlaying || progress > 0f) {
+                CircularProgressIndicator(
+                    progress = { progress.coerceIn(0f, 1f) },
+                    color = Color(0xFF5EB5F7),
+                    trackColor = Color(0x445EB5F7),
+                    strokeWidth = 3.dp,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(2.dp)
+                )
             }
         }
 
         Spacer(modifier = Modifier.height(6.dp))
         Text(
-            text = "Видео-кружок • ${formatMediaDuration(resolvedDurationMs)}",
+            text = "Видео-кружок • ${formatMediaDuration(resolvedDurationMs ?: measuredDurationMs)}",
             color = Color(0xFFD6E4F5),
             style = MaterialTheme.typography.bodySmall
         )
-    }
-}
-
-@Composable
-private fun VideoNotePreviewDialog(
-    message: ChatMessage,
-    onDismiss: () -> Unit
-) {
-    val videoUrl = resolveMediaUrl(message.attachment?.url) ?: return
-    val configuration = LocalConfiguration.current
-    val previewSize = remember(configuration.screenWidthDp) {
-        (configuration.screenWidthDp.dp * 0.78f).coerceIn(220.dp, 360.dp)
-    }
-    val resolvedDurationMs = rememberResolvedMediaDuration(
-        initialDurationMs = message.attachment?.durationMs,
-        mediaUrl = videoUrl
-    )
-    var videoViewRef by remember(videoUrl) { mutableStateOf<VideoView?>(null) }
-    var isPrepared by remember(videoUrl) { mutableStateOf(false) }
-    var isPlaying by remember(videoUrl) { mutableStateOf(false) }
-
-    DisposableEffect(videoUrl) {
-        onDispose {
-            runCatching { videoViewRef?.stopPlayback() }
-            videoViewRef = null
-        }
-    }
-
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            color = Color(0xF2000000)
-        ) {
-            Box(modifier = Modifier.fillMaxSize()) {
-                AndroidView(
-                    factory = { context ->
-                        VideoView(context).apply {
-                            setVideoURI(Uri.parse(videoUrl))
-                            setOnPreparedListener { mediaPlayer ->
-                                mediaPlayer.isLooping = true
-                                isPrepared = true
-                                start()
-                                isPlaying = true
-                            }
-                            setOnCompletionListener {
-                                isPlaying = false
-                            }
-                            setOnErrorListener { _, _, _ ->
-                                isPrepared = false
-                                isPlaying = false
-                                true
-                            }
-                        }.also { videoViewRef = it }
-                    },
-                    update = { videoViewRef = it },
-                    modifier = Modifier
-                        .size(previewSize)
-                        .align(Alignment.Center)
-                        .clip(CircleShape)
-                )
-
-                if (!isPrepared) {
-                    CircularProgressIndicator(
-                        color = Color(0xFF5EB5F7),
-                        modifier = Modifier.align(Alignment.Center)
-                    )
-                }
-
-                Surface(
-                    color = Color(0xAA0F172A),
-                    shape = CircleShape,
-                    modifier = Modifier
-                        .size(58.dp)
-                        .align(Alignment.Center)
-                        .clickable {
-                            val view = videoViewRef ?: return@clickable
-                            if (!isPrepared) return@clickable
-                            if (isPlaying) {
-                                view.pause()
-                                isPlaying = false
-                            } else {
-                                view.start()
-                                isPlaying = true
-                            }
-                        }
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                            contentDescription = if (isPlaying) "Пауза" else "Воспроизвести",
-                            tint = Color.White,
-                            modifier = Modifier.size(28.dp)
-                        )
-                    }
-                }
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .statusBarsPadding()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Surface(
-                        color = Color(0xAA0F172A),
-                        shape = CircleShape,
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clickable { onDismiss() }
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Filled.Close,
-                                contentDescription = "Закрыть",
-                                tint = Color.White
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.width(12.dp))
-
-                    Text(
-                        text = "Видео-кружок • ${formatMediaDuration(resolvedDurationMs)}",
-                        color = Color(0xFFD6E4F5),
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                }
-            }
-        }
     }
 }
 

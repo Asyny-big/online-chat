@@ -662,4 +662,4 @@ private const val LOCK_THRESHOLD_PX = 90f
 private const val CANCEL_THRESHOLD_PX = 120f
 private const val VOICE_MAX_DURATION_SEC = 120
 private const val VIDEO_MAX_DURATION_SEC = 60
-private const val VIDEO_MAX_DURATION_MS = 60_000L
+private const val VIDEO_MAX_DURATION_MS = 30_000L

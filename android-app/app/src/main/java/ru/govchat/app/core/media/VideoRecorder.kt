@@ -64,10 +64,11 @@ class VideoRecorder(
             val recorder = Recorder.Builder()
                 .setQualitySelector(
                     QualitySelector.from(
-                        Quality.HD,
+                        Quality.SD,
                         FallbackStrategy.lowerQualityOrHigherThan(Quality.SD)
                     )
                 )
+                .setTargetVideoEncodingBitRate(TARGET_VIDEO_BITRATE)
                 .build()
             val videoUseCase = VideoCapture.withOutput(recorder)
             val selector = CameraSelector.Builder()
@@ -263,7 +264,8 @@ class VideoRecorder(
     }
 
     companion object {
-        const val DEFAULT_MAX_DURATION_MS: Long = 60_000L
+        const val DEFAULT_MAX_DURATION_MS: Long = 30_000L
+        private const val TARGET_VIDEO_BITRATE = 1_200_000
         private const val NANOS_IN_MILLI = 1_000_000L
     }
 }
