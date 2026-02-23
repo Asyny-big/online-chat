@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+    <meta charset="UTF-8">
+    <title>GovChat — Диаграмма вариантов использования</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #fff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+    </style>
+</head>
+
+<body>
+    <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1200" viewBox="0 0 1600 1200">
+        <defs>
+            <marker id="arrowhead" markerWidth="12" markerHeight="8" refX="11" refY="4" orient="auto">
+                <polygon points="0 0, 12 4, 0 8" fill="none" stroke="#000" stroke-width="1" />
+            </marker>
+        </defs>
+
+        <!-- ==================== ACTOR: Пользователь ==================== -->
+        <!-- Stick figure centered at cx=800, head top at ~385 -->
+        <!-- Head -->
+        <circle cx="800" cy="405" r="20" fill="none" stroke="#000" stroke-width="2" />
+        <!-- Body -->
+        <line x1="800" y1="425" x2="800" y2="490" stroke="#000" stroke-width="2" />
+        <!-- Left arm -->
+        <line x1="800" y1="450" x2="755" y2="475" stroke="#000" stroke-width="2" />
+        <!-- Right arm -->
+        <line x1="800" y1="450" x2="845" y2="475" stroke="#000" stroke-width="2" />
+        <!-- Left leg -->
+        <line x1="800" y1="490" x2="765" y2="535" stroke="#000" stroke-width="2" />
+        <!-- Right leg -->
+        <line x1="800" y1="490" x2="835" y2="535" stroke="#000" stroke-width="2" />
+        <!-- Label — well below legs with space -->
+        <text x="800" y="570" text-anchor="middle" font-family="Times New Roman, serif" font-size="18"
+            font-weight="bold" fill="#000">Пользователь</text>
+
+        <!-- ==================== ASSOCIATION LINES ==================== -->
+        <!-- Solid lines, no arrowheads. From body/limbs to ellipses. -->
+        <!-- NONE go through label area (y 545-580) -->
+
+        <!-- 1. To Просмотреть контакты (12 o'clock — straight up from head) -->
+        <line x1="800" y1="385" x2="800" y2="225" stroke="#000" stroke-width="1.5" />
+
+        <!-- 2. To Авторизоваться (10 o'clock — from head-left) -->
+        <line x1="780" y1="400" x2="480" y2="230" stroke="#000" stroke-width="1.5" />
+
+        <!-- 3. To Редактировать профиль (2 o'clock — from head-right) -->
+        <line x1="820" y1="400" x2="1130" y2="230" stroke="#000" stroke-width="1.5" />
+
+        <!-- 4. To Создать групповой чат (9 o'clock — from left arm) -->
+        <line x1="755" y1="475" x2="410" y2="475" stroke="#000" stroke-width="1.5" />
+
+        <!-- 5. To Совершить видеозвонок (3 o'clock — from right arm) -->
+        <line x1="845" y1="475" x2="1185" y2="475" stroke="#000" stroke-width="1.5" />
+
+        <!-- 6. To Отправить сообщение (8 o'clock — from left leg going down-left) -->
+        <line x1="765" y1="535" x2="470" y2="720" stroke="#000" stroke-width="1.5" />
+
+        <!-- 7. To Просмотреть ленту (4 o'clock — from right leg going down-right) -->
+        <line x1="835" y1="535" x2="1130" y2="720" stroke="#000" stroke-width="1.5" />
+
+        <!-- 8. To Опубликовать пост (6 o'clock — goes to the LEFT of the label) -->
+        <line x1="765" y1="535" x2="690" y2="610" stroke="#000" stroke-width="1.5" />
+        <line x1="690" y1="610" x2="690" y2="870" stroke="#000" stroke-width="1.5" />
+
+        <!-- ==================== USE CASE ELLIPSES ==================== -->
+
+        <!-- === 1. Просмотреть контакты (TOP — 12 o'clock) === -->
+        <ellipse cx="800" cy="185" rx="140" ry="38" fill="none" stroke="#000" stroke-width="1.5" />
+        <text x="800" y="191" text-anchor="middle" font-family="Times New Roman, serif" font-size="16"
+            fill="#000">Просмотреть контакты</text>
+
+        <!-- === 2. Авторизоваться (UPPER-LEFT — 10 o'clock) === -->
+        <ellipse cx="420" cy="210" rx="120" ry="38" fill="none" stroke="#000" stroke-width="1.5" />
+        <text x="420" y="216" text-anchor="middle" font-family="Times New Roman, serif" font-size="16"
+            fill="#000">Авторизоваться</text>
+
+        <!-- 2a. Зарегистрироваться — «расширяет» → Авторизоваться -->
+        <ellipse cx="185" cy="100" rx="130" ry="35" fill="none" stroke="#000" stroke-width="1.5" />
+        <text x="185" y="106" text-anchor="middle" font-family="Times New Roman, serif" font-size="15"
+            fill="#000">Зарегистрироваться</text>
+        <!-- Arrow: from Зарегистрироваться toward Авторизоваться -->
+        <line x1="270" y1="128" x2="350" y2="180" stroke="#000" stroke-width="1.2" stroke-dasharray="8,4"
+            marker-end="url(#arrowhead)" />
+        <text x="280" y="162" text-anchor="middle" font-family="Times New Roman, serif" font-size="13"
+            fill="#000">«расширяет»</text>
+
+        <!-- === 3. Редактировать профиль (UPPER-RIGHT — 2 o'clock) === -->
+        <ellipse cx="1180" cy="210" rx="130" ry="38" fill="none" stroke="#000" stroke-width="1.5" />
+        <text x="1180" y="205" text-anchor="middle" font-family="Times New Roman, serif" font-size="15"
+            fill="#000">Редактировать</text>
+        <text x="1180" y="224" text-anchor="middle" font-family="Times New Roman, serif" font-size="15"
+            fill="#000">профиль</text>
+
+        <!-- 3a. Загрузить аватар — «расширяет» → Редактировать профиль -->
+        <ellipse cx="1415" cy="100" rx="120" ry="35" fill="none" stroke="#000" stroke-width="1.5" />
+        <text x="1415" y="106" text-anchor="middle" font-family="Times New Roman, serif" font-size="15"
+            fill="#000">Загрузить аватар</text>
+        <line x1="1340" y1="128" x2="1260" y2="180" stroke="#000" stroke-width="1.2" stroke-dasharray="8,4"
+            marker-end="url(#arrowhead)" />
+        <text x="1330" y="162" text-anchor="middle" font-family="Times New Roman, serif" font-size="13"
+            fill="#000">«расширяет»</text>
+
+        <!-- === 4. Создать групповой чат (LEFT — 9 o'clock) === -->
+        <ellipse cx="300" cy="475" rx="145" ry="38" fill="none" stroke="#000" stroke-width="1.5" />
+        <text x="300" y="470" text-anchor="middle" font-family="Times New Roman, serif" font-size="15"
+            fill="#000">Создать групповой</text>
+        <text x="300" y="488" text-anchor="middle" font-family="Times New Roman, serif" font-size="15"
+            fill="#000">чат</text>
+
+        <!-- 4a. Выбрать участников — «включает» from Создать групповой чат -->
+        <ellipse cx="105" cy="365" rx="120" ry="35" fill="none" stroke="#000" stroke-width="1.5" />
+        <text x="105" y="371" text-anchor="middle" font-family="Times New Roman, serif" font-size="15"
+            fill="#000">Выбрать участников</text>
+        <line x1="215" y1="443" x2="165" y2="398" stroke="#000" stroke-width="1.2" stroke-dasharray="8,4"
+            marker-end="url(#arrowhead)" />
+        <text x="160" y="432" text-anchor="middle" font-family="Times New Roman, serif" font-size="13"
+            fill="#000">«включает»</text>
+
+        <!-- === 5. Совершить видеозвонок (RIGHT — 3 o'clock) === -->
+        <ellipse cx="1300" cy="475" rx="140" ry="38" fill="none" stroke="#000" stroke-width="1.5" />
+        <text x="1300" y="470" text-anchor="middle" font-family="Times New Roman, serif" font-size="15"
+            fill="#000">Совершить</text>
+        <text x="1300" y="488" text-anchor="middle" font-family="Times New Roman, serif" font-size="15"
+            fill="#000">видеозвонок</text>
+
+        <!-- === 6. Отправить сообщение (LOWER-LEFT — 7-8 o'clock) === -->
+        <ellipse cx="400" cy="730" rx="140" ry="38" fill="none" stroke="#000" stroke-width="1.5" />
+        <text x="400" y="725" text-anchor="middle" font-family="Times New Roman, serif" font-size="15"
+            fill="#000">Отправить</text>
+        <text x="400" y="743" text-anchor="middle" font-family="Times New Roman, serif" font-size="15"
+            fill="#000">сообщение</text>
+
+        <!-- 6a. Добавить вложение — «включает» from Отправить сообщение -->
+        <ellipse cx="180" cy="860" rx="125" ry="35" fill="none" stroke="#000" stroke-width="1.5" />
+        <text x="180" y="866" text-anchor="middle" font-family="Times New Roman, serif" font-size="15"
+            fill="#000">Добавить вложение</text>
+        <line x1="315" y1="762" x2="250" y2="830" stroke="#000" stroke-width="1.2" stroke-dasharray="8,4"
+            marker-end="url(#arrowhead)" />
+        <text x="250" y="795" text-anchor="middle" font-family="Times New Roman, serif" font-size="13"
+            fill="#000">«включает»</text>
+
+        <!-- 6b. Отправить голосовое сообщение — «расширяет» → Отправить сообщение -->
+        <ellipse cx="150" cy="650" rx="140" ry="38" fill="none" stroke="#000" stroke-width="1.5" />
+        <text x="150" y="645" text-anchor="middle" font-family="Times New Roman, serif" font-size="14"
+            fill="#000">Отправить голосовое</text>
+        <text x="150" y="663" text-anchor="middle" font-family="Times New Roman, serif" font-size="14"
+            fill="#000">сообщение</text>
+        <line x1="260" y1="680" x2="320" y2="705" stroke="#000" stroke-width="1.2" stroke-dasharray="8,4"
+            marker-end="url(#arrowhead)" />
+        <text x="310" y="680" text-anchor="middle" font-family="Times New Roman, serif" font-size="13"
+            fill="#000">«расширяет»</text>
+
+        <!-- === 7. Опубликовать пост (BOTTOM — 6 o'clock) === -->
+        <ellipse cx="690" cy="910" rx="135" ry="38" fill="none" stroke="#000" stroke-width="1.5" />
+        <text x="690" y="916" text-anchor="middle" font-family="Times New Roman, serif" font-size="16"
+            fill="#000">Опубликовать пост</text>
+
+        <!-- 7a. Добавить описание — «включает» from Опубликовать пост -->
+        <ellipse cx="510" cy="1050" rx="125" ry="35" fill="none" stroke="#000" stroke-width="1.5" />
+        <text x="510" y="1056" text-anchor="middle" font-family="Times New Roman, serif" font-size="15"
+            fill="#000">Добавить описание</text>
+        <line x1="615" y1="942" x2="570" y2="1018" stroke="#000" stroke-width="1.2" stroke-dasharray="8,4"
+            marker-end="url(#arrowhead)" />
+        <text x="568" y="980" text-anchor="middle" font-family="Times New Roman, serif" font-size="13"
+            fill="#000">«включает»</text>
+
+        <!-- 7b. Добавить фотографию — «расширяет» → Опубликовать пост -->
+        <ellipse cx="930" cy="1050" rx="140" ry="35" fill="none" stroke="#000" stroke-width="1.5" />
+        <text x="930" y="1056" text-anchor="middle" font-family="Times New Roman, serif" font-size="15"
+            fill="#000">Добавить фотографию</text>
+        <line x1="845" y1="1020" x2="775" y2="942" stroke="#000" stroke-width="1.2" stroke-dasharray="8,4"
+            marker-end="url(#arrowhead)" />
+        <text x="840" y="975" text-anchor="middle" font-family="Times New Roman, serif" font-size="13"
+            fill="#000">«расширяет»</text>
+
+        <!-- === 8. Просмотреть ленту (LOWER-RIGHT — 4-5 o'clock) === -->
+        <ellipse cx="1200" cy="730" rx="130" ry="38" fill="none" stroke="#000" stroke-width="1.5" />
+        <text x="1200" y="736" text-anchor="middle" font-family="Times New Roman, serif" font-size="16"
+            fill="#000">Просмотреть ленту</text>
+
+        <!-- 8a. Добавить комментарий — «расширяет» → Просмотреть ленту -->
+        <ellipse cx="1430" cy="860" rx="130" ry="38" fill="none" stroke="#000" stroke-width="1.5" />
+        <text x="1430" y="855" text-anchor="middle" font-family="Times New Roman, serif" font-size="14"
+            fill="#000">Добавить</text>
+        <text x="1430" y="873" text-anchor="middle" font-family="Times New Roman, serif" font-size="14"
+            fill="#000">комментарий</text>
+        <line x1="1350" y1="830" x2="1280" y2="765" stroke="#000" stroke-width="1.2" stroke-dasharray="8,4"
+            marker-end="url(#arrowhead)" />
+        <text x="1340" y="790" text-anchor="middle" font-family="Times New Roman, serif" font-size="13"
+            fill="#000">«расширяет»</text>
+
+        <!-- 8b. Поставить реакцию — «расширяет» → Просмотреть ленту -->
+        <ellipse cx="1430" cy="640" rx="120" ry="35" fill="none" stroke="#000" stroke-width="1.5" />
+        <text x="1430" y="646" text-anchor="middle" font-family="Times New Roman, serif" font-size="15"
+            fill="#000">Поставить реакцию</text>
+        <line x1="1345" y1="668" x2="1285" y2="700" stroke="#000" stroke-width="1.2" stroke-dasharray="8,4"
+            marker-end="url(#arrowhead)" />
+        <text x="1345" y="678" text-anchor="middle" font-family="Times New Roman, serif" font-size="13"
+            fill="#000">«расширяет»</text>
+
+    </svg>
+</body>
+
+</html>

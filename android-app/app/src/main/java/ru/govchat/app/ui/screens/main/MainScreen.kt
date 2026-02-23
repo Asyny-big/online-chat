@@ -4,10 +4,12 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
+import android.media.MediaMetadataRetriever
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.view.WindowManager
+import android.widget.VideoView
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -154,9 +156,11 @@ import coil.request.CachePolicy
 import coil.request.ImageRequest
 import coil.size.Precision
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import livekit.org.webrtc.RendererCommon as LiveKitRendererCommon
 import livekit.org.webrtc.SurfaceViewRenderer as LiveKitSurfaceViewRenderer
 import org.webrtc.EglBase
@@ -1919,6 +1923,7 @@ private fun ChatContent(
         }
     }
     var imagePreviewStartIndex by remember(chat.id) { mutableIntStateOf(-1) }
+    var videoNotePreviewMessage by remember(chat.id) { mutableStateOf<ChatMessage?>(null) }
     val listState = rememberLazyListState()
     val playbackCoordinator = remember(chat.id) { PlaybackCoordinator() }
     var activePlaybackMessageId by remember(chat.id) { mutableStateOf<String?>(null) }
@@ -1932,6 +1937,9 @@ private fun ChatContent(
 
     BackHandler(enabled = imagePreviewStartIndex >= 0) {
         imagePreviewStartIndex = -1
+    }
+    BackHandler(enabled = videoNotePreviewMessage != null) {
+        videoNotePreviewMessage = null
     }
     BackHandler(enabled = imagePreviewStartIndex < 0 && showParticipantsDialog) {
         showParticipantsDialog = false
@@ -2188,6 +2196,8 @@ private fun ChatContent(
                         if (previewIndex >= 0) {
                             imagePreviewStartIndex = previewIndex
                         }
+                    } else if (type == MessageType.VideoNote && !attachment?.url.isNullOrBlank()) {
+                        videoNotePreviewMessage = message
                     } else {
                         onAttachmentClick(type, attachment)
                     }
@@ -2351,6 +2361,13 @@ private fun ChatContent(
             onDownload = { message ->
                 onAttachmentClick(message.type, message.attachment)
             }
+        )
+    }
+
+    videoNotePreviewMessage?.let { previewMessage ->
+        VideoNotePreviewDialog(
+            message = previewMessage,
+            onDismiss = { videoNotePreviewMessage = null }
         )
     }
 }
@@ -3944,6 +3961,10 @@ private fun VoiceMessageBody(
     onFallbackClick: () -> Unit
 ) {
     val audioUrl = resolveMediaUrl(message.attachment?.url)
+    val resolvedDurationMs = rememberResolvedMediaDuration(
+        initialDurationMs = message.attachment?.durationMs,
+        mediaUrl = audioUrl
+    )
     if (audioUrl == null) {
         AttachmentLink(
             title = "Голосовое сообщение",
@@ -4015,7 +4036,7 @@ private fun VoiceMessageBody(
 
             Spacer(modifier = Modifier.size(8.dp))
             Text(
-                text = formatMediaDuration(message.attachment?.durationMs),
+                text = formatMediaDuration(resolvedDurationMs),
                 color = Color(0xFFD6E4F5),
                 fontSize = 12.sp
             )
@@ -4029,6 +4050,10 @@ private fun VideoNoteMessageBody(
     onClick: () -> Unit
 ) {
     val videoUrl = resolveMediaUrl(message.attachment?.url)
+    val resolvedDurationMs = rememberResolvedMediaDuration(
+        initialDurationMs = message.attachment?.durationMs,
+        mediaUrl = videoUrl
+    )
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Surface(
@@ -4077,10 +4102,142 @@ private fun VideoNoteMessageBody(
 
         Spacer(modifier = Modifier.height(6.dp))
         Text(
-            text = "Видео-кружок • ${formatMediaDuration(message.attachment?.durationMs)}",
+            text = "Видео-кружок • ${formatMediaDuration(resolvedDurationMs)}",
             color = Color(0xFFD6E4F5),
             style = MaterialTheme.typography.bodySmall
         )
+    }
+}
+
+@Composable
+private fun VideoNotePreviewDialog(
+    message: ChatMessage,
+    onDismiss: () -> Unit
+) {
+    val videoUrl = resolveMediaUrl(message.attachment?.url) ?: return
+    val configuration = LocalConfiguration.current
+    val previewSize = remember(configuration.screenWidthDp) {
+        (configuration.screenWidthDp.dp * 0.78f).coerceIn(220.dp, 360.dp)
+    }
+    val resolvedDurationMs = rememberResolvedMediaDuration(
+        initialDurationMs = message.attachment?.durationMs,
+        mediaUrl = videoUrl
+    )
+    var videoViewRef by remember(videoUrl) { mutableStateOf<VideoView?>(null) }
+    var isPrepared by remember(videoUrl) { mutableStateOf(false) }
+    var isPlaying by remember(videoUrl) { mutableStateOf(false) }
+
+    DisposableEffect(videoUrl) {
+        onDispose {
+            runCatching { videoViewRef?.stopPlayback() }
+            videoViewRef = null
+        }
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = Color(0xF2000000)
+        ) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                AndroidView(
+                    factory = { context ->
+                        VideoView(context).apply {
+                            setVideoURI(Uri.parse(videoUrl))
+                            setOnPreparedListener { mediaPlayer ->
+                                mediaPlayer.isLooping = true
+                                isPrepared = true
+                                start()
+                                isPlaying = true
+                            }
+                            setOnCompletionListener {
+                                isPlaying = false
+                            }
+                            setOnErrorListener { _, _, _ ->
+                                isPrepared = false
+                                isPlaying = false
+                                true
+                            }
+                        }.also { videoViewRef = it }
+                    },
+                    update = { videoViewRef = it },
+                    modifier = Modifier
+                        .size(previewSize)
+                        .align(Alignment.Center)
+                        .clip(CircleShape)
+                )
+
+                if (!isPrepared) {
+                    CircularProgressIndicator(
+                        color = Color(0xFF5EB5F7),
+                        modifier = Modifier.align(Alignment.Center)
+                    )
+                }
+
+                Surface(
+                    color = Color(0xAA0F172A),
+                    shape = CircleShape,
+                    modifier = Modifier
+                        .size(58.dp)
+                        .align(Alignment.Center)
+                        .clickable {
+                            val view = videoViewRef ?: return@clickable
+                            if (!isPrepared) return@clickable
+                            if (isPlaying) {
+                                view.pause()
+                                isPlaying = false
+                            } else {
+                                view.start()
+                                isPlaying = true
+                            }
+                        }
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                            contentDescription = if (isPlaying) "Пауза" else "Воспроизвести",
+                            tint = Color.White,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        color = Color(0xAA0F172A),
+                        shape = CircleShape,
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clickable { onDismiss() }
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Filled.Close,
+                                contentDescription = "Закрыть",
+                                tint = Color.White
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(12.dp))
+
+                    Text(
+                        text = "Видео-кружок • ${formatMediaDuration(resolvedDurationMs)}",
+                        color = Color(0xFFD6E4F5),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -4472,6 +4629,45 @@ private fun formatTime(epochMillis: Long): String {
         val formatter = java.text.SimpleDateFormat("HH:mm", java.util.Locale("ru", "RU"))
         formatter.format(java.util.Date(epochMillis))
     }.getOrDefault("")
+}
+
+@Composable
+private fun rememberResolvedMediaDuration(
+    initialDurationMs: Long?,
+    mediaUrl: String?
+): Long? {
+    return produceState(
+        initialValue = initialDurationMs,
+        key1 = initialDurationMs,
+        key2 = mediaUrl
+    ) {
+        if ((initialDurationMs ?: 0L) > 0L) {
+            value = initialDurationMs
+            return@produceState
+        }
+
+        val safeUrl = mediaUrl?.trim().orEmpty()
+        if (safeUrl.isEmpty()) {
+            value = initialDurationMs
+            return@produceState
+        }
+
+        value = withContext(Dispatchers.IO) {
+            runCatching {
+                val retriever = MediaMetadataRetriever()
+                try {
+                    if (safeUrl.startsWith("http://") || safeUrl.startsWith("https://")) {
+                        retriever.setDataSource(safeUrl, emptyMap())
+                    } else {
+                        retriever.setDataSource(safeUrl)
+                    }
+                    retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+                } finally {
+                    runCatching { retriever.release() }
+                }
+            }.getOrNull()
+        } ?: initialDurationMs
+    }.value
 }
 
 private fun formatMediaDuration(durationMs: Long?): String {
