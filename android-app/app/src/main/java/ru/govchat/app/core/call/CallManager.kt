@@ -659,12 +659,7 @@ private class InternalLiveKitController(
 
             is RoomEvent.TrackSubscribed -> {
                 val activeRoom = room ?: return
-                val fallbackTrack = (event.track as? LiveKitVideoTrack)?.let { track ->
-                    CallVideoTrack.LiveKit(
-                        track = track,
-                        isScreenShare = isLiveKitTrackScreenLike(track)
-                    )
-                }
+                val fallbackTrack = (event.track as? LiveKitVideoTrack)?.let { CallVideoTrack.LiveKit(it) }
                 refreshTracks(
                     reason = "event.TrackSubscribed",
                     activeRoom = activeRoom,
@@ -724,10 +719,7 @@ private class InternalLiveKitController(
         for (publication in extractTrackPublications(room.localParticipant.videoTrackPublications)) {
             if (publication.muted) continue
             val track = publication.track as? LiveKitVideoTrack ?: continue
-            return CallVideoTrack.LiveKit(
-                track = track,
-                isScreenShare = isScreenSharePublication(publication)
-            )
+            return CallVideoTrack.LiveKit(track)
         }
         return null
     }
@@ -740,54 +732,11 @@ private class InternalLiveKitController(
                 if (publication.muted) continue
                 val track = publication.track as? LiveKitVideoTrack ?: continue
                 if (seen.add(System.identityHashCode(track))) {
-                    tracks += CallVideoTrack.LiveKit(
-                        track = track,
-                        isScreenShare = isScreenSharePublication(publication)
-                    )
+                    tracks += CallVideoTrack.LiveKit(track)
                 }
             }
         }
         return tracks
-    }
-
-    private fun isScreenSharePublication(publication: TrackPublication?): Boolean {
-        if (publication == null) return false
-        if (publication.source == Track.Source.SCREEN_SHARE) return true
-        val trackName = readStringProperty(publication, "trackName", "name")
-        if (trackName.contains("screen")) return true
-        val mediaTrack = publication.track as? LiveKitVideoTrack ?: return false
-        return isLiveKitTrackScreenLike(mediaTrack)
-    }
-
-    private fun isLiveKitTrackScreenLike(track: LiveKitVideoTrack?): Boolean {
-        if (track == null) return false
-        val trackName = readStringProperty(track, "name")
-        if (trackName.contains("screen")) return true
-        val mediaStreamTrack = readProperty(track, "mediaStreamTrack")
-        val hint = readStringProperty(mediaStreamTrack, "contentHint")
-        val label = readStringProperty(mediaStreamTrack, "label")
-        return hint == "detail" || label.contains("screen")
-    }
-
-    private fun readStringProperty(source: Any?, vararg names: String): String {
-        for (name in names) {
-            val value = readProperty(source, name)?.toString()?.trim().orEmpty()
-            if (value.isNotBlank()) return value.lowercase()
-        }
-        return ""
-    }
-
-    private fun readProperty(source: Any?, name: String): Any? {
-        if (source == null) return null
-        return runCatching {
-            source.javaClass.methods
-                .firstOrNull {
-                    it.parameterCount == 0 &&
-                        (it.name.equals(name, ignoreCase = true) ||
-                            it.name.equals("get${name.replaceFirstChar { ch -> ch.uppercaseChar() }}", ignoreCase = true))
-                }
-                ?.invoke(source)
-        }.getOrNull()
     }
 
     private fun extractTrackPublications(publications: Any?): List<TrackPublication> {

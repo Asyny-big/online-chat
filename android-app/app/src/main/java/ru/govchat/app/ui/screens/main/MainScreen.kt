@@ -2863,29 +2863,25 @@ private fun looksLikeTechnicalParticipantId(value: String): Boolean {
 private fun resolveRemoteLiveKitParticipantTrack(
     participant: RemoteParticipant
 ): CallVideoTrack.LiveKit? {
-    var screenShareTrack: CallVideoTrack.LiveKit? = null
-    var cameraTrack: CallVideoTrack.LiveKit? = null
+    var screenShareTrack: LiveKitMediaVideoTrack? = null
+    var cameraTrack: LiveKitMediaVideoTrack? = null
     for (publication in extractLiveKitTrackPublications(participant.videoTrackPublications)) {
         if (publication.muted) continue
         val track = publication.track as? LiveKitMediaVideoTrack ?: continue
-        val isScreenPublication = isScreenSharePublication(publication)
-        when {
-            isScreenPublication && screenShareTrack == null -> {
-                screenShareTrack = CallVideoTrack.LiveKit(
-                    track = track,
-                    isScreenShare = true
-                )
+        when (publication.source) {
+            LiveKitTrack.Source.SCREEN_SHARE -> if (screenShareTrack == null) {
+                screenShareTrack = track
             }
-            cameraTrack == null -> {
-                cameraTrack = CallVideoTrack.LiveKit(
-                    track = track,
-                    isScreenShare = isScreenLikeTrack(track)
-                )
+            LiveKitTrack.Source.CAMERA -> if (cameraTrack == null) {
+                cameraTrack = track
+            }
+            else -> if (cameraTrack == null) {
+                cameraTrack = track
             }
         }
     }
     val chosenTrack = screenShareTrack ?: cameraTrack ?: return null
-    return chosenTrack
+    return CallVideoTrack.LiveKit(chosenTrack)
 }
 
 private fun extractLiveKitTrackPublications(publications: Any?): List<LiveKitTrackPublication> {
@@ -2901,59 +2897,6 @@ private fun extractLiveKitTrackPublications(publications: Any?): List<LiveKitTra
         is Array<*> -> publications.flatMap { extractLiveKitTrackPublications(it) }
         else -> emptyList()
     }.distinctBy { it.sid }
-}
-
-private fun isScreenSharePublication(publication: LiveKitTrackPublication?): Boolean {
-    if (publication == null) return false
-    if (publication.source == LiveKitTrack.Source.SCREEN_SHARE) return true
-    val publicationName = readStringProperty(publication, "trackName", "name")
-    if (publicationName.contains("screen")) return true
-    val trackName = readStringProperty(publication.track, "name")
-    if (trackName.contains("screen")) return true
-    val mediaStreamTrack = readProperty(publication.track, "mediaStreamTrack")
-    return isScreenLikeTrack(mediaStreamTrack)
-}
-
-private fun isScreenLikeTrack(track: Any?): Boolean {
-    val hint = readStringProperty(track, "contentHint")
-    val label = readStringProperty(track, "label")
-    if (hint == "detail" || label.contains("screen")) {
-        return true
-    }
-    val trackId = readStringProperty(track, "id")
-    val name = readStringProperty(track, "name")
-    return trackId.contains("screen") ||
-        trackId.contains("share") ||
-        trackId.startsWith("ardamss") ||
-        name.contains("screen")
-}
-
-private fun isScreenCallTrack(track: CallVideoTrack): Boolean {
-    return when (track) {
-        is CallVideoTrack.WebRtc -> track.isScreenShare || isScreenLikeTrack(track.track)
-        is CallVideoTrack.LiveKit -> track.isScreenShare || isScreenLikeTrack(track.track)
-    }
-}
-
-private fun readStringProperty(source: Any?, vararg names: String): String {
-    for (name in names) {
-        val value = readProperty(source, name)?.toString()?.trim().orEmpty()
-        if (value.isNotBlank()) return value.lowercase()
-    }
-    return ""
-}
-
-private fun readProperty(source: Any?, name: String): Any? {
-    if (source == null) return null
-    return runCatching {
-        source.javaClass.methods
-            .firstOrNull {
-                it.parameterCount == 0 &&
-                    (it.name.equals(name, ignoreCase = true) ||
-                        it.name.equals("get${name.replaceFirstChar { ch -> ch.uppercaseChar() }}", ignoreCase = true))
-            }
-            ?.invoke(source)
-    }.getOrNull()
 }
 
 @Composable
@@ -3816,39 +3759,26 @@ private fun CallVideoView(
     zOrderMediaOverlay: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    val isScreenShare = remember(track) { isScreenCallTrack(track) }
     when (track) {
         is CallVideoTrack.WebRtc -> {
             val eglContext = webRtcEglContext ?: return
             val webRtcTrack = track.track
             val trackId = remember(webRtcTrack) { System.identityHashCode(webRtcTrack) }
             val eglId = remember(eglContext) { System.identityHashCode(eglContext) }
-            val scalingType = if (isScreenShare) {
-                WebRtcRendererCommon.ScalingType.SCALE_ASPECT_FIT
-            } else {
-                WebRtcRendererCommon.ScalingType.SCALE_ASPECT_FILL
-            }
             androidx.compose.runtime.key(trackId, eglId) {
                 AndroidView(
                     factory = { ctx ->
                         WebRtcSurfaceViewRenderer(ctx).apply {
                             setEnableHardwareScaler(true)
-                            setScalingType(scalingType)
+                            setScalingType(WebRtcRendererCommon.ScalingType.SCALE_ASPECT_FILL)
                             init(eglContext, null)
-                            setBackgroundColor(
-                                if (isScreenShare) android.graphics.Color.BLACK else android.graphics.Color.TRANSPARENT
-                            )
-                            setMirror(mirror && !isScreenShare)
+                            setMirror(mirror)
                             setZOrderMediaOverlay(zOrderMediaOverlay)
                             webRtcTrack.addSink(this)
                         }
                     },
                     update = { renderer ->
-                        renderer.setScalingType(scalingType)
-                        renderer.setBackgroundColor(
-                            if (isScreenShare) android.graphics.Color.BLACK else android.graphics.Color.TRANSPARENT
-                        )
-                        renderer.setMirror(mirror && !isScreenShare)
+                        renderer.setMirror(mirror)
                         renderer.setZOrderMediaOverlay(zOrderMediaOverlay)
                     },
                     onRelease = { renderer ->
@@ -3865,32 +3795,20 @@ private fun CallVideoView(
             val liveKitTrack = track.track
             val trackId = remember(liveKitTrack) { System.identityHashCode(liveKitTrack) }
             val roomId = remember(room) { System.identityHashCode(room) }
-            val scalingType = if (isScreenShare) {
-                LiveKitRendererCommon.ScalingType.SCALE_ASPECT_FIT
-            } else {
-                LiveKitRendererCommon.ScalingType.SCALE_ASPECT_FILL
-            }
             androidx.compose.runtime.key(trackId, roomId) {
                 AndroidView(
                     factory = { ctx ->
                         LiveKitSurfaceViewRenderer(ctx).apply {
                             setEnableHardwareScaler(true)
-                            setScalingType(scalingType)
+                            setScalingType(LiveKitRendererCommon.ScalingType.SCALE_ASPECT_FILL)
                             room.initVideoRenderer(this)
-                            setBackgroundColor(
-                                if (isScreenShare) android.graphics.Color.BLACK else android.graphics.Color.TRANSPARENT
-                            )
-                            setMirror(mirror && !isScreenShare)
+                            setMirror(mirror)
                             setZOrderMediaOverlay(zOrderMediaOverlay)
                             liveKitTrack.addRenderer(this)
                         }
                     },
                     update = { renderer ->
-                        renderer.setScalingType(scalingType)
-                        renderer.setBackgroundColor(
-                            if (isScreenShare) android.graphics.Color.BLACK else android.graphics.Color.TRANSPARENT
-                        )
-                        renderer.setMirror(mirror && !isScreenShare)
+                        renderer.setMirror(mirror)
                         renderer.setZOrderMediaOverlay(zOrderMediaOverlay)
                     },
                     onRelease = { renderer ->
