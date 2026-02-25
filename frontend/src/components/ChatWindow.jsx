@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import axios from 'axios';
 import MessageInput from './MessageInput';
+import MediaViewerModal from './MediaViewerModal';
 import { API_URL } from '@/config';
 import { DuckIcon, MessageIcon, PlusIcon, SearchIcon } from '@/shared/ui/Icons';
 
@@ -742,7 +743,7 @@ function ChatWindow({
 function MessageBubble({ message, isMine, onDelete, token }) {
   const [showMenu, setShowMenu] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [isVideoNoteOpen, setIsVideoNoteOpen] = useState(false);
+  const [selectedMedia, setSelectedMedia] = useState(null);
   const [audioDurationSec, setAudioDurationSec] = useState(null);
   const { type: rawType = 'text', text, attachment, createdAt, sender } = message;
 
@@ -786,21 +787,13 @@ function MessageBubble({ message, isMine, onDelete, token }) {
 
   const displayOriginalName = normalizeFilename(attachment?.originalName) || 'Файл';
 
-  useEffect(() => {
-    if (!isVideoNoteOpen) return undefined;
-    const handleEsc = (event) => {
-      if (event.key === 'Escape') {
-        setIsVideoNoteOpen(false);
-      }
-    };
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    document.addEventListener('keydown', handleEsc);
-    return () => {
-      document.body.style.overflow = prevOverflow;
-      document.removeEventListener('keydown', handleEsc);
-    };
-  }, [isVideoNoteOpen]);
+  const openMedia = useCallback((media) => {
+    if (!media?.url) return;
+    setSelectedMedia(media);
+  }, []);
+  const closeMedia = useCallback(() => {
+    setSelectedMedia(null);
+  }, []);
 
   const downloadAttachment = async () => {
     try {
@@ -906,45 +899,23 @@ function MessageBubble({ message, isMine, onDelete, token }) {
       case 'video_note':
         return (
           <div className="video-note-wrapper">
-            <button
-              type="button"
-              className="video-note-button"
-              onClick={() => setIsVideoNoteOpen(true)}
+            <video
+              src={getMediaUrl(attachment?.url)}
+              muted
+              playsInline
+              preload="metadata"
+              onClick={() => openMedia({ type: 'video', url: getMediaUrl(attachment?.url) })}
               title="Открыть видеокружок"
-            >
-              <video
-                src={getMediaUrl(attachment?.url)}
-                preload="metadata"
-                muted
-                playsInline
-                className="video-note-thumb"
-              />
-              <span className="video-note-play">▶</span>
-            </button>
+              className="video-note-thumb"
+              style={{
+                width: 120,
+                height: 120,
+                borderRadius: '50%',
+                objectFit: 'cover',
+                cursor: 'pointer'
+              }}
+            />
             {text && <div className="media-caption">{text}</div>}
-            {isVideoNoteOpen && (
-              <div className="video-note-overlay" onClick={() => setIsVideoNoteOpen(false)}>
-                <div className="video-note-modal" onClick={(e) => e.stopPropagation()}>
-                  <button
-                    type="button"
-                    className="video-note-close"
-                    onClick={() => setIsVideoNoteOpen(false)}
-                    aria-label="Закрыть"
-                  >
-                    ×
-                  </button>
-                  <video
-                    src={getMediaUrl(attachment?.url)}
-                    controls
-                    autoPlay
-                    playsInline
-                    preload="metadata"
-                    className="video-note-modal-video"
-                    controlsList="nodownload"
-                  />
-                </div>
-              </div>
-            )}
           </div>
         );
       case 'file':
@@ -977,6 +948,7 @@ function MessageBubble({ message, isMine, onDelete, token }) {
       >
         {!isMine && senderName && <div className="sender-name">{senderName}</div>}
         {renderContent()}
+        <MediaViewerModal media={selectedMedia} onClose={closeMedia} />
         <div className="message-time">
           {time}
           {isMine && onDelete && (

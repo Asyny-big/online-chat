@@ -354,7 +354,7 @@ const MainVideo = React.memo(function MainVideo({
         <LiveKitVideo
           track={videoTrack}
           muted={isLocal}
-          className={`gvc-stage-video${mirrorClass}`}
+          className={`gvc-stage-video${mirrorClass}${isScreenShare ? ' gvc-video-screen' : ''}`}
           onTrackEnded={onTrackEnded}
         />
       ) : (
@@ -400,7 +400,7 @@ const VideoThumbnail = React.memo(function VideoThumbnail({
         <LiveKitVideo
           track={videoTrack}
           muted={isLocal}
-          className={`gvc-thumb-video${mirrorClass}`}
+          className={`gvc-thumb-video${mirrorClass}${isScreenShare ? ' gvc-thumb-video-screen' : ''}`}
           onTrackEnded={onTrackEnded}
         />
       ) : (
@@ -449,6 +449,13 @@ function publicationId(pub) {
   return String(pub?.trackSid || pub?.sid || '') || null;
 }
 
+function isScreenLikeTrack(track) {
+  if (!track) return false;
+  const hint = String(track.contentHint || '').toLowerCase();
+  const label = String(track.label || '').toLowerCase();
+  return hint === 'detail' || label.includes('screen');
+}
+
 function qualityLabel(q) {
   try {
     if (q === VideoQuality.HIGH) return 'HIGH';
@@ -487,20 +494,32 @@ function setPublicationSubscribedQuality(pub, quality) {
 }
 
 function isScreenSharePublication(pub) {
-  const source = pub?.source;
-  const ss = Track?.Source?.ScreenShare;
-  if (ss && source === ss) return true;
-  const s = String(source || '').toLowerCase();
-  return s.includes('screen');
+  if (!pub) return false;
+
+  const source = String(pub.source || '').toLowerCase();
+  if (source === 'screen_share') return true;
+  if (Track?.Source?.ScreenShare && pub.source === Track.Source.ScreenShare) return true;
+
+  const trackSource = String(pub.track?.source || '').toLowerCase();
+  if (trackSource === 'screen_share') return true;
+  if (Track?.Source?.ScreenShare && pub.track?.source === Track.Source.ScreenShare) return true;
+
+  const name = String(pub?.trackName || pub?.name || pub?.track?.name || '').toLowerCase();
+  if (name.includes('screen')) return true;
+
+  if (isScreenLikeTrack(pub?.track?.mediaStreamTrack)) return true;
+
+  return false;
 }
 
 function isCameraPublication(pub) {
+  if (isScreenSharePublication(pub)) return false;
   const source = pub?.source;
   const cam = Track?.Source?.Camera;
   if (cam && source === cam) return true;
   const s = String(source || '').toLowerCase();
-  // fallback: not screen share and is video
-  return !s.includes('screen');
+  if (s.includes('camera')) return true;
+  return !!pub?.track;
 }
 
 function GroupCallModalLiveKit({
@@ -1812,8 +1831,9 @@ const CSS_STYLES = `
   width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; position: relative;
 }
 .gvc-stage-video {
-  width: 100%; height: 100%; object-fit: contain; background: black;
+  width: 100%; height: 100%; object-fit: cover; background: #111;
 }
+.gvc-video-screen { object-fit: contain; background: black; }
 .gvc-video-mirror { transform: scaleX(-1); transform-origin: center; }
 .gvc-stage-placeholder {
   width: 100%; height: 100%; background: #121212; display: flex; align-items: center; justify-content: center;
@@ -1842,7 +1862,8 @@ const CSS_STYLES = `
 .gvc-thumb:hover { background: #36393f; }
 .gvc-thumb.active { border-color: #5865f2; box-shadow: 0 0 0 2px rgba(88, 101, 242, 0.3); }
 .gvc-thumb.speaking { border-color: #3ba55c; }
-.gvc-thumb-video { width: 100%; height: 100%; object-fit: cover; }
+.gvc-thumb-video { width: 100%; height: 100%; object-fit: cover; background: #111; }
+.gvc-thumb-video-screen { object-fit: contain; background: black; }
 .gvc-thumb-placeholder { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #36393f; }
 .gvc-thumb-avatar { width: 40px; height: 40px; border-radius: 50%; background: #5865f2; display: flex; align-items: center; justify-content: center; font-weight: bold; color: white; }
 .gvc-thumb-name {

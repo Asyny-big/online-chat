@@ -9,6 +9,19 @@ import { IonSFUJSONRPCSignal } from 'ion-sdk-js/lib/signal/json-rpc-impl';
 // из-за active speaker). Mongo ObjectId никогда не совпадёт с таким значением.
 const LOCAL_PIN_ID = '__local__';
 
+function isScreenLikeTrack(track) {
+  if (!track) return false;
+  const hint = String(track.contentHint || '').toLowerCase();
+  const label = String(track.label || '').toLowerCase();
+  return hint === 'detail' || label.includes('screen');
+}
+
+function getPrimaryVideoTrack(stream) {
+  if (!stream || typeof stream.getVideoTracks !== 'function') return null;
+  const tracks = stream.getVideoTracks();
+  return tracks.length > 0 ? tracks[0] : null;
+}
+
 /**
  * GroupCallModal - Компонент для групповых видео/аудио звонков (Discord-like UX)
  * SFU-only: ion-sfu (json-rpc over WebSocket), 1 RTCPeerConnection → SFU
@@ -1312,6 +1325,8 @@ function GroupCallModal({
                 style={{
                   ...styles.mainVideo,
                   ...(isVideoOff ? styles.videoHidden : {}),
+                  objectFit: isScreenSharing ? 'contain' : 'cover',
+                  backgroundColor: isScreenSharing ? '#000' : 'transparent',
                   // Self-view (локальная камера) — зеркалим ТОЛЬКО в UI.
                   // Screen share (если включат/вернут) никогда не зеркалим.
                   ...(!isScreenSharing ? { transform: 'scaleX(-1)', transformOrigin: 'center' } : {})
@@ -1367,6 +1382,8 @@ function GroupCallModal({
                 style={{
                   ...styles.mainVideo,
                   ...(isVideoOff ? styles.videoHidden : {}),
+                  objectFit: isScreenSharing ? 'contain' : 'cover',
+                  backgroundColor: isScreenSharing ? '#000' : 'transparent',
                   // Self-view (локальная камера) — зеркалим ТОЛЬКО в UI.
                   // Screen share (если включат/вернут) никогда не зеркалим.
                   ...(!isScreenSharing ? { transform: 'scaleX(-1)', transformOrigin: 'center' } : {})
@@ -1407,6 +1424,8 @@ function GroupCallModal({
                     style={{
                       ...styles.previewVideo,
                       ...(isVideoOff ? styles.videoHidden : {}),
+                      objectFit: isScreenSharing ? 'contain' : 'cover',
+                      backgroundColor: isScreenSharing ? '#000' : 'transparent',
                       // Self-view (локальная камера) — зеркалим ТОЛЬКО в UI.
                       // Screen share (если включат/вернут) никогда не зеркалим.
                       ...(!isScreenSharing ? { transform: 'scaleX(-1)', transformOrigin: 'center' } : {})
@@ -1512,6 +1531,7 @@ function GroupCallModal({
 // Главное видео (высокое качество)
 const MainVideoPlayer = React.forwardRef(({ stream }, forwardedRef) => {
   const innerRef = useRef(null);
+  const isScreenShare = isScreenLikeTrack(getPrimaryVideoTrack(stream));
 
   const setRef = useCallback((node) => {
     innerRef.current = node;
@@ -1539,7 +1559,11 @@ const MainVideoPlayer = React.forwardRef(({ stream }, forwardedRef) => {
       ref={setRef}
       autoPlay
       playsInline
-      style={styles.mainVideo}
+      style={{
+        ...styles.mainVideo,
+        objectFit: isScreenShare ? 'contain' : 'cover',
+        backgroundColor: isScreenShare ? '#000' : 'transparent'
+      }}
     />
   );
 });
@@ -1547,6 +1571,7 @@ const MainVideoPlayer = React.forwardRef(({ stream }, forwardedRef) => {
 // Preview видео (низкое качество)
 function PreviewVideoPlayer({ stream }) {
   const videoRef = useRef(null);
+  const isScreenShare = isScreenLikeTrack(getPrimaryVideoTrack(stream));
 
   useEffect(() => {
     const el = videoRef.current;
@@ -1564,7 +1589,11 @@ function PreviewVideoPlayer({ stream }) {
       ref={videoRef}
       autoPlay
       playsInline
-      style={styles.previewVideo}
+      style={{
+        ...styles.previewVideo,
+        objectFit: isScreenShare ? 'contain' : 'cover',
+        backgroundColor: isScreenShare ? '#000' : 'transparent'
+      }}
     />
   );
 }
@@ -1692,7 +1721,8 @@ const styles = {
   mainVideo: {
     width: '100%',
     height: '100%',
-    objectFit: 'contain', // Сохраняем пропорции
+    objectFit: 'cover',
+    background: '#111',
   },
   mainVideoPlaceholder: {
     display: 'flex',
@@ -1807,6 +1837,7 @@ const styles = {
     width: '100%',
     height: '100%',
     objectFit: 'cover',
+    background: '#111',
   },
   previewPlaceholder: {
     position: 'absolute',

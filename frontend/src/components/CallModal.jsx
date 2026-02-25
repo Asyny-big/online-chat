@@ -116,6 +116,13 @@ function createRingtone() {
   }
 }
 
+function isScreenLikeTrack(track) {
+  if (!track) return false;
+  const hint = String(track.contentHint || '').toLowerCase();
+  const label = String(track.label || '').toLowerCase();
+  return hint === 'detail' || label.includes('screen');
+}
+
 function CallModal({
   socket,
   callState,      // 'idle' | 'outgoing' | 'incoming' | 'active'
@@ -134,6 +141,8 @@ function CallModal({
   // Это локальное состояние (UI/логика) + мы синхронизируем его с собеседником через socket.
   const [localVideoMode, setLocalVideoMode] = useState('camera'); // 'camera' | 'screen'
   const [remoteVideoMode, setRemoteVideoMode] = useState('camera'); // 'camera' | 'screen'
+  const [localTrackLooksScreen, setLocalTrackLooksScreen] = useState(false);
+  const [remoteTrackLooksScreen, setRemoteTrackLooksScreen] = useState(false);
   const [callDuration, setCallDuration] = useState(0);
   const [connectionState, setConnectionState] = useState('new');
   const [hasLocalStream, setHasLocalStream] = useState(false);
@@ -212,8 +221,19 @@ function CallModal({
     localVideoModeRef.current = localVideoMode;
   }, [localVideoMode]);
 
+  const syncLocalScreenHint = useCallback((track) => {
+    setLocalTrackLooksScreen(isScreenLikeTrack(track));
+  }, []);
+
+  const syncRemoteScreenHint = useCallback((track) => {
+    setRemoteTrackLooksScreen(isScreenLikeTrack(track));
+  }, []);
+
+  const isLocalScreen = localVideoMode === 'screen' || localTrackLooksScreen;
+  const isRemoteScreen = remoteVideoMode === 'screen' || remoteTrackLooksScreen;
+
   // Swap доступен только когда оба потока — камера (screen share не участвует).
-  const swapEnabled = callType === 'video' && localVideoMode !== 'screen' && remoteVideoMode !== 'screen';
+  const swapEnabled = callType === 'video' && !isLocalScreen && !isRemoteScreen;
 
   // Если включили screen share (локально/удалённо) — сбрасываем swap на дефолт.
   useEffect(() => {
@@ -275,7 +295,8 @@ function CallModal({
     if (localVideoRef.current) {
       localVideoRef.current.srcObject = localStreamRef.current;
     }
-  }, []);
+    syncLocalScreenHint(newVideoTrack);
+  }, [syncLocalScreenHint]);
 
   // Отправляем текущее состояние видеорежима собеседнику через существующий signaling-канал.
   // Сервер прозрачно форвардит любые типы signal.
@@ -382,6 +403,8 @@ function CallModal({
     setHasRemoteStream(false);
     setLocalVideoMode('camera');
     setRemoteVideoMode('camera');
+    setLocalTrackLooksScreen(false);
+    setRemoteTrackLooksScreen(false);
     setIsLocalFullscreen(false);
     pipPosRef.current = null;
     pipElRef.current = null;
@@ -417,6 +440,7 @@ function CallModal({
         localVideoRef.current.srcObject = stream;
         console.log('[CallModal] Local video srcObject set');
       }
+      syncLocalScreenHint(stream.getVideoTracks?.()[0] || null);
       
       return stream;
     } catch (err) {
@@ -424,7 +448,7 @@ function CallModal({
       alert('Не удалось получить доступ к камере/микрофону: ' + err.message);
       return null;
     }
-  }, [callType]);
+  }, [callType, syncLocalScreenHint]);
 
   // Create PeerConnection
   const createPeerConnection = useCallback((stream, iceConfig) => {
@@ -452,6 +476,7 @@ function CallModal({
       if (remoteStream && remoteVideoRef.current) {
         remoteVideoRef.current.srcObject = remoteStream;
         setHasRemoteStream(true);
+        syncRemoteScreenHint(event.track || remoteStream.getVideoTracks?.()[0] || null);
         console.log('[CallModal] Remote video srcObject set');
         return;
       }
@@ -471,6 +496,7 @@ function CallModal({
           remoteVideoRef.current.srcObject = fallbackStream;
         }
         setHasRemoteStream(true);
+        syncRemoteScreenHint(event.track || fallbackStream.getVideoTracks?.()[0] || null);
         console.log('[CallModal] Remote track attached via fallback stream:', event.track.kind, event.track.id);
       }
     };
@@ -552,7 +578,7 @@ function CallModal({
     };
     
     return pc;
-  }, [socket, callId, remoteUser]);
+  }, [socket, callId, remoteUser, syncRemoteScreenHint]);
 
   // Start call timer
   const startTimer = () => {
@@ -773,6 +799,7 @@ function CallModal({
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = localStreamRef.current;
       }
+      syncLocalScreenHint(newVideoTrack);
       
       setFacingMode(newFacingMode);
       console.log('[CallModal] Camera switched to:', newFacingMode);
@@ -782,7 +809,7 @@ function CallModal({
       // Возможно устройство не поддерживает вторую камеру
       alert('Не удалось переключить камеру. Возможно, устройство не поддерживает вторую камеру.');
     }
-  }, [callType, facingMode]);
+  }, [callType, facingMode, syncLocalScreenHint]);
 
   // Выключить демонстрацию экрана и вернуть камеру.
   const stopScreenShare = useCallback(async () => {
@@ -1048,8 +1075,9 @@ function CallModal({
   useEffect(() => {
     if (localVideoRef.current && localStreamRef.current) {
       localVideoRef.current.srcObject = localStreamRef.current;
+      syncLocalScreenHint(localStreamRef.current.getVideoTracks?.()[0] || null);
     }
-  }, [hasLocalStream]);
+  }, [hasLocalStream, syncLocalScreenHint]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -1160,8 +1188,8 @@ function CallModal({
   // - если локальный шарит экран -> локальный всегда main
   const localShouldBeMain =
     callType === 'video' &&
-    remoteVideoMode !== 'screen' &&
-    (localVideoMode === 'screen' || (swapEnabled && isLocalFullscreen));
+    !isRemoteScreen &&
+    (isLocalScreen || (swapEnabled && isLocalFullscreen));
   const remoteIsPip = callType === 'video' && localShouldBeMain;
   const localIsPip = callType === 'video' && !localShouldBeMain;
 
@@ -1364,9 +1392,8 @@ function CallModal({
                 ...(isMobileVideoLayout ? (remoteIsPip ? pipVideoStyle : mobileFullscreenVideoStyle) : (remoteIsPip ? pipVideoStyle : styles.remoteVideo)),
                 display: hasRemoteStream ? 'block' : 'none',
                 // Если собеседник шлёт screen — показываем без кропа
-                objectFit: remoteVideoMode === 'screen'
-                  ? 'contain'
-                  : (isMobileVideoLayout ? (remoteIsPip ? 'cover' : 'cover') : (remoteIsPip ? 'cover' : 'contain')),
+                objectFit: isRemoteScreen ? 'contain' : 'cover',
+                backgroundColor: isRemoteScreen ? '#000' : 'transparent',
                 borderRadius: isMobileVideoLayout ? (remoteIsPip ? '14px' : 0) : '20px',
                 transition: 'all 200ms ease',
                 cursor: pipClickable && remoteIsPip ? 'pointer' : 'default',
@@ -1376,7 +1403,7 @@ function CallModal({
           ) : null}
           
           {/* Avatar placeholder when no remote video (не показываем поверх screen share) */}
-          {(!hasRemoteStream || callType === 'audio') && localVideoMode !== 'screen' && (
+          {(!hasRemoteStream || callType === 'audio') && !isLocalScreen && (
             <div style={styles.avatarContainer}>
               <div style={styles.avatar}>
                 {remoteUser?.avatarUrl ? (
@@ -1403,16 +1430,15 @@ function CallModal({
                 ...(isMobileVideoLayout ? (localIsPip ? pipVideoStyle : mobileFullscreenVideoStyle) : (localIsPip ? pipVideoStyle : styles.remoteVideo)),
                 opacity: hasLocalStream ? 1 : 0,
                 // Локальная демонстрация экрана тоже без кропа
-                objectFit: localVideoMode === 'screen'
-                  ? 'contain'
-                  : (isMobileVideoLayout ? (localIsPip ? 'cover' : 'cover') : (localIsPip ? 'cover' : 'contain')),
+                objectFit: isLocalScreen ? 'contain' : 'cover',
+                backgroundColor: isLocalScreen ? '#000' : 'transparent',
                 // Self-view (камера) — зеркалим ТОЛЬКО в UI. Screen share никогда не зеркалим.
                 // Важно: для PiP комбинируем translate(var(--pip-x/y)) и scaleX(-1).
-                ...(localVideoMode !== 'screen'
-                  ? (localIsPip
+                ...(isLocalScreen
+                  ? {}
+                  : (localIsPip
                       ? { transform: 'translate3d(var(--pip-x, 0px), var(--pip-y, 0px), 0) scaleX(-1)', transformOrigin: 'center' }
-                      : { transform: 'scaleX(-1)', transformOrigin: 'center' })
-                  : {}),
+                      : { transform: 'scaleX(-1)', transformOrigin: 'center' })),
                 transition: 'all 200ms ease',
                 cursor: pipClickable && localIsPip ? 'pointer' : 'default',
                 ...(localIsPip ? { pointerEvents: 'auto' } : {})
