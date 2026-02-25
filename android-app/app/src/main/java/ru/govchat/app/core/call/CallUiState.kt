@@ -4,8 +4,15 @@ import org.webrtc.EglBase
 import io.livekit.android.room.Room
 
 sealed interface CallVideoTrack {
-    data class WebRtc(val track: org.webrtc.VideoTrack) : CallVideoTrack
-    data class LiveKit(val track: io.livekit.android.room.track.VideoTrack) : CallVideoTrack
+    data class WebRtc(
+        val track: org.webrtc.VideoTrack,
+        val isScreenShare: Boolean = false
+    ) : CallVideoTrack
+
+    data class LiveKit(
+        val track: io.livekit.android.room.track.VideoTrack,
+        val isScreenShare: Boolean = false
+    ) : CallVideoTrack
 }
 
 data class CallControlsState(
