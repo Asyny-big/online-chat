@@ -126,12 +126,21 @@ private fun IceServerDto.toDomain(): WebRtcIceServer {
 
 private fun AttachmentDto?.toDomain(): MessageAttachment? {
     if (this?.url.isNullOrBlank()) return null
+    val source = this!!
+    val thumbnailUrl = listOf(
+        source.thumbnailUrl,
+        source.thumbnail,
+        source.previewUrl,
+        source.preview
+    ).firstOrNull { !it.isNullOrBlank() }
+
     return MessageAttachment(
-        url = this!!.url.orEmpty(),
-        originalName = originalName.orEmpty(),
-        mimeType = mimeType,
-        sizeBytes = size,
-        durationMs = durationMs ?: durationSeconds?.times(1000)
+        url = source.url.orEmpty(),
+        originalName = source.originalName.orEmpty(),
+        mimeType = source.mimeType,
+        sizeBytes = source.size,
+        durationMs = source.durationMs ?: source.durationSeconds?.times(1000),
+        thumbnailUrl = thumbnailUrl
     )
 }
 

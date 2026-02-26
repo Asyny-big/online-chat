@@ -223,6 +223,7 @@ private fun MessageAttachment.toJson(): JSONObject {
         .put("mimeType", mimeType)
         .put("sizeBytes", sizeBytes)
         .put("durationMs", durationMs)
+        .put("thumbnailUrl", thumbnailUrl)
 }
 
 private fun JSONObject.toAttachment(): MessageAttachment? {
@@ -232,7 +233,8 @@ private fun JSONObject.toAttachment(): MessageAttachment? {
         originalName = optString("originalName"),
         mimeType = optString("mimeType").takeIf { it.isNotBlank() },
         sizeBytes = optLong("sizeBytes").takeIf { it > 0L },
-        durationMs = optLong("durationMs").takeIf { it > 0L }
+        durationMs = optLong("durationMs").takeIf { it > 0L },
+        thumbnailUrl = optString("thumbnailUrl").takeIf { it.isNotBlank() }
     )
 }
 

@@ -36,7 +36,13 @@ internal fun JSONObject.toSocketMessage(chatIdHint: String = ""): ChatMessage? {
                     it.has("durationMs") -> it.optLong("durationMs").takeIf { duration -> duration > 0L }
                     it.has("duration") -> it.optLong("duration").takeIf { duration -> duration > 0L }?.times(1000)
                     else -> null
-                }
+                },
+                thumbnailUrl = listOf(
+                    it.optString("thumbnailUrl"),
+                    it.optString("thumbnail"),
+                    it.optString("previewUrl"),
+                    it.optString("preview")
+                ).firstOrNull { value -> value.isNotBlank() }
             )
         }
     }

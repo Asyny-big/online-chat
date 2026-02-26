@@ -142,6 +142,10 @@ data class AttachmentDto(
     val mimeType: String? = null,
     val size: Long? = null,
     val durationMs: Long? = null,
+    val thumbnailUrl: String? = null,
+    val thumbnail: String? = null,
+    val previewUrl: String? = null,
+    val preview: String? = null,
     @Json(name = "duration")
     val durationSeconds: Long? = null
 )

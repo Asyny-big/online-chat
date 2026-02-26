@@ -18,7 +18,8 @@ data class MessageAttachment(
     val originalName: String,
     val mimeType: String?,
     val sizeBytes: Long?,
-    val durationMs: Long? = null
+    val durationMs: Long? = null,
+    val thumbnailUrl: String? = null
 )
 
 enum class MessageType {
