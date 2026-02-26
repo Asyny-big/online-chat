@@ -190,6 +190,11 @@ import ru.govchat.app.domain.model.MessageDeliveryStatus
 import ru.govchat.app.domain.model.MessageType
 import ru.govchat.app.domain.model.UserProfile
 import ru.govchat.app.service.call.CallForegroundService
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import kotlin.math.abs
 
 @Composable
@@ -2383,6 +2388,8 @@ private fun ChatMessagesList(
 ) {
     val appContext = LocalContext.current.applicationContext
     val displayMessages = remember(messages) { messages.asReversed() }
+    val timelineItems = remember(displayMessages) { buildMessageTimelineItems(displayMessages) }
+    val timelineItemByKey = remember(timelineItems) { timelineItems.associateBy { it.key } }
     val latestMessageId = messages.lastOrNull()?.id
     var initialScrollPerformed by remember(chatId) { mutableStateOf(false) }
     var shouldAutoScrollOnNewMessage by remember(chatId) { mutableStateOf(true) }
@@ -2416,7 +2423,7 @@ private fun ChatMessagesList(
         lastObservedLatestMessageId = latestMessageId
     }
 
-    LaunchedEffect(chatId, hasOlderMessages, isLoadingOlderMessages, displayMessages.size) {
+    LaunchedEffect(chatId, hasOlderMessages, isLoadingOlderMessages, timelineItems.size) {
         if (!hasOlderMessages || isLoadingOlderMessages) return@LaunchedEffect
         snapshotFlow {
             val totalItemsCount = listState.layoutInfo.totalItemsCount
@@ -2440,19 +2447,22 @@ private fun ChatMessagesList(
         }
     }
 
-    LaunchedEffect(chatId, displayMessages, playbackCoordinator) {
+    LaunchedEffect(chatId, timelineItems, playbackCoordinator) {
         snapshotFlow { listState.layoutInfo.visibleItemsInfo.map { it.index to it.key } }
             .map { visibleInfo ->
                 val sortedByIndex = visibleInfo.sortedBy { it.first }
-                val visibleIds = sortedByIndex.mapNotNull { (_, key) -> key as? String }.toSet()
-                val autoplayCandidate = sortedByIndex
-                    .mapNotNull { (index, _) -> displayMessages.getOrNull(index) }
+                val visibleMessages = sortedByIndex
+                    .mapNotNull { (_, rawKey) ->
+                        val key = rawKey as? String ?: return@mapNotNull null
+                        timelineItemByKey[key]?.message
+                    }
+                val visibleIds = visibleMessages.map { it.id }.toSet()
+                val autoplayCandidate = visibleMessages
                     .firstOrNull { it.type == MessageType.VideoNote }
                     ?.id
-                val visibleVideoUrls = sortedByIndex
-                    .mapNotNull { (index, _) ->
-                        displayMessages.getOrNull(index)
-                            ?.takeIf { it.type == MessageType.VideoNote }
+                val visibleVideoUrls = visibleMessages
+                    .mapNotNull { message ->
+                        message.takeIf { it.type == MessageType.VideoNote }
                             ?.attachment
                             ?.url
                             ?.let(::resolveMediaUrl)
@@ -2482,22 +2492,27 @@ private fun ChatMessagesList(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         items(
-            items = displayMessages,
-            key = { it.id },
-            contentType = { it.type }
-        ) { message ->
-            MessageBubble(
-                message = message,
-                isMine = message.senderId == currentUserId,
-                playbackCoordinator = playbackCoordinator,
-                activePlaybackMessageId = activePlaybackMessageId,
-                onActivePlaybackChanged = onActivePlaybackChanged,
-                isVisibleInViewport = visibleMessageIds.contains(message.id),
-                shouldAutoplayVideoNote = autoplayVideoNoteId == message.id,
-                onAttachmentClick = { type, attachment ->
-                    onAttachmentClick(message, type, attachment)
-                }
-            )
+            items = timelineItems,
+            key = { it.key },
+            contentType = { if (it.message != null) "message" else "day_separator" }
+        ) { item ->
+            val message = item.message
+            if (message == null) {
+                MessageDaySeparator(label = item.dayLabel.orEmpty())
+            } else {
+                MessageBubble(
+                    message = message,
+                    isMine = message.senderId == currentUserId,
+                    playbackCoordinator = playbackCoordinator,
+                    activePlaybackMessageId = activePlaybackMessageId,
+                    onActivePlaybackChanged = onActivePlaybackChanged,
+                    isVisibleInViewport = visibleMessageIds.contains(message.id),
+                    shouldAutoplayVideoNote = autoplayVideoNoteId == message.id,
+                    onAttachmentClick = { type, attachment ->
+                        onAttachmentClick(message, type, attachment)
+                    }
+                )
+            }
         }
         if (isLoadingOlderMessages) {
             item(key = "messages_loading_older") {
@@ -3823,6 +3838,28 @@ private fun CallVideoView(
 }
 
 @Composable
+private fun MessageDaySeparator(label: String) {
+    Box(
+        modifier = Modifier.fillMaxWidth(),
+        contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            color = Color(0xFF223244),
+            shape = RoundedCornerShape(999.dp),
+            modifier = Modifier
+                .border(1.dp, Color(0x5A4A6B88), RoundedCornerShape(999.dp))
+        ) {
+            Text(
+                text = label,
+                color = Color(0xFF9FB4C7),
+                fontSize = 12.sp,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+            )
+        }
+    }
+}
+
+@Composable
 private fun MessageBubble(
     message: ChatMessage,
     isMine: Boolean,
@@ -4679,10 +4716,72 @@ private fun resolveMediaUrl(rawUrl: String?): String? {
     }
 }
 
-private fun formatTime(epochMillis: Long): String {
+private data class ChatTimelineItem(
+    val key: String,
+    val message: ChatMessage? = null,
+    val dayLabel: String? = null
+)
+
+private val RU_LOCALE = Locale("ru", "RU")
+private val TIME_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm", RU_LOCALE)
+private val DAY_LABEL_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMMM", RU_LOCALE)
+
+private fun buildMessageTimelineItems(displayMessages: List<ChatMessage>): List<ChatTimelineItem> {
+    if (displayMessages.isEmpty()) return emptyList()
+
+    val items = ArrayList<ChatTimelineItem>(displayMessages.size + 8)
+    var currentDay: LocalDate? = null
+
+    displayMessages.forEachIndexed { index, message ->
+        val messageDay = epochMillisToLocalDate(message.createdAtMillis)
+        if (currentDay == null) {
+            currentDay = messageDay
+        } else if (messageDay != null && currentDay != messageDay) {
+            items += ChatTimelineItem(
+                key = "day-${currentDay.toString()}-$index",
+                dayLabel = formatDayLabel(currentDay)
+            )
+            currentDay = messageDay
+        }
+
+        items += ChatTimelineItem(
+            key = "msg-${message.id}",
+            message = message
+        )
+    }
+
+    currentDay?.let { day ->
+        items += ChatTimelineItem(
+            key = "day-${day.toString()}-tail",
+            dayLabel = formatDayLabel(day)
+        )
+    }
+
+    return items
+}
+
+private fun epochMillisToLocalDate(epochMillis: Long): LocalDate? {
+    if (epochMillis <= 0L) return null
+    val zone = ZoneId.systemDefault()
     return runCatching {
-        val formatter = java.text.SimpleDateFormat("HH:mm", java.util.Locale("ru", "RU"))
-        formatter.format(java.util.Date(epochMillis))
+        Instant.ofEpochMilli(epochMillis).atZone(zone).toLocalDate()
+    }.getOrNull()
+}
+
+private fun formatDayLabel(day: LocalDate): String {
+    val today = LocalDate.now(ZoneId.systemDefault())
+    return when (day) {
+        today -> "сегодня"
+        today.minusDays(1) -> "вчера"
+        else -> day.format(DAY_LABEL_FORMATTER)
+    }
+}
+
+private fun formatTime(epochMillis: Long): String {
+    if (epochMillis <= 0L) return ""
+    val zone = ZoneId.systemDefault()
+    return runCatching {
+        Instant.ofEpochMilli(epochMillis).atZone(zone).format(TIME_FORMATTER)
     }.getOrDefault("")
 }
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import axios from 'axios';
 import MessageInput from './MessageInput';
 import MediaViewerModal from './MediaViewerModal';
@@ -262,6 +262,7 @@ function ChatWindow({
   const participantCount = chat.participants?.length || 0;
   const hasIncomingCall = incomingCall && incomingCall.chatId === chat._id;
   const hasIncomingGroupCall = incomingGroupCall && incomingGroupCall.chatId === chat._id;
+  const timelineItems = useMemo(() => buildChatTimeline(messages), [messages]);
 
   return (
     <div className="chat-window-container">
@@ -422,11 +423,16 @@ function ChatWindow({
             <span>Начните общение</span>
           </div>
         ) : (
-          messages.map((msg, idx) => {
+          timelineItems.map((item) => {
+            if (item.type === 'day-separator') {
+              return <DaySeparator key={item.key} label={item.label} />;
+            }
+
+            const msg = item.message;
             const isMine = msg.sender?._id === currentUserId || msg.sender === currentUserId;
             return (
               <MessageBubble
-                key={msg._id || idx}
+                key={item.key}
                 message={msg}
                 isMine={isMine}
                 token={token}
@@ -592,6 +598,27 @@ function ChatWindow({
 
         /* Message Bubble */
         .message-row { display: flex; width: 100%; margin-bottom: 2px; }
+        .day-separator-row {
+          display: flex;
+          justify-content: center;
+          width: 100%;
+          margin: 10px 0 4px;
+        }
+        .day-separator-label {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          padding: 5px 12px;
+          border-radius: 999px;
+          font-size: 12px;
+          font-weight: 600;
+          color: #93a9bf;
+          background: rgba(30, 44, 59, 0.88);
+          border: 1px solid rgba(74, 107, 136, 0.42);
+          letter-spacing: 0.01em;
+          text-transform: lowercase;
+          box-shadow: 0 6px 14px rgba(0, 0, 0, 0.2);
+        }
         .message-bubble {
             max-width: 75%; padding: 10px 14px; border-radius: 18px; word-wrap: break-word;
             position: relative; box-shadow: var(--shadow-sm);
@@ -740,6 +767,14 @@ function ChatWindow({
   );
 }
 
+function DaySeparator({ label }) {
+  return (
+    <div className="day-separator-row">
+      <span className="day-separator-label">{label}</span>
+    </div>
+  );
+}
+
 function MessageBubble({ message, isMine, onDelete, token }) {
   const [showMenu, setShowMenu] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -757,9 +792,8 @@ function MessageBubble({ message, isMine, onDelete, token }) {
     return rawType;
   })();
 
-  const time = createdAt
-    ? new Date(createdAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
-    : '';
+  const time = formatMessageTime(createdAt);
+  const timeTitle = formatMessageDateTime(createdAt);
 
   const senderName = sender?.name || '';
 
@@ -949,7 +983,7 @@ function MessageBubble({ message, isMine, onDelete, token }) {
         {!isMine && senderName && <div className="sender-name">{senderName}</div>}
         {renderContent()}
         <MediaViewerModal media={selectedMedia} onClose={closeMedia} />
-        <div className="message-time">
+        <div className="message-time" title={timeTitle || undefined}>
           {time}
           {isMine && onDelete && (
             <button
@@ -1023,6 +1057,80 @@ function formatFileSize(bytes) {
   if (bytes < 1024) return bytes + ' Б';
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' КБ';
   return (bytes / (1024 * 1024)).toFixed(1) + ' МБ';
+}
+
+function buildChatTimeline(messages) {
+  if (!Array.isArray(messages) || messages.length === 0) return [];
+
+  const timeline = [];
+  let previousDayKey = null;
+
+  messages.forEach((message, index) => {
+    const createdAtDate = parseMessageDate(message?.createdAt);
+    const dayKey = createdAtDate ? toDayKey(createdAtDate) : null;
+
+    if (dayKey && dayKey !== previousDayKey) {
+      timeline.push({
+        type: 'day-separator',
+        key: `day-${dayKey}-${index}`,
+        label: formatDayLabel(createdAtDate)
+      });
+      previousDayKey = dayKey;
+    }
+
+    timeline.push({
+      type: 'message',
+      key: message?._id ? `msg-${message._id}` : `msg-index-${index}`,
+      message
+    });
+  });
+
+  return timeline;
+}
+
+function parseMessageDate(value) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function toDayKey(date) {
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+}
+
+function isSameDay(left, right) {
+  return (
+    left.getFullYear() === right.getFullYear()
+    && left.getMonth() === right.getMonth()
+    && left.getDate() === right.getDate()
+  );
+}
+
+function formatDayLabel(date) {
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+
+  if (isSameDay(date, today)) return '\u0441\u0435\u0433\u043e\u0434\u043d\u044f';
+  if (isSameDay(date, yesterday)) return '\u0432\u0447\u0435\u0440\u0430';
+  return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+}
+
+function formatMessageTime(createdAt) {
+  const date = parseMessageDate(createdAt);
+  if (!date) return '';
+  return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatMessageDateTime(createdAt) {
+  const date = parseMessageDate(createdAt);
+  if (!date) return '';
+  return date.toLocaleString('ru-RU', {
+    day: 'numeric',
+    month: 'long',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
 }
 
 export default ChatWindow;
