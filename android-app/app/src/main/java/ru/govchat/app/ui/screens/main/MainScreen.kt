@@ -100,8 +100,10 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -129,22 +131,27 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import androidx.compose.ui.zIndex
 import io.livekit.android.room.participant.RemoteParticipant
 import io.livekit.android.room.Room
 import io.livekit.android.room.track.Track as LiveKitTrack
@@ -161,6 +168,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -176,7 +184,6 @@ import ru.govchat.app.core.call.CallUiPhase
 import ru.govchat.app.core.call.CallUiState
 import ru.govchat.app.core.call.CallVideoTrack
 import ru.govchat.app.core.file.GovChatAttachmentDownloader
-import ru.govchat.app.core.media.MediaCacheManager
 import ru.govchat.app.core.notification.IncomingCallNotifications
 import ru.govchat.app.core.permission.GovChatPermissionFeature
 import ru.govchat.app.core.permission.rememberGovChatPermissionFlow
@@ -194,6 +201,8 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.min
+import kotlin.math.roundToInt
 
 @Composable
 fun MainScreen(
@@ -1933,29 +1942,31 @@ private fun ChatContent(
         }
     }
     var imagePreviewStartIndex by remember(chat.id) { mutableIntStateOf(-1) }
-    var openedVideoNoteMessage by remember(chat.id) { mutableStateOf<ChatMessage?>(null) }
+    var expandedVideoNoteState by remember(chat.id) { mutableStateOf<ExpandedVideoNoteUiState?>(null) }
+    val videoNoteBounds = remember(chat.id) { mutableStateMapOf<String, Rect>() }
     val listState = rememberLazyListState()
     val playbackCoordinator = remember(chat.id) { PlaybackCoordinator() }
+    val videoNotePlayerManager = remember(chat.id) {
+        SharedVideoNotePlayerManager(context.applicationContext)
+    }
     var activePlaybackMessageId by remember(chat.id) { mutableStateOf<String?>(null) }
 
     DisposableEffect(chat.id) {
         onDispose {
             playbackCoordinator.release()
+            videoNotePlayerManager.release()
             activePlaybackMessageId = null
         }
     }
 
-    BackHandler(enabled = openedVideoNoteMessage != null) {
-        openedVideoNoteMessage = null
-    }
-    BackHandler(enabled = openedVideoNoteMessage == null && imagePreviewStartIndex >= 0) {
+    BackHandler(enabled = expandedVideoNoteState == null && imagePreviewStartIndex >= 0) {
         imagePreviewStartIndex = -1
     }
-    BackHandler(enabled = openedVideoNoteMessage == null && imagePreviewStartIndex < 0 && showParticipantsDialog) {
+    BackHandler(enabled = expandedVideoNoteState == null && imagePreviewStartIndex < 0 && showParticipantsDialog) {
         showParticipantsDialog = false
     }
     BackHandler(
-        enabled = openedVideoNoteMessage == null &&
+        enabled = expandedVideoNoteState == null &&
             imagePreviewStartIndex < 0 &&
             !showParticipantsDialog &&
             selectedMediaUris.isNotEmpty()
@@ -1983,9 +1994,10 @@ private fun ChatContent(
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        // ── Telegram-style Chat Header ──
-        Surface(
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // ── Telegram-style Chat Header ──
+            Surface(
             modifier = Modifier.fillMaxWidth(),
             color = Color(0xFF1E2742),
             shadowElevation = 4.dp
@@ -2199,25 +2211,38 @@ private fun ChatContent(
                 hasOlderMessages = state.hasOlderMessages,
                 onLoadOlderMessages = onLoadOlderMessages,
                 playbackCoordinator = playbackCoordinator,
+                videoNotePlayerManager = videoNotePlayerManager,
+                expandedVideoNoteMessageId = expandedVideoNoteState?.message?.id,
                 activePlaybackMessageId = activePlaybackMessageId,
                 onActivePlaybackChanged = { activePlaybackMessageId = it },
+                onVideoNoteBoundsChanged = { messageId, bounds ->
+                    videoNoteBounds[messageId] = bounds
+                    val maxTrackedBounds = 160
+                    while (videoNoteBounds.size > maxTrackedBounds) {
+                        val keyToRemove = videoNoteBounds.keys.firstOrNull { it != messageId } ?: break
+                        videoNoteBounds.remove(keyToRemove)
+                    }
+                },
+                onVideoNoteClick = { message ->
+                    val mediaUrl = resolveMediaUrl(message.attachment?.url)
+                    if (mediaUrl == null) {
+                        onAttachmentClick(message.type, message.attachment)
+                    } else {
+                        playbackCoordinator.stop { activePlaybackMessageId = it }
+                        expandedVideoNoteState = ExpandedVideoNoteUiState(
+                            message = message,
+                            sourceBounds = videoNoteBounds[message.id]
+                        )
+                    }
+                },
                 onAttachmentClick = { message, type, attachment ->
-                    when {
-                        type == MessageType.VideoNote -> {
-                            playbackCoordinator.stop { activePlaybackMessageId = it }
-                            openedVideoNoteMessage = message
+                    if (type == MessageType.Image && !attachment?.url.isNullOrBlank()) {
+                        val previewIndex = imageMessages.indexOfFirst { it.id == message.id }
+                        if (previewIndex >= 0) {
+                            imagePreviewStartIndex = previewIndex
                         }
-
-                        type == MessageType.Image && !attachment?.url.isNullOrBlank() -> {
-                            val previewIndex = imageMessages.indexOfFirst { it.id == message.id }
-                            if (previewIndex >= 0) {
-                                imagePreviewStartIndex = previewIndex
-                            }
-                        }
-
-                        else -> {
-                            onAttachmentClick(type, attachment)
-                        }
+                    } else {
+                        onAttachmentClick(type, attachment)
                     }
                 },
                 modifier = Modifier
@@ -2227,18 +2252,18 @@ private fun ChatContent(
             )
         }
 
-        Divider(color = Color(0xFF334155))
-        // ── Telegram-style Input Bar ──
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = Color(0xFF17212B)
-        ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .imePadding()
-                ) {
+            Divider(color = Color(0xFF334155))
+            // ── Telegram-style Input Bar ──
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = Color(0xFF17212B)
+            ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .navigationBarsPadding()
+                            .imePadding()
+                    ) {
                     if (uploadProgress != null) {
                         Column(
                             modifier = Modifier
@@ -2333,7 +2358,7 @@ private fun ChatContent(
                         }
                     }
 
-                    MessageInput(
+                        MessageInput(
                         draft = draft,
                         onDraftChanged = { value ->
                             draft = value
@@ -2366,8 +2391,24 @@ private fun ChatContent(
                         onDismissFailedRecordingUpload = onDismissFailedRecordingUpload,
                         ensureVoicePermission = ensureVoiceRecordingPermission,
                         ensureVideoPermission = ensureVideoRecordingPermissions
-                    )
-                }
+                        )
+                    }
+            }
+        }
+
+        val expandedState = expandedVideoNoteState
+        if (expandedState != null) {
+            ExpandedVideoNoteOverlay(
+                state = expandedState,
+                playerManager = videoNotePlayerManager,
+                onDismiss = {
+                    expandedVideoNoteState = null
+                    videoNotePlayerManager.enterIdle(resetToStart = false)
+                },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .zIndex(20f)
+            )
         }
     }
 
@@ -2382,14 +2423,6 @@ private fun ChatContent(
         )
     }
 
-    val currentVideoNote = openedVideoNoteMessage
-    if (currentVideoNote != null) {
-        VideoNoteViewerDialog(
-            message = currentVideoNote,
-            onDismiss = { openedVideoNoteMessage = null },
-            onDownload = { onAttachmentClick(it.type, it.attachment) }
-        )
-    }
 }
 
 @Composable
@@ -2402,8 +2435,12 @@ private fun ChatMessagesList(
     hasOlderMessages: Boolean,
     onLoadOlderMessages: () -> Unit,
     playbackCoordinator: PlaybackCoordinator,
+    videoNotePlayerManager: SharedVideoNotePlayerManager,
+    expandedVideoNoteMessageId: String?,
     activePlaybackMessageId: String?,
     onActivePlaybackChanged: (String?) -> Unit,
+    onVideoNoteBoundsChanged: (String, Rect) -> Unit,
+    onVideoNoteClick: (ChatMessage) -> Unit,
     onAttachmentClick: (ChatMessage, MessageType, MessageAttachment?) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -2411,11 +2448,18 @@ private fun ChatMessagesList(
     val timelineItems = remember(displayMessages) {
         buildMessageTimelineItems(displayMessages)
     }
+    val timelineItemByKey = remember(timelineItems) {
+        timelineItems.associateBy { it.key }
+    }
+    val displayMessageById = remember(displayMessages) {
+        displayMessages.associateBy { it.id }
+    }
     val latestMessageId = messages.lastOrNull()?.id
     var initialScrollPerformed by remember(chatId) { mutableStateOf(false) }
     var shouldAutoScrollOnNewMessage by remember(chatId) { mutableStateOf(true) }
     var lastObservedLatestMessageId by remember(chatId) { mutableStateOf<String?>(null) }
     var paginationTriggered by remember(chatId) { mutableStateOf(false) }
+    var debouncedAutoplayVideoNoteId by remember(chatId) { mutableStateOf<String?>(null) }
 
     LaunchedEffect(chatId) {
         snapshotFlow { listState.isNearBottomForReverseLayout() }
@@ -2466,6 +2510,63 @@ private fun ChatMessagesList(
         }
     }
 
+    val autoplayVideoNoteMessage by remember(
+        chatId,
+        listState,
+        timelineItems,
+        timelineItemByKey,
+        expandedVideoNoteMessageId
+    ) {
+        derivedStateOf {
+            if (expandedVideoNoteMessageId != null) return@derivedStateOf null
+            listState.layoutInfo.visibleItemsInfo
+                .sortedBy { it.index }
+                .mapNotNull { visible ->
+                    val key = visible.key as? String ?: return@mapNotNull null
+                    timelineItemByKey[key]?.message
+                }
+                .firstOrNull { message ->
+                    message.type == MessageType.VideoNote &&
+                        resolveMediaUrl(message.attachment?.url) != null
+                }
+        }
+    }
+
+    LaunchedEffect(chatId, expandedVideoNoteMessageId) {
+        if (expandedVideoNoteMessageId != null) {
+            debouncedAutoplayVideoNoteId = null
+            return@LaunchedEffect
+        }
+        snapshotFlow { autoplayVideoNoteMessage?.id }
+            .distinctUntilChanged()
+            .collectLatest { candidateId ->
+                delay(130L)
+                debouncedAutoplayVideoNoteId = candidateId
+            }
+    }
+
+    val autoplayVideoNoteId = debouncedAutoplayVideoNoteId
+
+    LaunchedEffect(chatId, autoplayVideoNoteId, expandedVideoNoteMessageId) {
+        if (expandedVideoNoteMessageId != null) return@LaunchedEffect
+        val message = autoplayVideoNoteId?.let(displayMessageById::get)
+        val mediaUrl = resolveMediaUrl(message?.attachment?.url)
+        if (message == null || mediaUrl == null) {
+            videoNotePlayerManager.enterIdle(resetToStart = false)
+            return@LaunchedEffect
+        }
+        if (
+            videoNotePlayerManager.activeMessageId == message.id &&
+            videoNotePlayerManager.playbackState == VideoNotePlaybackState.InlineMuted
+        ) {
+            return@LaunchedEffect
+        }
+        videoNotePlayerManager.playInline(
+            messageId = message.id,
+            mediaUrl = mediaUrl
+        )
+    }
+
     LazyColumn(
         state = listState,
         modifier = modifier,
@@ -2485,8 +2586,13 @@ private fun ChatMessagesList(
                     message = message,
                     isMine = message.senderId == currentUserId,
                     playbackCoordinator = playbackCoordinator,
+                    videoNotePlayerManager = videoNotePlayerManager,
+                    isActiveInlineVideoNote = autoplayVideoNoteId == message.id,
+                    isExpandedVideoNote = expandedVideoNoteMessageId == message.id,
                     activePlaybackMessageId = activePlaybackMessageId,
                     onActivePlaybackChanged = onActivePlaybackChanged,
+                    onVideoNoteBoundsChanged = onVideoNoteBoundsChanged,
+                    onVideoNoteClick = onVideoNoteClick,
                     onAttachmentClick = { type, attachment ->
                         onAttachmentClick(message, type, attachment)
                     }
@@ -3843,8 +3949,13 @@ private fun MessageBubble(
     message: ChatMessage,
     isMine: Boolean,
     playbackCoordinator: PlaybackCoordinator,
+    videoNotePlayerManager: SharedVideoNotePlayerManager,
+    isActiveInlineVideoNote: Boolean,
+    isExpandedVideoNote: Boolean,
     activePlaybackMessageId: String?,
     onActivePlaybackChanged: (String?) -> Unit,
+    onVideoNoteBoundsChanged: (String, Rect) -> Unit,
+    onVideoNoteClick: (ChatMessage) -> Unit,
     onAttachmentClick: (MessageType, MessageAttachment?) -> Unit
 ) {
     val alignment = if (isMine) Alignment.End else Alignment.Start
@@ -3883,8 +3994,13 @@ private fun MessageBubble(
                 MessageBody(
                     message = message,
                     playbackCoordinator = playbackCoordinator,
+                    videoNotePlayerManager = videoNotePlayerManager,
+                    isActiveInlineVideoNote = isActiveInlineVideoNote,
+                    isExpandedVideoNote = isExpandedVideoNote,
                     activePlaybackMessageId = activePlaybackMessageId,
                     onActivePlaybackChanged = onActivePlaybackChanged,
+                    onVideoNoteBoundsChanged = onVideoNoteBoundsChanged,
+                    onVideoNoteClick = onVideoNoteClick,
                     onAttachmentClick = { onAttachmentClick(message.type, message.attachment) }
                 )
 
@@ -3924,8 +4040,13 @@ private fun MessageBubble(
 private fun MessageBody(
     message: ChatMessage,
     playbackCoordinator: PlaybackCoordinator,
+    videoNotePlayerManager: SharedVideoNotePlayerManager,
+    isActiveInlineVideoNote: Boolean,
+    isExpandedVideoNote: Boolean,
     activePlaybackMessageId: String?,
     onActivePlaybackChanged: (String?) -> Unit,
+    onVideoNoteBoundsChanged: (String, Rect) -> Unit,
+    onVideoNoteClick: (ChatMessage) -> Unit,
     onAttachmentClick: () -> Unit
 ) {
     when (message.type) {
@@ -3961,7 +4082,12 @@ private fun MessageBody(
         MessageType.VideoNote -> {
             VideoNoteMessageBubble(
                 message = message,
-                onClick = onAttachmentClick
+                playerManager = videoNotePlayerManager,
+                isInlineActive = isActiveInlineVideoNote,
+                isExpanded = isExpandedVideoNote,
+                onBoundsChanged = onVideoNoteBoundsChanged,
+                onClick = { onVideoNoteClick(message) },
+                onFallbackClick = onAttachmentClick
             )
         }
 
@@ -4097,58 +4223,124 @@ private fun VoiceMessageBody(
 @Composable
 private fun VideoNoteMessageBubble(
     message: ChatMessage,
-    onClick: () -> Unit
+    playerManager: SharedVideoNotePlayerManager,
+    isInlineActive: Boolean,
+    isExpanded: Boolean,
+    onBoundsChanged: (String, Rect) -> Unit,
+    onClick: () -> Unit,
+    onFallbackClick: () -> Unit
 ) {
+    val videoUrl = resolveMediaUrl(message.attachment?.url)
     val thumbnailUrl = resolveMediaUrl(message.attachment?.thumbnailUrl)
     val durationMs = message.attachment?.durationMs
+    val showInlinePlayer = isInlineActive &&
+        !isExpanded &&
+        videoUrl != null &&
+        playerManager.playbackState != VideoNotePlaybackState.ExpandedWithSound
+    val bubbleScale by animateFloatAsState(
+        targetValue = if (showInlinePlayer) 1.02f else 1f,
+        animationSpec = tween(durationMillis = 180),
+        label = "videoNoteInlineScale"
+    )
+    val clickSource = remember { MutableInteractionSource() }
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             modifier = Modifier
                 .size(200.dp)
                 .aspectRatio(1f)
+                .graphicsLayer {
+                    scaleX = bubbleScale
+                    scaleY = bubbleScale
+                }
+                .onGloballyPositioned { coordinates ->
+                    onBoundsChanged(message.id, coordinates.boundsInRoot())
+                }
                 .clip(CircleShape)
-                .clickable { onClick() }
+                .clickable(
+                    interactionSource = clickSource,
+                    indication = null
+                ) {
+                    if (videoUrl != null) onClick() else onFallbackClick()
+                }
         ) {
-            if (thumbnailUrl != null) {
-                AsyncImage(
-                    model = rememberImageRequest(
-                        data = thumbnailUrl,
-                        downsamplePx = 480
-                    ),
-                    imageLoader = rememberGovChatImageLoader(),
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
+            if (showInlinePlayer) {
+                AndroidView(
+                    factory = { viewContext ->
+                        PlayerView(viewContext).apply {
+                            useController = false
+                            layoutParams = android.view.ViewGroup.LayoutParams(
+                                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                                android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                            )
+                            playerManager.bindInline(this)
+                        }
+                    },
+                    update = { playerView ->
+                        playerManager.bindInline(playerView)
+                    },
+                    onRelease = { playerView ->
+                        playerManager.unbind(playerView)
+                    },
+                    modifier = Modifier.fillMaxSize()
                 )
             } else {
+                if (thumbnailUrl != null) {
+                    AsyncImage(
+                        model = rememberImageRequest(
+                            data = thumbnailUrl,
+                            downsamplePx = 480
+                        ),
+                        imageLoader = rememberGovChatImageLoader(),
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color(0xFF0F172A))
+                    )
+                }
+            }
+
+            androidx.compose.animation.AnimatedVisibility(
+                visible = !showInlinePlayer,
+                modifier = Modifier.fillMaxSize()
+            ) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color(0xFF0F172A))
-                )
-            }
-
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0x33000000)),
-                contentAlignment = Alignment.Center
-            ) {
-                Surface(
-                    color = Color(0xAA0F172A),
-                    shape = CircleShape,
-                    modifier = Modifier.size(44.dp)
+                        .background(Color(0x33000000)),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Filled.PlayArrow,
-                            contentDescription = "Воспроизвести",
-                            tint = Color.White,
-                            modifier = Modifier.size(22.dp)
-                        )
+                    Surface(
+                        color = Color(0xAA0F172A),
+                        shape = CircleShape,
+                        modifier = Modifier.size(44.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Filled.PlayArrow,
+                                contentDescription = "Воспроизвести",
+                                tint = Color.White,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
                     }
                 }
+            }
+
+            androidx.compose.animation.AnimatedVisibility(
+                visible = showInlinePlayer,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0x16000000))
+                )
             }
         }
 
@@ -4162,107 +4354,154 @@ private fun VideoNoteMessageBubble(
 }
 
 @Composable
-private fun VideoNoteViewerDialog(
-    message: ChatMessage,
+private fun ExpandedVideoNoteOverlay(
+    state: ExpandedVideoNoteUiState,
+    playerManager: SharedVideoNotePlayerManager,
     onDismiss: () -> Unit,
-    onDownload: (ChatMessage) -> Unit
+    modifier: Modifier = Modifier
 ) {
-    val videoUrl = resolveMediaUrl(message.attachment?.url)
-    val context = LocalContext.current
-    val exoPlayer = remember(videoUrl) {
-        videoUrl?.let { url ->
-            MediaCacheManager.createPlayer(context).apply {
-                setMediaItem(MediaCacheManager.mediaItem(url))
-                prepare()
-                playWhenReady = true
-            }
+    val videoUrl = resolveMediaUrl(state.message.attachment?.url)
+    if (videoUrl == null) {
+        LaunchedEffect(state.message.id) { onDismiss() }
+        return
+    }
+    val density = LocalDensity.current
+    val configuration = LocalConfiguration.current
+    val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
+    val screenHeightPx = with(density) { configuration.screenHeightDp.dp.toPx() }
+    var isExpanded by remember(state.message.id) { mutableStateOf(false) }
+    val progress by animateFloatAsState(
+        targetValue = if (isExpanded) 1f else 0f,
+        animationSpec = tween(durationMillis = 260),
+        label = "videoNoteExpandedProgress"
+    )
+
+    val defaultSourceSizePx = with(density) { 200.dp.toPx() }
+    val sourceBounds = state.sourceBounds ?: Rect(
+        left = (screenWidthPx - defaultSourceSizePx) / 2f,
+        top = screenHeightPx * 0.62f - defaultSourceSizePx / 2f,
+        right = (screenWidthPx + defaultSourceSizePx) / 2f,
+        bottom = screenHeightPx * 0.62f + defaultSourceSizePx / 2f
+    )
+    val sourceDiameterPx = min(sourceBounds.width, sourceBounds.height).coerceAtLeast(
+        with(density) { 140.dp.toPx() }
+    )
+    val targetDiameterPx = min(
+        screenWidthPx * 0.76f,
+        with(density) { 340.dp.toPx() }
+    )
+    val sourceCenter = sourceBounds.center
+    val targetCenter = Offset(
+        x = screenWidthPx / 2f,
+        y = screenHeightPx * 0.42f
+    )
+    val currentDiameterPx = lerpFloat(sourceDiameterPx, targetDiameterPx, progress)
+    val currentCenter = Offset(
+        x = lerpFloat(sourceCenter.x, targetCenter.x, progress),
+        y = lerpFloat(sourceCenter.y, targetCenter.y, progress)
+    )
+
+    LaunchedEffect(state.message.id, videoUrl) {
+        playerManager.playExpanded(state.message.id, videoUrl)
+        isExpanded = true
+    }
+
+    LaunchedEffect(progress, isExpanded) {
+        if (!isExpanded && progress <= 0.02f) {
+            onDismiss()
         }
     }
 
-    DisposableEffect(exoPlayer) {
-        onDispose {
-            exoPlayer?.let { player ->
-                runCatching { player.pause() }
-                runCatching { player.stop() }
-                runCatching { player.clearMediaItems() }
-                runCatching { player.release() }
-            }
-        }
+    BackHandler(enabled = true) {
+        isExpanded = false
     }
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            color = Color.Black
+    Box(modifier = modifier) {
+        androidx.compose.animation.AnimatedVisibility(
+            visible = progress > 0f,
+            modifier = Modifier.fillMaxSize()
         ) {
-            Box(modifier = Modifier.fillMaxSize()) {
-                if (exoPlayer != null) {
-                    AndroidView(
-                        factory = { viewContext ->
-                            PlayerView(viewContext).apply {
-                                useController = true
-                                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                                player = exoPlayer
-                                layoutParams = android.view.ViewGroup.LayoutParams(
-                                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                                    android.view.ViewGroup.LayoutParams.MATCH_PARENT
-                                )
-                            }
-                        },
-                        update = { playerView ->
-                            if (playerView.player !== exoPlayer) {
-                                playerView.player = exoPlayer
-                            }
-                        },
-                        onRelease = { playerView ->
-                            playerView.player = null
-                        },
-                        modifier = Modifier.fillMaxSize()
-                    )
-                } else {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.68f * progress))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
                     ) {
-                        Text(
-                            text = "Видео недоступно",
-                            color = Color.White
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Button(onClick = { onDownload(message) }) {
-                            Text("Скачать")
-                        }
+                        isExpanded = false
                     }
-                }
+            )
+        }
 
-                Surface(
-                    color = Color(0xAA0F172A),
-                    shape = CircleShape,
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .statusBarsPadding()
-                        .padding(12.dp)
-                        .size(40.dp)
-                        .clickable { onDismiss() }
-                ) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                        Icon(
-                            imageVector = Icons.Filled.Close,
-                            contentDescription = "Закрыть",
-                            tint = Color.White,
-                            modifier = Modifier.size(18.dp)
+        Box(
+            modifier = Modifier
+                .offset {
+                    IntOffset(
+                        x = (currentCenter.x - currentDiameterPx / 2f).roundToInt(),
+                        y = (currentCenter.y - currentDiameterPx / 2f).roundToInt()
+                    )
+                }
+                .size(with(density) { currentDiameterPx.toDp() })
+                .clip(CircleShape)
+                .zIndex(21f)
+        ) {
+            AndroidView(
+                factory = { viewContext ->
+                    PlayerView(viewContext).apply {
+                        useController = false
+                        layoutParams = android.view.ViewGroup.LayoutParams(
+                            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                            android.view.ViewGroup.LayoutParams.MATCH_PARENT
                         )
+                        playerManager.bindExpanded(this)
                     }
+                },
+                update = { playerView ->
+                    playerManager.bindExpanded(playerView)
+                },
+                onRelease = { playerView ->
+                    playerManager.unbind(playerView)
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        androidx.compose.animation.AnimatedVisibility(
+            visible = progress > 0.7f,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .statusBarsPadding()
+                .padding(14.dp)
+                .zIndex(22f)
+        ) {
+            Surface(
+                color = Color(0xAA0F172A),
+                shape = CircleShape,
+                modifier = Modifier
+                    .size(40.dp)
+                    .clickable { isExpanded = false }
+            ) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = "Закрыть",
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
             }
         }
     }
+}
+
+private data class ExpandedVideoNoteUiState(
+    val message: ChatMessage,
+    val sourceBounds: Rect?
+)
+
+private fun lerpFloat(start: Float, end: Float, fraction: Float): Float {
+    return start + (end - start) * fraction.coerceIn(0f, 1f)
 }
 
 @Composable
