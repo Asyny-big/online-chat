@@ -62,6 +62,7 @@ function ChatWindow({
     onDeleteChat?.();
     setShowDeleteChatModal(false);
   }, [onDeleteChat]);
+  const timelineItems = useMemo(() => buildChatTimeline(messages), [messages]);
 
   if (!chat) {
     return (
@@ -262,7 +263,6 @@ function ChatWindow({
   const participantCount = chat.participants?.length || 0;
   const hasIncomingCall = incomingCall && incomingCall.chatId === chat._id;
   const hasIncomingGroupCall = incomingGroupCall && incomingGroupCall.chatId === chat._id;
-  const timelineItems = useMemo(() => buildChatTimeline(messages), [messages]);
 
   return (
     <div className="chat-window-container">
