@@ -44,15 +44,25 @@ class VideoRecorder(
         lifecycleOwner: LifecycleOwner,
         previewView: PreviewView
     ): Result<Unit> {
-        if (recorderState == RecorderState.Recording) {
-            return Result.failure(IllegalStateException("Video recorder is already recording"))
-        }
+        return bindToPreviewInternal(
+            lifecycleOwner = lifecycleOwner,
+            previewView = previewView,
+            forceRebind = false
+        )
+    }
+
+    private suspend fun bindToPreviewInternal(
+        lifecycleOwner: LifecycleOwner,
+        previewView: PreviewView,
+        forceRebind: Boolean
+    ): Result<Unit> {
 
         return runCatching {
             if (
                 recorderState == RecorderState.PreviewBound &&
                 boundPreviewView === previewView &&
-                boundLifecycleOwner === lifecycleOwner
+                boundLifecycleOwner === lifecycleOwner &&
+                !forceRebind
             ) {
                 return@runCatching
             }
@@ -82,7 +92,9 @@ class VideoRecorder(
             videoCapture = videoUseCase
             boundPreviewView = previewView
             boundLifecycleOwner = lifecycleOwner
-            recorderState = RecorderState.PreviewBound
+            if (recorderState != RecorderState.Recording) {
+                recorderState = RecorderState.PreviewBound
+            }
         }
     }
 
@@ -90,16 +102,31 @@ class VideoRecorder(
         lifecycleOwner: LifecycleOwner,
         previewView: PreviewView
     ): Result<Unit> {
-        if (isRecording()) {
-            return Result.failure(IllegalStateException("Cannot switch camera while recording"))
-        }
+        val previousLensFacing = lensFacing
         lensFacing = if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
             CameraSelector.LENS_FACING_BACK
         } else {
             CameraSelector.LENS_FACING_FRONT
         }
-        return bindToPreview(lifecycleOwner, previewView)
+        return bindToPreviewInternal(
+            lifecycleOwner = lifecycleOwner,
+            previewView = previewView,
+            forceRebind = true
+        ).onFailure {
+            lensFacing = previousLensFacing
+        }
     }
+
+    fun toggleLensFacingPreference(): Int {
+        lensFacing = if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
+            CameraSelector.LENS_FACING_BACK
+        } else {
+            CameraSelector.LENS_FACING_FRONT
+        }
+        return lensFacing
+    }
+
+    fun currentLensFacing(): Int = lensFacing
 
     fun startRecording(
         maxDurationMs: Long = DEFAULT_MAX_DURATION_MS,
@@ -125,7 +152,9 @@ class VideoRecorder(
         val executor = ContextCompat.getMainExecutor(appContext)
 
         return runCatching {
-            val pending = capture.output.prepareRecording(appContext, outputOptions).withAudioEnabled()
+            val pending = capture.output.prepareRecording(appContext, outputOptions)
+                .withAudioEnabled()
+                .asPersistentRecording()
             activeRecording = pending.start(executor) recordingEvent@{ event ->
                 when (event) {
                     is VideoRecordEvent.Start -> {

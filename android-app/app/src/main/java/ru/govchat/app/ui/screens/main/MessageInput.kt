@@ -3,11 +3,11 @@
 import android.app.Activity
 import android.content.ContextWrapper
 import android.net.Uri
+import androidx.camera.core.CameraSelector
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -15,14 +15,11 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -37,9 +34,7 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Cached
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FiberManualRecord
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -61,7 +56,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -72,7 +66,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -115,29 +108,11 @@ fun MessageInput(
         }
     }
 
-    var suppressTap by remember { mutableStateOf(false) }
-    var longPressArmed by remember { mutableStateOf(false) }
-    var dragDx by remember { mutableStateOf(0f) }
-    var dragDy by remember { mutableStateOf(0f) }
-    var lockGestureHandled by remember { mutableStateOf(false) }
-    var cancelGestureHandled by remember { mutableStateOf(false) }
     var activeSessionId by remember { mutableStateOf<Long?>(null) }
-
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
+    var selectedLensFacing by remember { mutableStateOf(videoRecorder.currentLensFacing()) }
 
     val isRecording = recordingState == RecordingState.Recording || recordingState == RecordingState.Locked
-    val isLocked = recordingState == RecordingState.Locked
     val isUploading = recordingState == RecordingState.Uploading
-    val latestRecordingState by rememberUpdatedState(recordingState)
-
-    fun resetGestureState() {
-        longPressArmed = false
-        dragDx = 0f
-        dragDy = 0f
-        lockGestureHandled = false
-        cancelGestureHandled = false
-    }
 
     fun clearSession() {
         activeSessionId = null
@@ -153,19 +128,24 @@ fun MessageInput(
                     onRecordingCancelled()
                 }
                 clearSession()
-                resetGestureState()
             }
             .onFailure {
                 onRecordingCancelled()
                 clearSession()
-                resetGestureState()
             }
     }
 
     fun stopVideoAndSend() {
         scope.launch {
             videoRecorder.stopAndAwaitFinalize()
-            resetGestureState()
+        }
+    }
+
+    fun sendCurrentRecording() {
+        when (recordingMode) {
+            RecordingMode.Voice -> stopVoiceAndSend()
+            RecordingMode.Video -> stopVideoAndSend()
+            RecordingMode.None -> Unit
         }
     }
 
@@ -177,13 +157,12 @@ fun MessageInput(
         }
         onRecordingCancelled()
         clearSession()
-        resetGestureState()
     }
 
     fun startVoiceRecording() {
         if (isRecording || isUploading) return
         ensureVoicePermission {
-            if (!longPressArmed) return@ensureVoicePermission
+            if (recordingState != RecordingState.Idle) return@ensureVoicePermission
             voiceRecorder.start()
                 .onSuccess {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -191,16 +170,14 @@ fun MessageInput(
                     if (sessionId == null) {
                         voiceRecorder.cancel()
                         onRecordingCancelled()
-                        resetGestureState()
                         return@onSuccess
                     }
                     activeSessionId = sessionId
-                    suppressTap = true
+                    onRecordingLocked()
                 }
                 .onFailure {
                     onRecordingCancelled()
                     clearSession()
-                    resetGestureState()
                 }
         }
     }
@@ -208,14 +185,13 @@ fun MessageInput(
     fun startVideoRecording() {
         if (isRecording || isUploading) return
         ensureVideoPermission {
-            if (!longPressArmed) return@ensureVideoPermission
+            if (recordingState != RecordingState.Idle) return@ensureVideoPermission
             scope.launch {
                 videoRecorder.bindToPreview(
                     lifecycleOwner = lifecycleOwner,
                     previewView = previewView
                 ).onFailure {
                     onRecordingCancelled()
-                    resetGestureState()
                     return@launch
                 }
 
@@ -242,15 +218,13 @@ fun MessageInput(
                     if (sessionId == null) {
                         videoRecorder.cancelRecording()
                         onRecordingCancelled()
-                        resetGestureState()
                         return@onSuccess
                     }
                     activeSessionId = sessionId
-                    suppressTap = true
+                    onRecordingLocked()
                 }.onFailure {
                     onRecordingCancelled()
                     clearSession()
-                    resetGestureState()
                 }
             }
         }
@@ -264,6 +238,25 @@ fun MessageInput(
         }
     }
 
+    fun toggleVideoLensFacing() {
+        if (recordingMode != RecordingMode.Video || isUploading) return
+        if (isRecording) {
+            scope.launch {
+                videoRecorder.switchCamera(
+                    lifecycleOwner = lifecycleOwner,
+                    previewView = previewView
+                ).onSuccess {
+                    selectedLensFacing = videoRecorder.currentLensFacing()
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                }
+            }
+            return
+        }
+
+        selectedLensFacing = videoRecorder.toggleLensFacingPreference()
+        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+    }
+
     val lifecycleStopHandler by rememberUpdatedState {
         if (!isRecording) return@rememberUpdatedState
         val isChangingConfig = context.findActivity()?.isChangingConfigurations == true
@@ -271,11 +264,7 @@ fun MessageInput(
             cancelRecording()
             return@rememberUpdatedState
         }
-        when (recordingMode) {
-            RecordingMode.Voice -> stopVoiceAndSend()
-            RecordingMode.Video -> stopVideoAndSend()
-            RecordingMode.None -> Unit
-        }
+        sendCurrentRecording()
     }
 
     DisposableEffect(lifecycleOwner) {
@@ -296,40 +285,9 @@ fun MessageInput(
     LaunchedEffect(recordingCommands) {
         recordingCommands.collectLatest { command ->
             when (command) {
-                RecordingCommand.StopAndSend -> {
-                    when (recordingMode) {
-                        RecordingMode.Voice -> stopVoiceAndSend()
-                        RecordingMode.Video -> stopVideoAndSend()
-                        RecordingMode.None -> Unit
-                    }
-                }
-
-                RecordingCommand.Cancel -> {
-                    cancelRecording()
-                }
+                RecordingCommand.StopAndSend -> sendCurrentRecording()
+                RecordingCommand.Cancel -> cancelRecording()
             }
-        }
-    }
-
-    LaunchedEffect(isPressed, draft, recordingState, recordingMode) {
-        if (isPressed && draft.isBlank() && recordingState == RecordingState.Idle) {
-            delay(HOLD_TO_RECORD_DELAY_MS)
-            if (isPressed) {
-                longPressArmed = true
-                startRecordingFromCurrentMode()
-            }
-            return@LaunchedEffect
-        }
-
-        if (!isPressed && longPressArmed) {
-            if (recordingState == RecordingState.Recording && !cancelGestureHandled) {
-                when (recordingMode) {
-                    RecordingMode.Voice -> stopVoiceAndSend()
-                    RecordingMode.Video -> stopVideoAndSend()
-                    RecordingMode.None -> Unit
-                }
-            }
-            resetGestureState()
         }
     }
 
@@ -352,16 +310,6 @@ fun MessageInput(
             repeatMode = RepeatMode.Reverse
         ),
         label = "recordDotAlpha"
-    )
-
-    val actionButtonScale by animateFloatAsState(
-        targetValue = when {
-            isPressed -> 1.18f
-            isRecording -> 1.12f
-            else -> 1f
-        },
-        animationSpec = tween(150),
-        label = "actionButtonScale"
     )
 
     Column(modifier = modifier.fillMaxWidth()) {
@@ -434,24 +382,26 @@ fun MessageInput(
                     Text(
                         text = when {
                             isUploading -> "Загрузка записи..."
-                            isLocked -> "Запись зафиксирована"
-                            else -> "Свайп влево для отмены, вверх для фиксации"
+                            recordingMode == RecordingMode.Video -> "Запись видео-кружка"
+                            else -> "Запись голосового сообщения"
                         },
                         color = Color(0xFF9FB4C8),
                         modifier = Modifier.weight(1f)
                     )
 
-                    if (isUploading) {
-                        IconButton(onClick = onCancelUpload) {
+                    if (recordingMode == RecordingMode.Video && isRecording) {
+                        IconButton(onClick = { toggleVideoLensFacing() }) {
                             Icon(
-                                imageVector = Icons.Filled.Close,
-                                contentDescription = "Отменить загрузку",
-                                tint = Color(0xFFFFC4C4)
+                                imageVector = Icons.Filled.Cached,
+                                contentDescription = if (selectedLensFacing == CameraSelector.LENS_FACING_FRONT) {
+                                    "Переключить на основную камеру"
+                                } else {
+                                    "Переключить на фронтальную камеру"
+                                },
+                                tint = Color(0xFF9FB4C8)
                             )
                         }
-                    }
 
-                    if (recordingMode == RecordingMode.Video && isRecording) {
                         Box(
                             modifier = Modifier
                                 .size(66.dp)
@@ -465,21 +415,30 @@ fun MessageInput(
                                     .clip(CircleShape)
                             )
                         }
-
                     }
 
-                    if (isLocked) {
-                        IconButton(onClick = {
-                            when (recordingMode) {
-                                RecordingMode.Voice -> stopVoiceAndSend()
-                                RecordingMode.Video -> stopVideoAndSend()
-                                RecordingMode.None -> Unit
-                            }
-                        }) {
+                    if (isUploading) {
+                        IconButton(onClick = onCancelUpload) {
                             Icon(
-                                imageVector = Icons.Filled.Stop,
-                                contentDescription = "Остановить",
-                                tint = Color(0xFFFF6B6B)
+                                imageVector = Icons.Filled.Close,
+                                contentDescription = "Отменить загрузку",
+                                tint = Color(0xFFFFC4C4)
+                            )
+                        }
+                    } else if (isRecording) {
+                        IconButton(onClick = { cancelRecording() }) {
+                            Icon(
+                                imageVector = Icons.Filled.Close,
+                                contentDescription = "Удалить запись",
+                                tint = Color(0xFFFF9B9B)
+                            )
+                        }
+
+                        IconButton(onClick = { sendCurrentRecording() }) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.Send,
+                                contentDescription = "Отправить запись",
+                                tint = Color(0xFF5EB5F7)
                             )
                         }
                     }
@@ -487,156 +446,101 @@ fun MessageInput(
             }
         }
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 6.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(
-                onClick = onOpenAttachmentPicker,
-                modifier = Modifier.size(40.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.AttachFile,
-                    contentDescription = "Прикрепить",
-                    tint = Color(0xFF8296AC),
-                    modifier = Modifier.size(22.dp)
-                )
-            }
-
-            TextField(
-                value = draft,
-                onValueChange = onDraftChanged,
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(horizontal = 4.dp),
-                placeholder = {
-                    Text("Сообщение", color = Color(0xFF6B7D8E))
-                },
-                singleLine = true,
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = Color(0xFF242F3D),
-                    unfocusedContainerColor = Color(0xFF242F3D),
-                    cursorColor = Color(0xFF5EB5F7),
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent,
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White
-                ),
-                shape = RoundedCornerShape(24.dp),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(
-                    onSend = {
-                        if (draft.isNotBlank()) {
-                            onSendText(draft)
-                        }
-                    }
-                )
-            )
-
-            if (draft.isNotBlank()) {
-                IconButton(
-                    onClick = { onSendText(draft) },
-                    modifier = Modifier.size(40.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.Send,
-                        contentDescription = "Отправить",
-                        tint = Color(0xFF5EB5F7),
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-            } else {
-                Box(
-                    modifier = Modifier
-                        .size(46.dp)
-                        .graphicsLayer {
-                            scaleX = actionButtonScale
-                            scaleY = actionButtonScale
-                        }
-                        .clip(CircleShape)
-                        .background(Color(0xFF2B5278))
-                        .clickable(
-                            interactionSource = interactionSource,
-                            indication = null,
-                            onClick = {
-                                if (suppressTap) {
-                                    suppressTap = false
-                                } else if (!isRecording && !isUploading) {
-                                    onToggleRecordingMode()
-                                }
-                            }
-                        )
-                        .pointerInput(Unit) {
-                            detectDragGestures(
-                                onDrag = { change, dragAmount ->
-                                    if (latestRecordingState != RecordingState.Recording) return@detectDragGestures
-                                    change.consume()
-                                    dragDx += dragAmount.x
-                                    dragDy += dragAmount.y
-
-                                    if (!lockGestureHandled && dragDy < -LOCK_THRESHOLD_PX) {
-                                        lockGestureHandled = true
-                                        onRecordingLocked()
-                                    }
-
-                                    if (!cancelGestureHandled && !lockGestureHandled && dragDx < -CANCEL_THRESHOLD_PX) {
-                                        cancelGestureHandled = true
-                                        cancelRecording()
-                                    }
-                                },
-                                onDragEnd = {
-                                    dragDx = 0f
-                                    dragDy = 0f
-                                },
-                                onDragCancel = {
-                                    dragDx = 0f
-                                    dragDy = 0f
-                                }
-                            )
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = if (recordingMode == RecordingMode.Video) Icons.Filled.Videocam else Icons.Filled.Mic,
-                        contentDescription = if (recordingMode == RecordingMode.Video) "Видео-кружок" else "Голосовое сообщение",
-                        tint = Color.White,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-            }
-        }
-
-        if (recordingState == RecordingState.Recording) {
+        if (!isRecording) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 2.dp),
+                    .padding(horizontal = 6.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = Icons.Filled.Cached,
-                    contentDescription = null,
-                    tint = Color(0xFF9FB4C8),
-                    modifier = Modifier.size(14.dp)
-                )
-                Spacer(modifier = Modifier.size(6.dp))
-                Text(
-                    text = if (recordingMode == RecordingMode.Video) {
-                        "Свайп влево для отмены, вверх для lock"
-                    } else {
-                        "Свайп влево для отмены"
+                IconButton(
+                    onClick = onOpenAttachmentPicker,
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.AttachFile,
+                        contentDescription = "Прикрепить",
+                        tint = Color(0xFF8296AC),
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+
+                TextField(
+                    value = draft,
+                    onValueChange = onDraftChanged,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = 4.dp),
+                    placeholder = {
+                        Text("Сообщение", color = Color(0xFF6B7D8E))
                     },
-                    color = Color(0xFF7F95AB)
+                    singleLine = true,
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = Color(0xFF242F3D),
+                        unfocusedContainerColor = Color(0xFF242F3D),
+                        cursorColor = Color(0xFF5EB5F7),
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(24.dp),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(
+                        onSend = {
+                            if (draft.isNotBlank()) {
+                                onSendText(draft)
+                            }
+                        }
+                    )
                 )
-                Spacer(modifier = Modifier.weight(1f))
-                Icon(
-                    imageVector = Icons.Filled.Lock,
-                    contentDescription = null,
-                    tint = if (lockGestureHandled) Color(0xFF5EB5F7) else Color(0xFF7F95AB),
-                    modifier = Modifier.size(15.dp)
-                )
+
+                if (draft.isNotBlank()) {
+                    IconButton(
+                        onClick = { onSendText(draft) },
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.Send,
+                            contentDescription = "Отправить",
+                            tint = Color(0xFF5EB5F7),
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF2B5278))
+                            .pointerInput(recordingMode, isRecording, isUploading, draft) {
+                                detectTapGestures(
+                                    onTap = {
+                                        if (!isRecording && !isUploading) {
+                                            onToggleRecordingMode()
+                                        }
+                                    },
+                                    onLongPress = {
+                                        if (!isRecording && !isUploading && draft.isBlank()) {
+                                            startRecordingFromCurrentMode()
+                                        }
+                                    }
+                                )
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (recordingMode == RecordingMode.Video) Icons.Filled.Videocam else Icons.Filled.Mic,
+                            contentDescription = if (recordingMode == RecordingMode.Video) {
+                                "Видео-кружок: нажмите для смены режима, удерживайте для записи"
+                            } else {
+                                "Голосовое: нажмите для смены режима, удерживайте для записи"
+                            },
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
             }
         }
     }
@@ -657,9 +561,6 @@ private tailrec fun android.content.Context.findActivity(): Activity? {
     }
 }
 
-private const val HOLD_TO_RECORD_DELAY_MS = 180L
-private const val LOCK_THRESHOLD_PX = 90f
-private const val CANCEL_THRESHOLD_PX = 120f
 private const val VOICE_MAX_DURATION_SEC = 120
 private const val VIDEO_MAX_DURATION_SEC = 60
 private const val VIDEO_MAX_DURATION_MS = 30_000L
