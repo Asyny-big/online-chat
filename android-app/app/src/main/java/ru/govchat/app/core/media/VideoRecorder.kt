@@ -27,6 +27,7 @@ class VideoRecorder(
 ) {
 
     private var cameraProvider: ProcessCameraProvider? = null
+    private var recorder: Recorder? = null
     private var preview: Preview? = null
     private var videoCapture: VideoCapture<Recorder>? = null
     private var activeRecording: Recording? = null
@@ -71,7 +72,7 @@ class VideoRecorder(
             val previewUseCase = Preview.Builder().build().also {
                 it.surfaceProvider = previewView.surfaceProvider
             }
-            val recorder = Recorder.Builder()
+            val sharedRecorder = recorder ?: Recorder.Builder()
                 .setQualitySelector(
                     QualitySelector.from(
                         Quality.SD,
@@ -79,8 +80,8 @@ class VideoRecorder(
                     )
                 )
                 .setTargetVideoEncodingBitRate(TARGET_VIDEO_BITRATE)
-                .build()
-            val videoUseCase = VideoCapture.withOutput(recorder)
+                .build().also { recorder = it }
+            val videoUseCase = VideoCapture.withOutput(sharedRecorder)
             val selector = CameraSelector.Builder()
                 .requireLensFacing(lensFacing)
                 .build()
@@ -252,6 +253,7 @@ class VideoRecorder(
             outputFile = null
         }
         unbindCamera()
+        recorder = null
         if (recorderState != RecorderState.Recording) {
             recorderState = RecorderState.Unbound
         }

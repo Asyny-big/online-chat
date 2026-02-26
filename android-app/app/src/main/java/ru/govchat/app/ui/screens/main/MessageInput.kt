@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -110,6 +111,7 @@ fun MessageInput(
 
     var activeSessionId by remember { mutableStateOf<Long?>(null) }
     var selectedLensFacing by remember { mutableStateOf(videoRecorder.currentLensFacing()) }
+    var isSwitchingCamera by remember { mutableStateOf(false) }
 
     val isRecording = recordingState == RecordingState.Recording || recordingState == RecordingState.Locked
     val isUploading = recordingState == RecordingState.Uploading
@@ -241,13 +243,19 @@ fun MessageInput(
     fun toggleVideoLensFacing() {
         if (recordingMode != RecordingMode.Video || isUploading) return
         if (isRecording) {
+            if (isSwitchingCamera) return
             scope.launch {
-                videoRecorder.switchCamera(
-                    lifecycleOwner = lifecycleOwner,
-                    previewView = previewView
-                ).onSuccess {
-                    selectedLensFacing = videoRecorder.currentLensFacing()
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                isSwitchingCamera = true
+                try {
+                    videoRecorder.switchCamera(
+                        lifecycleOwner = lifecycleOwner,
+                        previewView = previewView
+                    ).onSuccess {
+                        selectedLensFacing = videoRecorder.currentLensFacing()
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    }
+                } finally {
+                    isSwitchingCamera = false
                 }
             }
             return
@@ -356,6 +364,7 @@ fun MessageInput(
                 shape = RoundedCornerShape(14.dp),
                 modifier = Modifier
                     .fillMaxWidth()
+                    .heightIn(max = 94.dp)
                     .padding(horizontal = 12.dp, vertical = 6.dp)
             ) {
                 Row(
@@ -390,7 +399,10 @@ fun MessageInput(
                     )
 
                     if (recordingMode == RecordingMode.Video && isRecording) {
-                        IconButton(onClick = { toggleVideoLensFacing() }) {
+                        IconButton(
+                            enabled = !isSwitchingCamera,
+                            onClick = { toggleVideoLensFacing() }
+                        ) {
                             Icon(
                                 imageVector = Icons.Filled.Cached,
                                 contentDescription = if (selectedLensFacing == CameraSelector.LENS_FACING_FRONT) {
@@ -398,7 +410,7 @@ fun MessageInput(
                                 } else {
                                     "Переключить на фронтальную камеру"
                                 },
-                                tint = Color(0xFF9FB4C8)
+                                tint = if (isSwitchingCamera) Color(0xFF60798F) else Color(0xFF9FB4C8)
                             )
                         }
 
