@@ -11,7 +11,7 @@ import ru.govchat.app.R
 
 object NotificationChannels {
     const val CALLS_CHANNEL_ID = "govchat_calls_active"
-    const val INCOMING_CALLS_CHANNEL_ID = "govchat_calls_incoming_v4"
+    const val INCOMING_CALLS_CHANNEL_ID = "govchat_calls_incoming_v3"
     const val MESSAGES_CHANNEL_ID = "govchat_messages"
 
     fun ensureCreated(context: Context) {
@@ -39,8 +39,14 @@ object NotificationChannels {
             description = context.getString(R.string.notifications_channel_incoming_calls_desc)
             setShowBadge(false)
             lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-            enableVibration(false)
-            setSound(null, null)
+            enableVibration(true)
+            vibrationPattern = longArrayOf(0L, 1000L, 700L, 1000L)
+            val ringtoneUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+            val audioAttributes = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+            setSound(ringtoneUri, audioAttributes)
         }
 
         val messagesChannel = NotificationChannel(
