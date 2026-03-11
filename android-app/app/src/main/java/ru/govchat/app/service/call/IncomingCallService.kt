@@ -100,9 +100,9 @@ class IncomingCallService : Service() {
         currentCallId = command.callId
         acquireWakeLock()
         scheduleTimeout(command)
+        startAlerting()
 
         if (showNotification) {
-            stopAlerting()
             val notification = CallNotificationManager.showIncomingCallNotification(this, command)
             val foregroundStarted = startIncomingForeground(notificationId(command.callId), notification)
             isForegroundIncoming = foregroundStarted
@@ -111,7 +111,6 @@ class IncomingCallService : Service() {
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 isForegroundIncoming = false
             }
-            startAlerting()
             launchIncomingCallActivity(command)
         }
     }
