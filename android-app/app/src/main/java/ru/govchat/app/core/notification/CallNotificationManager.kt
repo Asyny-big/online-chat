@@ -104,10 +104,17 @@ object CallNotificationManager {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        val acceptIntent = PendingIntent.getService(
+        val acceptIntent = PendingIntent.getActivity(
             context,
             requestCode(command.callId, "accept"),
-            IncomingCallService.createAcceptIntent(context, command),
+            NotificationIntents.addCommandExtras(
+                Intent(context, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP
+                },
+                command.copy(action = NotificationIntents.ACTION_ACCEPT_CALL)
+            ),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 

@@ -106,9 +106,7 @@ class IncomingCallService : Service() {
             val notification = CallNotificationManager.showIncomingCallNotification(this, command)
             val foregroundStarted = startIncomingForeground(notificationId(command.callId), notification)
             isForegroundIncoming = foregroundStarted
-            if (CallNotificationManager.canUseFullScreenIntent(this)) {
-                launchIncomingCallActivity(command)
-            }
+            launchIncomingCallActivity(command)
         } else {
             if (isForegroundIncoming) {
                 stopForeground(STOP_FOREGROUND_REMOVE)

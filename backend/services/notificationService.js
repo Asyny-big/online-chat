@@ -117,7 +117,7 @@ class NotificationService {
         messageId: ''
       },
       forceWakeup: true,
-      sendToOnlineUsers: true
+      sendToOnlineUsers: false
     });
   }
 
@@ -155,7 +155,7 @@ class NotificationService {
         messageId: ''
       },
       forceWakeup: true,
-      sendToOnlineUsers: true
+      sendToOnlineUsers: false
     });
   }
 
