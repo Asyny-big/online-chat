@@ -16,10 +16,13 @@ import ru.govchat.app.core.network.GovChatApi
 import ru.govchat.app.core.network.SocketGateway
 import ru.govchat.app.core.storage.ChatMessagesCacheStorage
 import ru.govchat.app.core.storage.SessionStorage
+import ru.govchat.app.data.local.callhistory.CallHistoryDatabase
 import ru.govchat.app.data.repository.AuthRepositoryImpl
+import ru.govchat.app.data.repository.CallHistoryRepositoryImpl
 import ru.govchat.app.data.repository.ChatRepositoryImpl
 import ru.govchat.app.data.repository.DeviceRepositoryImpl
 import ru.govchat.app.domain.repository.AuthRepository
+import ru.govchat.app.domain.repository.CallHistoryRepository
 import ru.govchat.app.domain.repository.ChatRepository
 import ru.govchat.app.domain.repository.DeviceRepository
 import ru.govchat.app.domain.usecase.CheckSessionUseCase
@@ -55,6 +58,9 @@ class AppContainer(application: Application) {
     )
     val chatMessagesCacheStorage: ChatMessagesCacheStorage = ChatMessagesCacheStorage(
         appContext = application.applicationContext
+    )
+    private val callHistoryDatabase: CallHistoryDatabase = CallHistoryDatabase.getInstance(
+        application.applicationContext
     )
 
     private val authInterceptor = AuthInterceptor(sessionStorage)
@@ -96,6 +102,9 @@ class AppContainer(application: Application) {
         sessionStorage = sessionStorage
     )
     val deviceRepository: DeviceRepository = DeviceRepositoryImpl(api, sessionStorage)
+    val callHistoryRepository: CallHistoryRepository = CallHistoryRepositoryImpl(
+        dao = callHistoryDatabase.callHistoryDao()
+    )
 
     val checkSessionUseCase = CheckSessionUseCase(authRepository)
     val loginUseCase = LoginUseCase(authRepository)

@@ -4,6 +4,8 @@ import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.content.Intent
 import android.util.Log
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.google.firebase.messaging.FirebaseMessagingService
@@ -16,9 +18,10 @@ import kotlinx.coroutines.runBlocking
 import ru.govchat.app.GovChatApp
 import ru.govchat.app.MainActivity
 import ru.govchat.app.R
-import ru.govchat.app.core.notification.IncomingCallNotifications
 import ru.govchat.app.core.notification.NotificationChannels
 import ru.govchat.app.core.notification.NotificationIntents
+import ru.govchat.app.domain.model.CallHistoryStatus
+import ru.govchat.app.service.call.IncomingCallService
 
 class GovChatFirebaseMessagingService : FirebaseMessagingService() {
 
@@ -77,7 +80,18 @@ class GovChatFirebaseMessagingService : FirebaseMessagingService() {
             isCallCancellationEvent -> {
                 val callId = payload.read("callId", "call_id", "roomId", "room_id")
                 if (callId.isNotBlank()) {
-                    IncomingCallNotifications.cancel(this, callId)
+                    val reason = payload.read("reason")
+                    val fallbackStatus = when {
+                        reason.contains("declin", ignoreCase = true) -> CallHistoryStatus.DECLINED
+                        else -> CallHistoryStatus.CANCELLED
+                    }
+                    serviceScope.launch {
+                        (application as? GovChatApp)
+                            ?.container
+                            ?.callHistoryRepository
+                            ?.markEnded(callId, fallbackStatus = fallbackStatus)
+                    }
+                    IncomingCallService.cancelIncomingCall(this, callId)
                     Log.i(TAG, "Incoming call notification cancelled traceId=${pushTraceId.ifBlank { "n/a" }} callId=$callId")
                 }
             }
@@ -98,16 +112,23 @@ class GovChatFirebaseMessagingService : FirebaseMessagingService() {
                 }
                 val isGroup = eventType == "incoming_group_call" ||
                     payload.readBoolean("isGroup", "is_group", "isGroupCall", "is_group_call")
-
-                IncomingCallNotifications.show(
-                    context = this,
+                val command = NotificationIntents.incomingCallCommand(
                     callId = callId,
                     chatId = chatId,
                     chatName = chatName.ifBlank { title.ifBlank { "GovChat" } },
-                    initiatorName = initiatorName,
-                    isGroup = isGroup,
                     callType = callType,
-                    initiatorId = initiatorId
+                    isGroupCall = isGroup,
+                    initiatorId = initiatorId,
+                    initiatorName = initiatorName,
+                    initiatorAvatarUrl = payload.read("initiatorAvatarUrl", "initiator_avatar_url", "avatarUrl", "avatar_url"),
+                    participantCount = payload.read("participantCount", "participant_count").toIntOrNull() ?: 0
+                )
+                val showNotification = !ProcessLifecycleOwner.get().lifecycle.currentState
+                    .isAtLeast(Lifecycle.State.STARTED)
+                IncomingCallService.showIncomingCall(
+                    context = this,
+                    command = command,
+                    showNotification = showNotification
                 )
                 Log.i(TAG, "Incoming call notification shown traceId=${pushTraceId.ifBlank { "n/a" }} callId=$callId")
             }

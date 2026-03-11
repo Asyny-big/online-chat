@@ -14,4 +14,13 @@
     <string name="push_message_body">Откройте GovChat, чтобы прочитать</string>
     <string name="notification_call_accept">Принять</string>
     <string name="notification_call_decline">Отклонить</string>
+    <string name="call_contact_fallback">Контакт</string>
+    <string name="call_group_invite_body">%1$s приглашает в %2$s</string>
+    <string name="call_video_label">Видеозвонок</string>
+    <string name="call_audio_label">Аудиозвонок</string>
+    <string name="call_missed_title">Пропущенный звонок</string>
+    <string name="call_missed_video_body">Пропущен видеозвонок от %1$s</string>
+    <string name="call_missed_audio_body">Пропущен звонок от %1$s</string>
+    <string name="call_missed_video_message">Пропущенный видеозвонок</string>
+    <string name="call_missed_audio_message">Пропущенный звонок</string>
 </resources>

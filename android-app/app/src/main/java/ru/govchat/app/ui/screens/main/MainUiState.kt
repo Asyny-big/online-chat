@@ -1,6 +1,7 @@
 package ru.govchat.app.ui.screens.main
 
 import ru.govchat.app.domain.model.AttachmentType
+import ru.govchat.app.domain.model.CallHistory
 import ru.govchat.app.domain.model.ChatMessage
 import ru.govchat.app.domain.model.ChatPreview
 import ru.govchat.app.domain.model.TypingUser
@@ -18,6 +19,7 @@ data class MainUiState(
     val isSending: Boolean = false,
     val typingUsers: List<TypingUser> = emptyList(),
     val currentUserId: String? = null,
+    val callHistory: List<CallHistory> = emptyList(),
     val incomingCall: IncomingCallUi? = null,
     val activeCall: ActiveCallUi? = null,
     val existingGroupCallPrompt: ExistingGroupCallPromptUi? = null,

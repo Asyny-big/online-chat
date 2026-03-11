@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.ProcessLifecycleOwner
 import ru.govchat.app.core.AppContainer
 import ru.govchat.app.core.lifecycle.RealtimeLifecycleObserver
+import ru.govchat.app.core.notification.CallNotificationManager
 import ru.govchat.app.core.notification.NotificationChannels
 
 class GovChatApp : Application() {
@@ -16,6 +17,7 @@ class GovChatApp : Application() {
 
         container = AppContainer(this)
         NotificationChannels.ensureCreated(this)
+        CallNotificationManager.ensureInitialized(this)
 
         ProcessLifecycleOwner.get().lifecycle.addObserver(
             RealtimeLifecycleObserver(

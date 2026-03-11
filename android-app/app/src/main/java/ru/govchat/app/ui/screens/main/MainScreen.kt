@@ -18,6 +18,7 @@ import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
@@ -60,6 +61,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.CallMade
+import androidx.compose.material.icons.filled.CallMissed
+import androidx.compose.material.icons.filled.CallReceived
 import androidx.compose.material.icons.filled.Cached
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
@@ -184,9 +188,13 @@ import ru.govchat.app.core.call.CallUiPhase
 import ru.govchat.app.core.call.CallUiState
 import ru.govchat.app.core.call.CallVideoTrack
 import ru.govchat.app.core.file.GovChatAttachmentDownloader
-import ru.govchat.app.core.notification.IncomingCallNotifications
+import ru.govchat.app.core.notification.CallNotificationManager
 import ru.govchat.app.core.permission.GovChatPermissionFeature
 import ru.govchat.app.core.permission.rememberGovChatPermissionFlow
+import ru.govchat.app.domain.model.CallHistory
+import ru.govchat.app.domain.model.CallHistoryDirection
+import ru.govchat.app.domain.model.CallHistoryStatus
+import ru.govchat.app.domain.model.CallHistoryType
 import ru.govchat.app.domain.model.ChatMessage
 import ru.govchat.app.domain.model.ChatPreview
 import ru.govchat.app.domain.model.ChatType
@@ -248,7 +256,10 @@ fun MainScreen(
     onCreateChatWithUser: (String) -> Unit,
     onCreateGroupChat: (String, List<String>) -> Unit,
     onResetUserSearch: () -> Unit,
-    onRefreshProfile: () -> Unit
+    onRefreshProfile: () -> Unit,
+    onOpenChatFromCallHistory: (String) -> Unit,
+    onDeleteCallHistoryEntries: (List<String>) -> Unit,
+    onClearCallHistory: () -> Unit
 ) {
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
@@ -406,7 +417,7 @@ fun MainScreen(
         val incoming = state.incomingCall
         if (incoming == null) {
             lastIncomingCallId?.let { callId ->
-                IncomingCallNotifications.cancel(context, callId)
+                CallNotificationManager.cancelIncomingNotification(context, callId)
             }
             lastIncomingCallId = null
             return@LaunchedEffect
@@ -438,8 +449,7 @@ fun MainScreen(
             CallForegroundService.stop(context)
             return@LaunchedEffect
         }
-        IncomingCallNotifications.cancelAll(context)
-        IncomingCallNotifications.cancel(context, active.callId)
+        CallNotificationManager.dismissIncomingCall(context, active.callId)
         // On Android 14+ (targetSdk 34+), foreground service with microphone type
         // requires RECORD_AUDIO runtime permission to be granted.
         val hasMic = ContextCompat.checkSelfPermission(
@@ -482,7 +492,10 @@ fun MainScreen(
                         onCreateChatWithUser = onCreateChatWithUser,
                         onCreateGroupChat = onCreateGroupChat,
                         onResetUserSearch = onResetUserSearch,
-                        onRefreshProfile = onRefreshProfile
+                        onRefreshProfile = onRefreshProfile,
+                        onOpenChatFromCallHistory = onOpenChatFromCallHistory,
+                        onDeleteCallHistoryEntries = onDeleteCallHistoryEntries,
+                        onClearCallHistory = onClearCallHistory
                     )
                 } else {
                     ChatContent(
@@ -648,7 +661,10 @@ private fun ChatsListContent(
     onCreateChatWithUser: (String) -> Unit,
     onCreateGroupChat: (String, List<String>) -> Unit,
     onResetUserSearch: () -> Unit,
-    onRefreshProfile: () -> Unit
+    onRefreshProfile: () -> Unit,
+    onOpenChatFromCallHistory: (String) -> Unit,
+    onDeleteCallHistoryEntries: (List<String>) -> Unit,
+    onClearCallHistory: () -> Unit
 ) {
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     var showAddChatDialog by remember { mutableStateOf(false) }
@@ -740,6 +756,12 @@ private fun ChatsListContent(
                         modifier = Modifier.size(20.dp)
                     )
                 }
+
+                if (selectedTab == 1 && state.callHistory.isNotEmpty()) {
+                    TextButton(onClick = onClearCallHistory) {
+                        Text("Очистить", color = Color(0xFF5EB5F7))
+                    }
+                }
             }
         }
 
@@ -791,7 +813,12 @@ private fun ChatsListContent(
                     state = state,
                     onSelectChat = onSelectChat
                 )
-                1 -> PlaceholderTabContent("Звонки", "История звонков появится здесь")
+                1 -> CallsTabContent(
+                    calls = state.callHistory,
+                    chats = state.chats,
+                    onOpenChat = onOpenChatFromCallHistory,
+                    onDeleteEntries = onDeleteCallHistoryEntries
+                )
                 2 -> PlaceholderTabContent("Контакты", "Скоро здесь будут ваши контакты")
                 3 -> ProfileTabContent(
                     state = state,
@@ -978,6 +1005,171 @@ private fun ChatsTabContent(
             }
         }
     }
+}
+
+@Composable
+private fun CallsTabContent(
+    calls: List<CallHistory>,
+    chats: List<ChatPreview>,
+    onOpenChat: (String) -> Unit,
+    onDeleteEntries: (List<String>) -> Unit
+) {
+    val groupedCalls = remember(calls) { buildCallHistoryGroups(calls) }
+    var pendingDeleteGroup by remember { mutableStateOf<CallHistoryGroupUi?>(null) }
+
+    if (pendingDeleteGroup != null) {
+        AlertDialog(
+            onDismissRequest = { pendingDeleteGroup = null },
+            title = { Text("Удалить запись") },
+            text = {
+                Text(
+                    if (pendingDeleteGroup!!.entryIds.size > 1) {
+                        "Удалить эту группу звонков из истории?"
+                    } else {
+                        "Удалить звонок из истории?"
+                    }
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDeleteEntries(pendingDeleteGroup!!.entryIds)
+                        pendingDeleteGroup = null
+                    }
+                ) {
+                    Text("Удалить", color = Color(0xFFEF4444))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteGroup = null }) {
+                    Text("Отмена")
+                }
+            }
+        )
+    }
+
+    if (groupedCalls.isEmpty()) {
+        PlaceholderTabContent("Звонки", "История звонков пока пуста")
+        return
+    }
+
+    LazyColumn(modifier = Modifier.fillMaxSize()) {
+        items(groupedCalls, key = { it.key }) { group ->
+            val representative = group.representative
+            val avatarFallback = representative.avatarUrl
+                ?: chats.firstOrNull { it.id == representative.chatId }?.avatarUrl
+            CallHistoryRow(
+                group = group,
+                avatarUrl = avatarFallback,
+                onClick = { onOpenChat(group.representativeId) },
+                onLongClick = { pendingDeleteGroup = group }
+            )
+        }
+    }
+}
+
+@Composable
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+private fun CallHistoryRow(
+    group: CallHistoryGroupUi,
+    avatarUrl: String?,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
+) {
+    val representative = group.representative
+    val icon = when {
+        representative.status == CallHistoryStatus.MISSED -> Icons.Filled.CallMissed
+        representative.direction == CallHistoryDirection.OUTGOING -> Icons.Filled.CallMade
+        else -> Icons.Filled.CallReceived
+    }
+    val iconTint = when {
+        representative.status == CallHistoryStatus.MISSED -> Color(0xFFEF4444)
+        representative.direction == CallHistoryDirection.OUTGOING -> Color(0xFF60A5FA)
+        else -> Color(0xFF22C55E)
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            )
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .clip(CircleShape)
+                .background(Color(0xFF243447)),
+            contentAlignment = Alignment.Center
+        ) {
+            if (!avatarUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = resolveMediaUrl(avatarUrl) ?: avatarUrl,
+                    contentDescription = representative.userName,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Text(
+                    text = representative.userName.firstOrNull()?.uppercase() ?: "?",
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = representative.userName,
+                color = Color.White,
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = iconTint,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = group.secondaryLabel,
+                    color = Color(0xFF94A3B8),
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Column(horizontalAlignment = Alignment.End) {
+            Text(
+                text = formatCallHistoryTime(representative.startedAt),
+                color = Color(0xFFCBD5E1),
+                style = MaterialTheme.typography.bodySmall
+            )
+            if (representative.status == CallHistoryStatus.ANSWERED && representative.duration > 0L) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = formatCallDuration(representative.duration),
+                    color = Color(0xFF60A5FA),
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+    }
+
+    Divider(color = Color(0xFF1E293B), thickness = 1.dp)
 }
 
 @Composable
@@ -4887,6 +5079,14 @@ private fun resolveMediaUrl(rawUrl: String?): String? {
     }
 }
 
+private data class CallHistoryGroupUi(
+    val key: String,
+    val representativeId: String,
+    val representative: CallHistory,
+    val entryIds: List<String>,
+    val secondaryLabel: String
+)
+
 private data class ChatTimelineItem(
     val key: String,
     val message: ChatMessage? = null,
@@ -4896,6 +5096,80 @@ private data class ChatTimelineItem(
 private val RU_LOCALE = Locale("ru", "RU")
 private val TIME_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm", RU_LOCALE)
 private val DAY_LABEL_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMMM", RU_LOCALE)
+
+private fun buildCallHistoryGroups(calls: List<CallHistory>): List<CallHistoryGroupUi> {
+    if (calls.isEmpty()) return emptyList()
+
+    val groups = mutableListOf<CallHistoryGroupUi>()
+    var index = 0
+    while (index < calls.size) {
+        val current = calls[index]
+        val bucket = mutableListOf(current)
+        var nextIndex = index + 1
+        while (nextIndex < calls.size && calls[nextIndex].canGroupWith(current)) {
+            bucket += calls[nextIndex]
+            nextIndex += 1
+        }
+        groups += CallHistoryGroupUi(
+            key = bucket.joinToString(separator = "|") { it.id },
+            representativeId = current.id,
+            representative = current,
+            entryIds = bucket.map { it.id },
+            secondaryLabel = buildCallHistorySubtitle(bucket)
+        )
+        index = nextIndex
+    }
+    return groups
+}
+
+private fun CallHistory.canGroupWith(other: CallHistory): Boolean {
+    return userId == other.userId &&
+        chatId == other.chatId &&
+        direction == other.direction &&
+        status == other.status &&
+        callType == other.callType
+}
+
+private fun buildCallHistorySubtitle(group: List<CallHistory>): String {
+    val representative = group.first()
+    val statusLabel = when (representative.status) {
+        CallHistoryStatus.MISSED -> "пропущенный"
+        CallHistoryStatus.ANSWERED -> "принятый"
+        CallHistoryStatus.DECLINED -> "отклоненный"
+        CallHistoryStatus.CANCELLED -> "отмененный"
+    }
+    val type = when (representative.callType) {
+        CallHistoryType.VIDEO -> "видеозвонок"
+        CallHistoryType.AUDIO -> "аудиозвонок"
+    }
+    return if (group.size > 1) {
+        "${group.size} ${statusLabel.replaceFirstChar { it.uppercase() }} звонка"
+    } else {
+        val direction = when (representative.direction) {
+            CallHistoryDirection.INCOMING -> "Входящий"
+            CallHistoryDirection.OUTGOING -> "Исходящий"
+        }
+        "$direction $type • $statusLabel"
+    }
+}
+
+private fun formatCallHistoryTime(startedAt: Long): String {
+    if (startedAt <= 0L) return "--:--"
+    val zone = ZoneId.systemDefault()
+    return Instant.ofEpochMilli(startedAt).atZone(zone).format(TIME_FORMATTER)
+}
+
+private fun formatCallDuration(durationMillis: Long): String {
+    val totalSeconds = (durationMillis / 1000L).coerceAtLeast(0L)
+    val hours = totalSeconds / 3600L
+    val minutes = (totalSeconds % 3600L) / 60L
+    val seconds = totalSeconds % 60L
+    return if (hours > 0L) {
+        String.format(RU_LOCALE, "%d:%02d:%02d", hours, minutes, seconds)
+    } else {
+        String.format(RU_LOCALE, "%02d:%02d", minutes, seconds)
+    }
+}
 
 private fun buildMessageTimelineItems(displayMessages: List<ChatMessage>): List<ChatTimelineItem> {
     if (displayMessages.isEmpty()) return emptyList()

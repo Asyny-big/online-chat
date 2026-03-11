@@ -114,6 +114,7 @@ fun GovChatNavGraph(
                     createChatUseCase = container.createChatUseCase,
                     createGroupChatUseCase = container.createGroupChatUseCase,
                     messagesDiskCache = container.chatMessagesCacheStorage,
+                    callHistoryRepository = container.callHistoryRepository,
                     chatRepository = container.chatRepository,
                     authRepository = container.authRepository
                 )
@@ -190,7 +191,10 @@ fun GovChatNavGraph(
                 onCreateChatWithUser = viewModel::createChatWithUser,
                 onCreateGroupChat = viewModel::createGroupChat,
                 onResetUserSearch = viewModel::resetUserSearch,
-                onRefreshProfile = viewModel::refreshProfile
+                onRefreshProfile = viewModel::refreshProfile,
+                onOpenChatFromCallHistory = viewModel::openChatFromCallHistory,
+                onDeleteCallHistoryEntries = viewModel::deleteCallHistoryEntries,
+                onClearCallHistory = viewModel::clearCallHistory
             )
         }
     }
