@@ -551,21 +551,6 @@ fun MainScreen(
                 }
             }
 
-            val incoming = state.incomingCall
-            if (incoming != null && state.activeCall == null && !isInPictureInPictureMode) {
-                IncomingCallFullScreenOverlay(
-                    incoming = incoming,
-                    avatarUrl = state.chats.firstOrNull { it.id == incoming.chatId }?.avatarUrl,
-                    isBusy = state.isCallActionInProgress,
-                    onDecline = onDeclineIncomingCall,
-                    onAccept = {
-                        requestCallPermissions(incoming.type.ifBlank { "audio" }) {
-                            onAcceptIncomingCall()
-                        }
-                    }
-                )
-            }
-
             if (state.activeCall != null && !callUiState.isMinimized) {
                 ActiveCallOverlay(
                     call = state.activeCall,
