@@ -6,7 +6,6 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -148,9 +147,6 @@ object CallNotificationManager {
             .setOngoing(true)
             .setOnlyAlertOnce(false)
             .setSilent(false)
-            .setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE))
-            .setVibrate(longArrayOf(0L, 1000L, 700L, 1000L))
-            .setDefaults(Notification.DEFAULT_LIGHTS)
             .setColorized(true)
             .setColor(0xFF1B5E20.toInt())
             .setTimeoutAfter(INCOMING_CALL_TIMEOUT_MS)
