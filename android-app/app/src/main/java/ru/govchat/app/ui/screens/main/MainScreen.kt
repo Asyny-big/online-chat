@@ -477,16 +477,22 @@ fun MainScreen(
                 color = Color(0xFF17212B)
             ) {
                 if (state.selectedChat == null) {
+                    val notificationsEnabled = permissionFlow.isGranted(GovChatPermissionFeature.Notifications)
                     ChatsListContent(
                         state = state,
                         onRefresh = onRefresh,
                         onSelectChat = onSelectChat,
                         onLogout = onLogout,
-                        notificationsEnabled = permissionFlow.isGranted(GovChatPermissionFeature.Notifications),
+                        notificationsEnabled = notificationsEnabled,
+                        fullScreenCallsEnabled = !notificationsEnabled ||
+                            CallNotificationManager.canUseFullScreenIntent(context),
                         onRequestNotifications = {
                             requestPermission(GovChatPermissionFeature.Notifications) {
                                 Toast.makeText(context, "Уведомления включены", Toast.LENGTH_SHORT).show()
                             }
+                        },
+                        onRequestFullScreenCalls = {
+                            CallNotificationManager.openFullScreenIntentSettings(context)
                         },
                         onSearchUserByPhone = onSearchUserByPhone,
                         onCreateChatWithUser = onCreateChatWithUser,
@@ -641,7 +647,9 @@ private fun ChatsListContent(
     onSelectChat: (String) -> Unit,
     onLogout: () -> Unit,
     notificationsEnabled: Boolean,
+    fullScreenCallsEnabled: Boolean,
     onRequestNotifications: () -> Unit,
+    onRequestFullScreenCalls: () -> Unit,
     onSearchUserByPhone: (String) -> Unit,
     onCreateChatWithUser: (String) -> Unit,
     onCreateGroupChat: (String, List<String>) -> Unit,
@@ -773,6 +781,34 @@ private fun ChatsListContent(
                     )
                     TextButton(onClick = onRequestNotifications) {
                         Text("Разрешить", color = Color(0xFF5EB5F7))
+                    }
+                }
+            }
+        }
+
+        if (notificationsEnabled && !fullScreenCallsEnabled) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                color = Color(0xFF3A2415),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Разрешите полноэкранные звонки",
+                        color = Color.White,
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    TextButton(onClick = onRequestFullScreenCalls) {
+                        Text("Открыть", color = Color(0xFFF59E0B))
                     }
                 }
             }
