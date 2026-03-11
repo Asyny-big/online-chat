@@ -60,6 +60,7 @@ class IncomingCallService : Service() {
         val action = intent?.action
         when (action) {
             ACTION_SHOW_INCOMING_CALL -> handleShowIncomingCall(intent)
+            ACTION_ACKNOWLEDGE_INCOMING_CALL -> handleAcknowledge(intent)
             ACTION_ACCEPT_INCOMING_CALL -> handleAccept(intent)
             ACTION_DECLINE_INCOMING_CALL -> handleDecline(intent)
             ACTION_CANCEL_INCOMING_CALL -> handleCancel(intent)
@@ -128,6 +129,19 @@ class IncomingCallService : Service() {
             cleanupIncomingSurface(command.callId)
             launchCallHost(command.copy(action = NotificationIntents.ACTION_ACCEPT_CALL))
         }
+    }
+
+    private fun handleAcknowledge(intent: Intent) {
+        val callId = NotificationIntents.toCommand(intent)?.callId
+            ?: intent.getStringExtra(NotificationIntents.EXTRA_CALL_ID)
+            ?: currentCallId
+        stopAlerting()
+        releaseWakeLock()
+        if (isForegroundIncoming) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            isForegroundIncoming = false
+        }
+        CallNotificationManager.cancelIncomingNotification(this, callId)
     }
 
     private fun handleDecline(intent: Intent) {
@@ -367,6 +381,7 @@ class IncomingCallService : Service() {
     companion object {
         private const val TAG = "IncomingCallService"
         private const val ACTION_SHOW_INCOMING_CALL = "ru.govchat.app.call.SHOW_INCOMING"
+        private const val ACTION_ACKNOWLEDGE_INCOMING_CALL = "ru.govchat.app.call.ACKNOWLEDGE_INCOMING"
         private const val ACTION_ACCEPT_INCOMING_CALL = "ru.govchat.app.call.ACCEPT_INCOMING"
         private const val ACTION_DECLINE_INCOMING_CALL = "ru.govchat.app.call.DECLINE_INCOMING"
         private const val ACTION_CANCEL_INCOMING_CALL = "ru.govchat.app.call.CANCEL_INCOMING"
@@ -418,6 +433,22 @@ class IncomingCallService : Service() {
                 context.startService(createAcceptIntent(context, command))
             }.onFailure { error ->
                 Log.e(TAG, "Unable to accept incoming call", error)
+            }
+        }
+
+        fun acknowledgeIncomingCall(context: Context, command: NotificationCommand) {
+            runCatching {
+                context.startService(
+                    NotificationIntents.addCommandExtras(
+                        Intent(context, IncomingCallService::class.java).apply {
+                            action = ACTION_ACKNOWLEDGE_INCOMING_CALL
+                        },
+                        command.copy(action = NotificationIntents.ACTION_OPEN_CALL)
+                    )
+                )
+            }.onFailure { error ->
+                Log.w(TAG, "Unable to acknowledge incoming call", error)
+                CallNotificationManager.cancelIncomingNotification(context, command.callId)
             }
         }
 

@@ -865,6 +865,7 @@ class MainViewModel(
 
                 NotificationIntents.ACTION_ACCEPT_CALL -> {
                     ensureIncomingCallFromNotification(command)
+                    IncomingCallService.acknowledgeIncomingCall(applicationContext, command)
                     acceptIncomingCall(fromNotification = true)
                 }
 
