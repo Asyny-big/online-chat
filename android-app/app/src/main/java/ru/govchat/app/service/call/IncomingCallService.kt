@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
 import android.media.Ringtone
 import android.media.RingtoneManager
@@ -14,6 +15,7 @@ import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.util.Log
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -102,8 +104,8 @@ class IncomingCallService : Service() {
         if (showNotification) {
             stopAlerting()
             val notification = CallNotificationManager.showIncomingCallNotification(this, command)
-            startForeground(notificationId(command.callId), notification)
-            isForegroundIncoming = true
+            val foregroundStarted = startIncomingForeground(notificationId(command.callId), notification)
+            isForegroundIncoming = foregroundStarted
         } else {
             if (isForegroundIncoming) {
                 stopForeground(STOP_FOREGROUND_REMOVE)
@@ -337,6 +339,21 @@ class IncomingCallService : Service() {
 
     private fun notificationId(callId: String?): Int {
         return FOREGROUND_NOTIFICATION_BASE_ID + callId.orEmpty().hashCode()
+    }
+
+    private fun startIncomingForeground(notificationId: Int, notification: android.app.Notification): Boolean {
+        return runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(notificationId, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SHORT_SERVICE)
+            } else {
+                startForeground(notificationId, notification)
+            }
+            true
+        }.getOrElse { error ->
+            Log.e(TAG, "Unable to promote incoming call service to foreground; falling back to posted notification", error)
+            NotificationManagerCompat.from(this).notify(notificationId, notification)
+            false
+        }
     }
 
     private fun applicationContainer() = (application as GovChatApp).container

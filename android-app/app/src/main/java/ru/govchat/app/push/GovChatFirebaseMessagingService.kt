@@ -18,6 +18,7 @@ import kotlinx.coroutines.runBlocking
 import ru.govchat.app.GovChatApp
 import ru.govchat.app.MainActivity
 import ru.govchat.app.R
+import ru.govchat.app.core.notification.CallNotificationManager
 import ru.govchat.app.core.notification.NotificationChannels
 import ru.govchat.app.core.notification.NotificationIntents
 import ru.govchat.app.domain.model.CallHistoryStatus
@@ -99,6 +100,10 @@ class GovChatFirebaseMessagingService : FirebaseMessagingService() {
             isIncomingCallEvent -> {
                 val callId = payload.read("callId", "call_id", "roomId", "room_id").ifBlank {
                     "call-${System.currentTimeMillis()}"
+                }
+                if (CallNotificationManager.isIncomingCallStillPending(this, callId)) {
+                    Log.i(TAG, "Skipping duplicate incoming call push for already pending callId=$callId")
+                    return
                 }
                 val chatId = payload.read("chatId", "chat_id")
                 val chatName = payload.read("chatName", "chat_name")

@@ -233,6 +233,15 @@ object CallNotificationManager {
         return handled.has(callId)
     }
 
+    fun isIncomingCallStillPending(context: Context, callId: String?): Boolean {
+        if (callId.isNullOrBlank()) return false
+        val appContext = context.applicationContext
+        val currentCallId = currentIncomingCall(appContext)?.callId
+        if (currentCallId != callId) return false
+        val presentedAt = pendingCallPresentedAtMillis(appContext) ?: return true
+        return System.currentTimeMillis() - presentedAt < INCOMING_CALL_TIMEOUT_MS
+    }
+
     fun markCallHandled(context: Context, callId: String?) {
         if (callId.isNullOrBlank()) return
         val appContext = context.applicationContext

@@ -1189,6 +1189,9 @@ class MainViewModel(
                     if (event.initiatorId.isNotBlank() && event.initiatorId == currentUserId) {
                         return@collect
                     }
+                    if (CallNotificationManager.isIncomingCallStillPending(applicationContext, event.callId)) {
+                        return@collect
+                    }
                     val command = NotificationIntents.incomingCallCommand(
                         callId = event.callId,
                         chatId = event.chatId,
