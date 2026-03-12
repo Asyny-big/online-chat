@@ -78,6 +78,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VideocamOff
 import androidx.compose.material.icons.filled.ExitToApp
@@ -246,6 +247,7 @@ fun MainScreen(
     onExpandMinimizedCall: () -> Unit,
     onCallSurfaceInteraction: () -> Unit,
     onToggleMicrophone: () -> Unit,
+    onToggleSpeakerphone: () -> Unit,
     onToggleCamera: () -> Unit,
     onSwitchCamera: () -> Unit,
     onStartScreenShare: (Int, Intent?) -> Unit,
@@ -568,6 +570,7 @@ fun MainScreen(
                     onToggleMinimize = onToggleCallMinimized,
                     onInteraction = onCallSurfaceInteraction,
                     onToggleMicrophone = onToggleMicrophone,
+                    onToggleSpeakerphone = onToggleSpeakerphone,
                     onToggleCamera = onToggleCamera,
                     onSwitchCamera = onSwitchCamera,
                     onToggleScreenShare = toggleScreenShare
@@ -3223,6 +3226,7 @@ private fun ActiveCallOverlay(
     onToggleMinimize: () -> Unit,
     onInteraction: () -> Unit,
     onToggleMicrophone: () -> Unit,
+    onToggleSpeakerphone: () -> Unit,
     onToggleCamera: () -> Unit,
     onSwitchCamera: () -> Unit,
     onToggleScreenShare: () -> Unit
@@ -3541,6 +3545,7 @@ private fun ActiveCallOverlay(
                     controls = uiState.controls,
                     onInteraction = onInteraction,
                     onToggleMicrophone = onToggleMicrophone,
+                    onToggleSpeakerphone = onToggleSpeakerphone,
                     onToggleCamera = onToggleCamera,
                     onSwitchCamera = onSwitchCamera,
                     onToggleScreenShare = onToggleScreenShare,
@@ -3816,6 +3821,7 @@ private fun CallControlsBar(
     controls: CallControlsState,
     onInteraction: () -> Unit,
     onToggleMicrophone: () -> Unit,
+    onToggleSpeakerphone: () -> Unit,
     onToggleCamera: () -> Unit,
     onSwitchCamera: () -> Unit,
     onToggleScreenShare: () -> Unit,
@@ -3865,6 +3871,25 @@ private fun CallControlsBar(
                     onToggleMicrophone()
                 }
             )
+
+            if (!call.isGroup && call.type != "video") {
+                CallControlButton(
+                    icon = Icons.Filled.VolumeUp,
+                    contentDescription = if (controls.isSpeakerphoneEnabled) {
+                        "Выключить громкую связь"
+                    } else {
+                        "Включить громкую связь"
+                    },
+                    selected = controls.isSpeakerphoneEnabled,
+                    enabled = controls.canToggleSpeakerphone,
+                    buttonSize = regularButtonSize,
+                    iconSize = regularIconSize,
+                    onClick = {
+                        onInteraction()
+                        onToggleSpeakerphone()
+                    }
+                )
+            }
 
             if (call.type == "video") {
                 CallControlButton(

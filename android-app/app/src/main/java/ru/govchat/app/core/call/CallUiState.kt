@@ -11,6 +11,8 @@ sealed interface CallVideoTrack {
 data class CallControlsState(
     val isMicrophoneEnabled: Boolean = true,
     val isCameraEnabled: Boolean = true,
+    val isSpeakerphoneEnabled: Boolean = false,
+    val canToggleSpeakerphone: Boolean = false,
     val isUsingFrontCamera: Boolean = true,
     val canSwitchCamera: Boolean = false,
     val isScreenShareSupported: Boolean = false,

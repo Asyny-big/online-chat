@@ -1112,6 +1112,18 @@ class MainViewModel(
         }
     }
 
+    fun toggleSpeakerphone() {
+        if (mutableState.value.activeCall == null) return
+        viewModelScope.launch {
+            callManager.toggleSpeakerphone().onFailure { error ->
+                mutableState.update {
+                    it.copy(callErrorMessage = error.message ?: "Не удалось переключить громкую связь")
+                }
+            }
+            showCallControlsTemporarily()
+        }
+    }
+
     fun toggleCamera() {
         if (mutableState.value.activeCall == null) return
         viewModelScope.launch {

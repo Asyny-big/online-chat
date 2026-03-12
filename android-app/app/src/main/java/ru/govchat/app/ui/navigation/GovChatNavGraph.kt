@@ -181,6 +181,7 @@ fun GovChatNavGraph(
                 onExpandMinimizedCall = viewModel::expandMinimizedCall,
                 onCallSurfaceInteraction = viewModel::onCallSurfaceInteraction,
                 onToggleMicrophone = viewModel::toggleMicrophone,
+                onToggleSpeakerphone = viewModel::toggleSpeakerphone,
                 onToggleCamera = viewModel::toggleCamera,
                 onSwitchCamera = viewModel::switchCamera,
                 onStartScreenShare = viewModel::startScreenShare,

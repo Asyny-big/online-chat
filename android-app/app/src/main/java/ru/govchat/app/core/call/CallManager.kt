@@ -99,6 +99,8 @@ class CallManager(
                 controls = it.controls.copy(
                     isMicrophoneEnabled = true,
                     isCameraEnabled = isVideo,
+                    isSpeakerphoneEnabled = isVideo,
+                    canToggleSpeakerphone = !isVideo,
                     isScreenShareSupported = false,
                     isScreenSharing = false
                 )
@@ -140,6 +142,8 @@ class CallManager(
                 controls = it.controls.copy(
                     isMicrophoneEnabled = true,
                     isCameraEnabled = isVideo,
+                    isSpeakerphoneEnabled = isVideo,
+                    canToggleSpeakerphone = !isVideo,
                     isUsingFrontCamera = true,
                     canSwitchCamera = isVideo,
                     isScreenShareSupported = isVideo && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP,
@@ -167,6 +171,8 @@ class CallManager(
                 controls = it.controls.copy(
                     isMicrophoneEnabled = true,
                     isCameraEnabled = type == "video",
+                    isSpeakerphoneEnabled = type == "video",
+                    canToggleSpeakerphone = type != "video",
                     canSwitchCamera = type == "video",
                     isScreenShareSupported = type == "video" && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP,
                     isScreenSharing = false
@@ -240,6 +246,26 @@ class CallManager(
         mutableState.update {
             it.copy(
                 controls = it.controls.copy(isCameraEnabled = nextEnabled),
+                statusMessage = null
+            )
+        }
+        return Result.success(Unit)
+    }
+
+    suspend fun toggleSpeakerphone(): Result<Unit> {
+        val currentEnabled = mutableState.value.controls.isSpeakerphoneEnabled
+        val nextEnabled = !currentEnabled
+        val applied = when (mediaEngine) {
+            MediaEngine.WebRtc -> webRtcController.setSpeakerphoneEnabled(nextEnabled)
+            MediaEngine.LiveKit -> false
+            MediaEngine.None -> false
+        }
+        if (!applied) {
+            return Result.failure(IllegalStateException("Speakerphone is unavailable"))
+        }
+        mutableState.update {
+            it.copy(
+                controls = it.controls.copy(isSpeakerphoneEnabled = nextEnabled),
                 statusMessage = null
             )
         }
@@ -365,6 +391,8 @@ class CallManager(
             val controls = current.controls.copy(
                 isMicrophoneEnabled = media.isMicrophoneEnabled,
                 isCameraEnabled = media.isCameraEnabled,
+                isSpeakerphoneEnabled = media.isSpeakerphoneEnabled,
+                canToggleSpeakerphone = media.canToggleSpeakerphone,
                 isUsingFrontCamera = media.isUsingFrontCamera,
                 canSwitchCamera = media.canSwitchCamera,
                 isScreenShareSupported = media.isScreenShareSupported,
