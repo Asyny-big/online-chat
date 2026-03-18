@@ -95,6 +95,19 @@ class SocketGateway(
             )
         }
 
+        socket.on("message:updated") messageUpdated@{ args ->
+            val payload = args.firstOrNull() as? JSONObject ?: return@messageUpdated
+            val chatId = payload.optString("chatId")
+            val messageJson = payload.optJSONObject("message") ?: return@messageUpdated
+            val message = messageJson.toSocketMessage(chatIdHint = chatId) ?: return@messageUpdated
+            emit(
+                RealtimeEvent.MessageUpdated(
+                    chatId = chatId.ifBlank { message.chatId },
+                    message = message
+                )
+            )
+        }
+
         socket.on("messages:read") { args ->
             val payload = args.firstOrNull() as? JSONObject ?: return@on
             emit(payload.toMessagesReadEvent() ?: return@on)
@@ -134,12 +147,20 @@ class SocketGateway(
             emit(RealtimeEvent.ChatDeleted(chatId = chatId))
         }
 
-        socket.on("message:deleted") { args ->
-            val payload = args.firstOrNull() as? JSONObject ?: return@on
+        socket.on("message:deleted") messageDeleted@{ args ->
+            val payload = args.firstOrNull() as? JSONObject ?: return@messageDeleted
             val chatId = payload.optString("chatId")
             val messageId = payload.optString("messageId")
-            if (chatId.isBlank() || messageId.isBlank()) return@on
-            emit(RealtimeEvent.MessageDeleted(chatId = chatId, messageId = messageId))
+            if (chatId.isBlank() || messageId.isBlank()) return@messageDeleted
+            val message = payload.optJSONObject("message")?.toSocketMessage(chatIdHint = chatId)
+            emit(
+                RealtimeEvent.MessageDeleted(
+                    chatId = chatId,
+                    messageId = messageId,
+                    message = message,
+                    scope = payload.optString("scope").ifBlank { "for_all" }
+                )
+            )
         }
 
         socket.on("call:incoming") { args ->

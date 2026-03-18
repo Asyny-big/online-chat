@@ -74,8 +74,10 @@ router.get('/', async (req, res) => {
         {
           $match: {
             chat: { $in: chatIds },
+            deleted: { $ne: true },
             sender: { $ne: userObjectId },
-            'readBy.user': { $ne: userObjectId }
+            'readBy.user': { $ne: userObjectId },
+            deletedFor: { $ne: userObjectId }
           }
         },
         {

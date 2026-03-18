@@ -56,7 +56,9 @@ import ru.govchat.app.domain.repository.ChatRepository
 import ru.govchat.app.domain.usecase.LoadMessagesUseCase
 import ru.govchat.app.domain.usecase.LoadChatsUseCase
 import ru.govchat.app.domain.usecase.AcceptCallUseCase
+import ru.govchat.app.domain.usecase.DeleteMessageUseCase
 import ru.govchat.app.domain.usecase.DeclineCallUseCase
+import ru.govchat.app.domain.usecase.EditMessageUseCase
 import ru.govchat.app.domain.usecase.JoinGroupCallUseCase
 import ru.govchat.app.domain.usecase.LeaveCallUseCase
 import ru.govchat.app.domain.usecase.LeaveGroupCallUseCase
@@ -78,6 +80,8 @@ class MainViewModel(
     appContext: Context,
     private val loadChatsUseCase: LoadChatsUseCase,
     private val loadMessagesUseCase: LoadMessagesUseCase,
+    private val editMessageUseCase: EditMessageUseCase,
+    private val deleteMessageUseCase: DeleteMessageUseCase,
     private val sendTextMessageUseCase: SendTextMessageUseCase,
     private val sendAttachmentMessageUseCase: SendAttachmentMessageUseCase,
     private val loadWebRtcConfigUseCase: LoadWebRtcConfigUseCase,
@@ -345,6 +349,61 @@ class MainViewModel(
                             isSending = false,
                             errorMessage = error.message ?: "Р В РЎвЂєР РЋРІвЂљВ¬Р В РЎвЂР В Р’В±Р В РЎвЂќР В Р’В° Р В РЎвЂўР РЋРІР‚С™Р В РЎвЂ”Р РЋР вЂљР В Р’В°Р В Р вЂ Р В РЎвЂќР В РЎвЂ"
                         )
+                    }
+                }
+        }
+    }
+
+    fun editMessage(messageId: String, text: String) {
+        val trimmed = text.trim()
+        if (trimmed.isBlank()) return
+        val currentMessage = findMessageById(messageId)
+        if (currentMessage?.deleted == true) return
+        val optimisticMessage = currentMessage?.let { buildOptimisticEditedMessage(it, trimmed) }
+
+        viewModelScope.launch {
+            mutableState.update { it.copy(errorMessage = null) }
+            optimisticMessage?.let { applyMessageMutation(it) }
+            editMessageUseCase(
+                messageId = messageId,
+                text = trimmed,
+                expectedRevision = currentMessage?.revision,
+                expectedUpdatedAtMillis = messageMutationTimestamp(currentMessage)
+            )
+                .onSuccess { message ->
+                    applyMessageMutation(normalizeDeliveryStatus(message))
+                }
+                .onFailure { error ->
+                    currentMessage?.let { applyMessageMutation(it) }
+                    refreshChatMessages(currentMessage?.chatId ?: mutableState.value.selectedChatId)
+                    mutableState.update {
+                        it.copy(errorMessage = error.message ?: "Не удалось обновить сообщение")
+                    }
+                }
+        }
+    }
+
+    fun deleteMessage(messageId: String) {
+        val currentMessage = findMessageById(messageId)
+        if (currentMessage?.deleted == true) return
+        val optimisticMessage = currentMessage?.let { buildOptimisticDeletedMessage(it) }
+
+        viewModelScope.launch {
+            mutableState.update { it.copy(errorMessage = null) }
+            optimisticMessage?.let { applyMessageMutation(it) }
+            deleteMessageUseCase(
+                messageId = messageId,
+                expectedRevision = currentMessage?.revision,
+                expectedUpdatedAtMillis = messageMutationTimestamp(currentMessage)
+            )
+                .onSuccess { message ->
+                    applyMessageMutation(normalizeDeliveryStatus(message))
+                }
+                .onFailure { error ->
+                    currentMessage?.let { applyMessageMutation(it) }
+                    refreshChatMessages(currentMessage?.chatId ?: mutableState.value.selectedChatId)
+                    mutableState.update {
+                        it.copy(errorMessage = error.message ?: "Не удалось удалить сообщение")
                     }
                 }
         }
@@ -1176,6 +1235,14 @@ class MainViewModel(
             when (event) {
                 is RealtimeEvent.SocketConnected -> {
                     mutableState.update { it.copy(isRealtimeConnected = true) }
+                    refreshChats()
+                    val selectedChatId = mutableState.value.selectedChatId
+                    if (!selectedChatId.isNullOrBlank()) {
+                        viewModelScope.launch {
+                            chatRepository.joinChat(selectedChatId)
+                            loadMessages(selectedChatId)
+                        }
+                    }
                 }
 
                 is RealtimeEvent.SocketDisconnected -> {
@@ -1187,6 +1254,10 @@ class MainViewModel(
                     appendMessage(message)
                     updateChatWithMessage(event.chatId, message)
                     maybeMarkMessagesRead(event.chatId, listOf(message))
+                }
+
+                is RealtimeEvent.MessageUpdated -> {
+                    applyMessageMutation(normalizeDeliveryStatus(event.message))
                 }
 
                 is RealtimeEvent.UserStatusChanged -> {
@@ -1256,10 +1327,16 @@ class MainViewModel(
                 }
 
                 is RealtimeEvent.MessageDeleted -> {
-                    removeMessageFromCache(event.chatId, event.messageId)
-                    mutableState.update { current ->
-                        if (current.selectedChatId != event.chatId) return@update current
-                        current.copy(messages = current.messages.filterNot { it.id == event.messageId })
+                    if (event.scope == "for_me") {
+                        removeMessageFromCache(event.chatId, event.messageId)
+                        mutableState.update { current ->
+                            if (current.selectedChatId != event.chatId) return@update current
+                            current.copy(messages = current.messages.filterNot { it.id == event.messageId })
+                        }
+                    } else {
+                        event.message?.let { message ->
+                            applyMessageMutation(normalizeDeliveryStatus(message))
+                        } ?: refreshChatMessages(event.chatId)
                     }
                 }
 
@@ -1919,6 +1996,28 @@ class MainViewModel(
         }
     }
 
+    private fun applyMessageMutation(message: ChatMessage) {
+        val chatId = message.chatId
+        val existing = messagesForChat(chatId)
+        val currentMessage = existing.firstOrNull { it.id == message.id }
+        if (currentMessage == null) {
+            updateChatWithMessage(chatId, message, moveToTop = false)
+            return
+        }
+        if (!shouldReplaceMessage(currentMessage, message)) {
+            return
+        }
+
+        val updated = existing.map { current ->
+            if (current.id == message.id) message else current
+        }
+        updateMessagesCache(chatId, updated)
+        if (mutableState.value.selectedChatId == chatId) {
+            mutableState.update { it.copy(messages = updated) }
+        }
+        updateChatWithMessage(chatId, message, moveToTop = false)
+    }
+
     private fun removeMessage(messageId: String) {
         val chatId = mutableState.value.selectedChatId ?: return
         removeMessageFromCache(chatId = chatId, messageId = messageId)
@@ -1928,23 +2027,30 @@ class MainViewModel(
         }
     }
 
-    private fun updateChatWithMessage(chatId: String, message: ChatMessage) {
+    private fun updateChatWithMessage(chatId: String, message: ChatMessage, moveToTop: Boolean = true) {
         mutableState.update { current ->
             val index = current.chats.indexOfFirst { it.id == chatId }
             if (index < 0) return@update current
 
             val source = current.chats[index]
+            val shouldRefreshSubtitle = moveToTop || message.createdAtMillis >= source.updatedAtMillis
+            if (!shouldRefreshSubtitle && current.selectedChatId != chatId) {
+                return@update current
+            }
             val shouldIncreaseUnread = current.selectedChatId != chatId &&
                 message.senderId != current.currentUserId
             val updated = source.copy(
-                subtitle = message.toChatSubtitle(),
-                updatedAtMillis = message.createdAtMillis,
+                subtitle = if (shouldRefreshSubtitle) message.toChatSubtitle() else source.subtitle,
+                updatedAtMillis = if (shouldRefreshSubtitle) message.createdAtMillis else source.updatedAtMillis,
                 unreadCount = if (shouldIncreaseUnread) source.unreadCount + 1 else source.unreadCount
             )
 
             val reordered = current.chats.toMutableList()
-            reordered.removeAt(index)
-            reordered.add(0, updated)
+            reordered[index] = updated
+            if (moveToTop && index > 0) {
+                reordered.removeAt(index)
+                reordered.add(0, updated)
+            }
 
             current.copy(chats = reordered)
         }
@@ -1986,7 +2092,7 @@ class MainViewModel(
     private fun maybeMarkMessagesRead(chatId: String, messages: List<ChatMessage>) {
         val currentUserId = mutableState.value.currentUserId ?: return
         val unreadIncomingIds = messages
-            .filter { it.senderId != currentUserId && !it.readByUserIds.contains(currentUserId) }
+            .filter { !it.deleted && it.senderId != currentUserId && !it.readByUserIds.contains(currentUserId) }
             .map { it.id }
             .distinct()
 
@@ -2030,16 +2136,89 @@ class MainViewModel(
             ?: if (mutableState.value.selectedChatId == chatId) mutableState.value.messages else emptyList()
     }
 
+    private fun findMessageById(messageId: String): ChatMessage? {
+        if (messageId.isBlank()) return null
+        mutableState.value.messages.firstOrNull { it.id == messageId }?.let { return it }
+        return messagesCache.values.asSequence()
+            .flatten()
+            .firstOrNull { it.id == messageId }
+    }
+
+    private fun messageMutationTimestamp(message: ChatMessage?): Long? {
+        if (message == null) return null
+        return listOf(
+            message.updatedAtMillis,
+            message.editedAtMillis,
+            message.createdAtMillis.takeIf { it > 0L }
+        ).firstOrNull { it != null && it > 0L }
+    }
+
+    private fun shouldReplaceMessage(current: ChatMessage?, incoming: ChatMessage): Boolean {
+        if (current == null) return true
+
+        if (incoming.revision != current.revision) {
+            return incoming.revision > current.revision
+        }
+
+        val currentTimestamp = messageMutationTimestamp(current) ?: 0L
+        val incomingTimestamp = messageMutationTimestamp(incoming) ?: 0L
+        if (incomingTimestamp != currentTimestamp) {
+            return incomingTimestamp >= currentTimestamp
+        }
+
+        if (incoming.deleted != current.deleted) {
+            return incoming.deleted
+        }
+
+        if (incoming.edited != current.edited) {
+            return incoming.edited
+        }
+
+        return incoming.createdAtMillis >= current.createdAtMillis
+    }
+
+    private fun buildOptimisticEditedMessage(message: ChatMessage, text: String): ChatMessage {
+        val now = System.currentTimeMillis()
+        return message.copy(
+            text = text,
+            edited = true,
+            editedAtMillis = now,
+            updatedAtMillis = now,
+            revision = message.revision + 1
+        )
+    }
+
+    private fun buildOptimisticDeletedMessage(message: ChatMessage): ChatMessage {
+        val now = System.currentTimeMillis()
+        return message.copy(
+            text = "",
+            attachment = null,
+            edited = false,
+            editedAtMillis = null,
+            deleted = true,
+            deletedForUserIds = emptySet(),
+            updatedAtMillis = now,
+            revision = message.revision + 1
+        )
+    }
+
+    private fun refreshChatMessages(chatId: String?) {
+        if (chatId.isNullOrBlank()) return
+        viewModelScope.launch {
+            chatRepository.joinChat(chatId)
+            loadMessages(chatId)
+        }
+    }
+
     private fun mergeMessages(base: List<ChatMessage>, incoming: List<ChatMessage>): List<ChatMessage> {
-        if (base.isEmpty()) {
-            return incoming.distinctBy { it.id }.sortedBy { it.createdAtMillis }
-        }
-        if (incoming.isEmpty()) {
-            return base.distinctBy { it.id }.sortedBy { it.createdAtMillis }
-        }
         val byId = LinkedHashMap<String, ChatMessage>(base.size + incoming.size)
         base.forEach { byId[it.id] = it }
-        incoming.forEach { byId[it.id] = it }
+        incoming.forEach { message ->
+            val current = byId[message.id]
+            if (shouldReplaceMessage(current, message)) {
+                byId[message.id] = message
+            }
+        }
         return byId.values.sortedBy { it.createdAtMillis }
     }
 
@@ -2192,6 +2371,8 @@ class MainViewModel(
             appContext: Context,
             loadChatsUseCase: LoadChatsUseCase,
             loadMessagesUseCase: LoadMessagesUseCase,
+            editMessageUseCase: EditMessageUseCase,
+            deleteMessageUseCase: DeleteMessageUseCase,
             sendTextMessageUseCase: SendTextMessageUseCase,
             sendAttachmentMessageUseCase: SendAttachmentMessageUseCase,
             loadWebRtcConfigUseCase: LoadWebRtcConfigUseCase,
@@ -2217,6 +2398,8 @@ class MainViewModel(
                 appContext = appContext,
                 loadChatsUseCase = loadChatsUseCase,
                 loadMessagesUseCase = loadMessagesUseCase,
+                editMessageUseCase = editMessageUseCase,
+                deleteMessageUseCase = deleteMessageUseCase,
                 sendTextMessageUseCase = sendTextMessageUseCase,
                 sendAttachmentMessageUseCase = sendAttachmentMessageUseCase,
                 loadWebRtcConfigUseCase = loadWebRtcConfigUseCase,
@@ -2264,6 +2447,7 @@ private fun String.toCallHistoryType(): CallHistoryType {
 }
 
 private fun ChatMessage.toChatSubtitle(): String {
+    if (deleted) return "Сообщение удалено"
     return when (type) {
         MessageType.Voice -> "Голосовое сообщение"
         MessageType.VideoNote -> "Видео-кружок"

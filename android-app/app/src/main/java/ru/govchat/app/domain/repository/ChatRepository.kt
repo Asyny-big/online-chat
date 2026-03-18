@@ -18,6 +18,17 @@ interface ChatRepository {
         beforeMillis: Long? = null,
         limit: Int = 30
     ): Result<List<ChatMessage>>
+    suspend fun editMessage(
+        messageId: String,
+        text: String,
+        expectedRevision: Int? = null,
+        expectedUpdatedAtMillis: Long? = null
+    ): Result<ChatMessage>
+    suspend fun deleteMessage(
+        messageId: String,
+        expectedRevision: Int? = null,
+        expectedUpdatedAtMillis: Long? = null
+    ): Result<ChatMessage>
     suspend fun sendTextMessage(chatId: String, text: String): Result<ChatMessage>
     suspend fun startCall(chatId: String, type: String): Result<String>
     suspend fun acceptCall(callId: String): Result<Unit>

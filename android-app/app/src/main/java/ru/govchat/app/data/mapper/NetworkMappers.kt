@@ -82,7 +82,13 @@ fun MessageDto.toDomain(chatIdFallback: String): ChatMessage {
         text = text,
         attachment = attachment.toDomain(),
         readByUserIds = readBy,
-        createdAtMillis = createdAt.toEpochMillisOrZero()
+        createdAtMillis = createdAt.toEpochMillisOrZero(),
+        updatedAtMillis = updatedAt.toEpochMillisOrZero().takeIf { it > 0L },
+        revision = revision,
+        edited = edited,
+        editedAtMillis = editedAt.toEpochMillisOrZero().takeIf { it > 0L },
+        deleted = deleted,
+        deletedForUserIds = deletedFor.filter { it.isNotBlank() }.toSet()
     )
 }
 
@@ -95,9 +101,10 @@ fun WebRtcIceConfigDto.toDomain(): WebRtcConfig {
 
 private fun ru.govchat.app.core.network.LastMessageDto?.toDisplayText(): String {
     if (this == null) return "Нет сообщений"
+    if ((text ?: "").trim() == "Сообщение удалено") return "Сообщение удалено"
     return when (type.orEmpty()) {
-        "voice" -> "��������� ���������"
-        "video_note" -> "�����-������"
+        "voice" -> "Голосовое сообщение"
+        "video_note" -> "Видео-кружок"
         "audio" -> "🎤 Голосовое сообщение"
         "image" -> "📷 Изображение"
         "video" -> "🎥 Видео"
@@ -237,4 +244,3 @@ private fun Any?.toUserProfileOrNull(): UserProfile? {
         else -> null
     }
 }
-

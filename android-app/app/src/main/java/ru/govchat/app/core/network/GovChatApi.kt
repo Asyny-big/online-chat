@@ -3,7 +3,9 @@ package ru.govchat.app.core.network
 import com.squareup.moshi.Json
 import okhttp3.MultipartBody
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
+import retrofit2.http.PATCH
 import retrofit2.http.Multipart
 import retrofit2.http.POST
 import retrofit2.http.Part
@@ -33,6 +35,19 @@ interface GovChatApi {
         @Query("before") before: String? = null,
         @Query("limit") limit: Int = 30
     ): List<MessageDto>
+
+    @PATCH("messages/{messageId}")
+    suspend fun editMessage(
+        @Path("messageId") messageId: String,
+        @Body request: EditMessageRequest
+    ): MessageMutationResponse
+
+    @DELETE("messages/{messageId}")
+    suspend fun deleteMessage(
+        @Path("messageId") messageId: String,
+        @Query("expectedRevision") expectedRevision: Int? = null,
+        @Query("expectedUpdatedAt") expectedUpdatedAt: String? = null
+    ): MessageMutationResponse
 
     @GET("webrtc/ice")
     suspend fun getWebRtcIceConfig(): WebRtcIceConfigDto
@@ -126,7 +141,13 @@ data class MessageDto(
     val text: String = "",
     val attachment: AttachmentDto? = null,
     val readBy: List<ReadByDto> = emptyList(),
-    val createdAt: String? = null
+    val edited: Boolean = false,
+    val editedAt: String? = null,
+    val deleted: Boolean = false,
+    val deletedFor: List<String> = emptyList(),
+    val createdAt: String? = null,
+    val updatedAt: String? = null,
+    val revision: Int = 0
 )
 
 data class MessageSenderDto(
@@ -173,6 +194,19 @@ data class DeviceUnregisterRequest(
 
 data class ApiSuccessResponse(
     val success: Boolean = true
+)
+
+data class EditMessageRequest(
+    val text: String,
+    val expectedRevision: Int? = null,
+    val expectedUpdatedAt: String? = null
+)
+
+data class MessageMutationResponse(
+    val success: Boolean = false,
+    val scope: String? = null,
+    val messageId: String? = null,
+    val message: MessageDto? = null
 )
 
 data class WebRtcIceConfigDto(

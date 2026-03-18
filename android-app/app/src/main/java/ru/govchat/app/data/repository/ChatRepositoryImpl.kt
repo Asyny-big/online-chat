@@ -14,6 +14,7 @@ import ru.govchat.app.core.network.GovChatApi
 import ru.govchat.app.core.network.SocketGateway
 import ru.govchat.app.core.network.UriUploadRequestBody
 import ru.govchat.app.core.network.CreateGroupChatRequest
+import ru.govchat.app.core.network.EditMessageRequest
 import ru.govchat.app.core.storage.SessionStorage
 import ru.govchat.app.data.mapper.toDomain
 import ru.govchat.app.data.mapper.toParticipantsDomain
@@ -55,6 +56,44 @@ class ChatRepositoryImpl(
                 before = beforeIso,
                 limit = limit
             ).map { it.toDomain(chatIdFallback = chatId) }
+        }
+    }
+
+    override suspend fun editMessage(
+        messageId: String,
+        text: String,
+        expectedRevision: Int?,
+        expectedUpdatedAtMillis: Long?
+    ): Result<ChatMessage> {
+        return runAuthorized {
+            api.editMessage(
+                messageId = messageId,
+                request = EditMessageRequest(
+                    text = text,
+                    expectedRevision = expectedRevision,
+                    expectedUpdatedAt = expectedUpdatedAtMillis?.takeIf { it > 0L }?.let { millis ->
+                        Instant.ofEpochMilli(millis).toString()
+                    }
+                )
+            ).message?.toDomain(chatIdFallback = "")
+                ?: throw IllegalStateException("Server did not return edited message")
+        }
+    }
+
+    override suspend fun deleteMessage(
+        messageId: String,
+        expectedRevision: Int?,
+        expectedUpdatedAtMillis: Long?
+    ): Result<ChatMessage> {
+        return runAuthorized {
+            api.deleteMessage(
+                messageId = messageId,
+                expectedRevision = expectedRevision,
+                expectedUpdatedAt = expectedUpdatedAtMillis?.takeIf { it > 0L }?.let { millis ->
+                    Instant.ofEpochMilli(millis).toString()
+                }
+            ).message?.toDomain(chatIdFallback = "")
+                ?: throw IllegalStateException("Server did not return deleted message")
         }
     }
 

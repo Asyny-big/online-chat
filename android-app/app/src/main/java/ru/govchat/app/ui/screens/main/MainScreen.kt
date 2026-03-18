@@ -143,6 +143,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -225,6 +226,8 @@ fun MainScreen(
     onSelectChat: (String) -> Unit,
     onBackFromChat: () -> Unit,
     onSendText: (String) -> Unit,
+    onEditMessage: (String, String) -> Unit,
+    onDeleteMessage: (String) -> Unit,
     onInputChanged: (String) -> Unit,
     onSendAttachment: (Uri) -> Unit,
     onToggleRecordingMode: () -> Unit,
@@ -513,6 +516,8 @@ fun MainScreen(
                         recordingCommands = recordingCommands,
                         onBack = onBackFromChat,
                         onSendText = onSendText,
+                        onEditMessage = onEditMessage,
+                        onDeleteMessage = onDeleteMessage,
                         onInputChanged = onInputChanged,
                         onSendAttachment = onSendAttachment,
                         onToggleRecordingMode = onToggleRecordingMode,
@@ -2130,6 +2135,8 @@ private fun ChatContent(
     recordingCommands: Flow<RecordingCommand>,
     onBack: () -> Unit,
     onSendText: (String) -> Unit,
+    onEditMessage: (String, String) -> Unit,
+    onDeleteMessage: (String) -> Unit,
     onInputChanged: (String) -> Unit,
     onSendAttachment: (Uri) -> Unit,
     onToggleRecordingMode: () -> Unit,
@@ -2166,6 +2173,9 @@ private fun ChatContent(
         SharedVideoNotePlayerManager(context.applicationContext)
     }
     var activePlaybackMessageId by remember(chat.id) { mutableStateOf<String?>(null) }
+    var pendingMessageAction by remember(chat.id) { mutableStateOf<ChatMessage?>(null) }
+    var editingMessage by remember(chat.id) { mutableStateOf<ChatMessage?>(null) }
+    var editMessageDraft by remember(chat.id) { mutableStateOf("") }
 
     DisposableEffect(chat.id) {
         onDispose {
@@ -2461,6 +2471,12 @@ private fun ChatContent(
                         onAttachmentClick(type, attachment)
                     }
                 },
+                onMessageLongPress = { message ->
+                    if (message.senderId != state.currentUserId || message.deleted) {
+                        return@ChatMessagesList
+                    }
+                    pendingMessageAction = message
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
@@ -2612,6 +2628,82 @@ private fun ChatContent(
             }
         }
 
+        pendingMessageAction?.let { message ->
+            AlertDialog(
+                onDismissRequest = { pendingMessageAction = null },
+                title = { Text("Сообщение") },
+                text = {
+                    Text(
+                        if (message.type == MessageType.Text) {
+                            "Выберите действие для сообщения"
+                        } else {
+                            "Для этого сообщения доступно только удаление"
+                        }
+                    )
+                },
+                confirmButton = {
+                    Row {
+                        if (message.type == MessageType.Text) {
+                            TextButton(
+                                onClick = {
+                                    editingMessage = message
+                                    editMessageDraft = message.text
+                                    pendingMessageAction = null
+                                }
+                            ) {
+                                Text("Редактировать")
+                            }
+                        }
+                        TextButton(
+                            onClick = {
+                                onDeleteMessage(message.id)
+                                pendingMessageAction = null
+                            }
+                        ) {
+                            Text("Удалить")
+                        }
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingMessageAction = null }) {
+                        Text("Отмена")
+                    }
+                }
+            )
+        }
+
+        editingMessage?.let { message ->
+            AlertDialog(
+                onDismissRequest = { editingMessage = null },
+                title = { Text("Редактировать сообщение") },
+                text = {
+                    OutlinedTextField(
+                        value = editMessageDraft,
+                        onValueChange = { editMessageDraft = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 3,
+                        maxLines = 6
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            onEditMessage(message.id, editMessageDraft)
+                            editingMessage = null
+                        },
+                        enabled = editMessageDraft.trim().isNotEmpty()
+                    ) {
+                        Text("Сохранить")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { editingMessage = null }) {
+                        Text("Отмена")
+                    }
+                }
+            )
+        }
+
         val expandedState = expandedVideoNoteState
         if (expandedState != null) {
             ExpandedVideoNoteOverlay(
@@ -2658,6 +2750,7 @@ private fun ChatMessagesList(
     onVideoNoteBoundsChanged: (String, Rect) -> Unit,
     onVideoNoteClick: (ChatMessage) -> Unit,
     onAttachmentClick: (ChatMessage, MessageType, MessageAttachment?) -> Unit,
+    onMessageLongPress: (ChatMessage) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val displayMessages = remember(messages) { messages.asReversed() }
@@ -2801,6 +2894,7 @@ private fun ChatMessagesList(
                 MessageBubble(
                     message = message,
                     isMine = message.senderId == currentUserId,
+                    onLongPress = { onMessageLongPress(message) },
                     playbackCoordinator = playbackCoordinator,
                     videoNotePlayerManager = videoNotePlayerManager,
                     isActiveInlineVideoNote = autoplayVideoNoteId == message.id,
@@ -4183,9 +4277,11 @@ private fun MessageDaySeparator(label: String) {
 }
 
 @Composable
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 private fun MessageBubble(
     message: ChatMessage,
     isMine: Boolean,
+    onLongPress: () -> Unit,
     playbackCoordinator: PlaybackCoordinator,
     videoNotePlayerManager: SharedVideoNotePlayerManager,
     isActiveInlineVideoNote: Boolean,
@@ -4197,7 +4293,13 @@ private fun MessageBubble(
     onAttachmentClick: (MessageType, MessageAttachment?) -> Unit
 ) {
     val alignment = if (isMine) Alignment.End else Alignment.Start
-    val bubbleColor = if (isMine) Color(0xFF2B5278) else Color(0xFF182533)
+    val bubbleColor = if (message.deleted) {
+        Color(0xFF334155)
+    } else if (isMine) {
+        Color(0xFF2B5278)
+    } else {
+        Color(0xFF182533)
+    }
     val bubbleShape = if (isMine) {
         RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp)
     } else {
@@ -4216,7 +4318,12 @@ private fun MessageBubble(
         Surface(
             shape = bubbleShape,
             color = bubbleColor,
-            modifier = Modifier.widthIn(max = 300.dp)
+            modifier = Modifier
+                .widthIn(max = 300.dp)
+                .combinedClickable(
+                    onClick = {},
+                    onLongClick = onLongPress
+                )
         ) {
             Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
                 if (!isMine && message.senderName.isNotBlank()) {
@@ -4247,6 +4354,23 @@ private fun MessageBubble(
                     modifier = Modifier.align(Alignment.End),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    if (message.edited && !message.deleted) {
+                        Text(
+                            text = buildString {
+                                append("изменено")
+                                message.editedAtMillis?.let { editedAt ->
+                                    val formatted = formatTime(editedAt)
+                                    if (formatted.isNotBlank()) {
+                                        append(" ")
+                                        append(formatted)
+                                    }
+                                }
+                            },
+                            color = Color(0x99FFFFFF),
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(end = 6.dp)
+                        )
+                    }
                     Text(
                         text = formatTime(message.createdAtMillis),
                         color = Color(0x99FFFFFF),
@@ -4287,6 +4411,15 @@ private fun MessageBody(
     onVideoNoteClick: (ChatMessage) -> Unit,
     onAttachmentClick: () -> Unit
 ) {
+    if (message.deleted) {
+        Text(
+            text = "Сообщение удалено",
+            color = Color(0xFFD1D5DB),
+            fontStyle = FontStyle.Italic
+        )
+        return
+    }
+
     when (message.type) {
         MessageType.Image -> {
             val imageUrl = resolveMediaUrl(message.attachment?.url)

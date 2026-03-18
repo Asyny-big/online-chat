@@ -5,6 +5,7 @@ sealed interface RealtimeEvent {
     data object SocketDisconnected : RealtimeEvent
     data class UserStatusChanged(val userId: String, val status: String) : RealtimeEvent
     data class MessageCreated(val chatId: String, val message: ChatMessage) : RealtimeEvent
+    data class MessageUpdated(val chatId: String, val message: ChatMessage) : RealtimeEvent
     data class MessagesRead(
         val chatId: String,
         val userId: String,
@@ -18,7 +19,12 @@ sealed interface RealtimeEvent {
     ) : RealtimeEvent
     data class ChatCreated(val chat: ChatPreview) : RealtimeEvent
     data class ChatDeleted(val chatId: String) : RealtimeEvent
-    data class MessageDeleted(val chatId: String, val messageId: String) : RealtimeEvent
+    data class MessageDeleted(
+        val chatId: String,
+        val messageId: String,
+        val message: ChatMessage? = null,
+        val scope: String = "for_all"
+    ) : RealtimeEvent
     data class IncomingCall(
         val callId: String,
         val chatId: String,

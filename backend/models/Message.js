@@ -12,33 +12,55 @@ const messageSchema = new mongoose.Schema({
     ref: 'User',
     required: true
   },
-  // Тип сообщения
   type: {
     type: String,
     enum: ['text', 'file', 'audio', 'image', 'video', 'voice', 'video_note', 'system'],
     default: 'text'
   },
-  // Текст сообщения
   text: {
     type: String,
     default: '',
     maxlength: 10000
   },
-  // Вложение
+  edited: {
+    type: Boolean,
+    default: false
+  },
+  editedAt: {
+    type: Date,
+    default: null
+  },
+  updatedAt: {
+    type: Date,
+    default: Date.now
+  },
+  revision: {
+    type: Number,
+    default: 0
+  },
+  deleted: {
+    type: Boolean,
+    default: false
+  },
+  deletedFor: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  }],
   attachment: {
     url: String,
     originalName: String,
     mimeType: String,
-    size: Number // в байтах
+    size: Number,
+    durationMs: Number,
+    thumbnailUrl: String,
+    previewUrl: String
   },
-  // Статусы прочтения (для каждого участника)
   readBy: [{
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     readAt: { type: Date, default: Date.now }
   }],
-  // Системное сообщение (добавление участника, создание группы и т.д.)
   systemEvent: {
-    type: { type: String }, // 'user_added', 'user_removed', 'chat_created', etc.
+    type: { type: String },
     targetUser: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     actorUser: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
   },
@@ -49,7 +71,6 @@ const messageSchema = new mongoose.Schema({
   }
 });
 
-// Составной индекс для пагинации сообщений
 messageSchema.index({ chat: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Message', messageSchema);

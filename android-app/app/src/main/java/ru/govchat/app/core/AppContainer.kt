@@ -34,6 +34,8 @@ import ru.govchat.app.domain.usecase.LogoutUseCase
 import ru.govchat.app.domain.usecase.RegisterUseCase
 import ru.govchat.app.domain.usecase.AcceptCallUseCase
 import ru.govchat.app.domain.usecase.DeclineCallUseCase
+import ru.govchat.app.domain.usecase.DeleteMessageUseCase
+import ru.govchat.app.domain.usecase.EditMessageUseCase
 import ru.govchat.app.domain.usecase.JoinGroupCallUseCase
 import ru.govchat.app.domain.usecase.LeaveCallUseCase
 import ru.govchat.app.domain.usecase.LeaveGroupCallUseCase
@@ -112,6 +114,8 @@ class AppContainer(application: Application) {
     val logoutUseCase = LogoutUseCase(authRepository)
     val loadChatsUseCase = LoadChatsUseCase(chatRepository)
     val loadMessagesUseCase = LoadMessagesUseCase(chatRepository)
+    val editMessageUseCase = EditMessageUseCase(chatRepository)
+    val deleteMessageUseCase = DeleteMessageUseCase(chatRepository)
     val sendTextMessageUseCase = SendTextMessageUseCase(chatRepository)
     val sendAttachmentMessageUseCase = SendAttachmentMessageUseCase(chatRepository)
     val loadWebRtcConfigUseCase = LoadWebRtcConfigUseCase(chatRepository)

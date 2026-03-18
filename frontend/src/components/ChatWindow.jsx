@@ -21,6 +21,7 @@ function ChatWindow({
   onAcceptGroupCall,
   onDeclineGroupCall,
   onBack,
+  onEditMessage,
   onDeleteMessage,
   onDeleteChat
 }) {
@@ -436,6 +437,7 @@ function ChatWindow({
                 message={msg}
                 isMine={isMine}
                 token={token}
+                onEdit={isMine ? (nextText) => onEditMessage?.(msg._id, nextText) : null}
                 onDelete={isMine ? () => onDeleteMessage?.(msg._id) : null}
               />
             );
@@ -709,6 +711,48 @@ function ChatWindow({
             opacity: 0.5; padding: 0; color: inherit;
         }
         .delete-msg-btn:hover { opacity: 1; }
+        .message-bubble.deleted { opacity: 0.85; }
+        .deleted-message {
+            color: var(--text-secondary);
+            font-style: italic;
+        }
+        .message-edit-block { display: grid; gap: 8px; min-width: 220px; }
+        .message-edit-input {
+            width: 100%;
+            resize: vertical;
+            min-height: 72px;
+            border-radius: 10px;
+            border: 1px solid var(--border-light);
+            background: rgba(15, 23, 42, 0.45);
+            color: var(--text-primary);
+            padding: 10px 12px;
+            font: inherit;
+        }
+        .message-edit-actions { display: flex; justify-content: flex-end; gap: 8px; }
+        .message-edit-btn {
+            border: none;
+            border-radius: 8px;
+            padding: 6px 12px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .message-edit-btn.cancel {
+            background: var(--bg-surface);
+            color: var(--text-primary);
+        }
+        .message-edit-btn.save {
+            background: var(--accent);
+            color: white;
+        }
+        .message-edit-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .message-edited {
+            margin-right: 6px;
+            font-size: 11px;
+            opacity: 0.7;
+        }
 
         /* Modal */
         .modal-overlay {
@@ -740,10 +784,11 @@ function ChatWindow({
         }
         .context-menu-item {
             padding: 10px 16px; background: transparent; border: none;
-            color: var(--danger); fontSize: 13px; cursor: pointer;
+            color: var(--text-primary); fontSize: 13px; cursor: pointer;
             display: flex; align-items: center; gap: 8px; white-space: nowrap;
         }
         .context-menu-item:hover { background-color: var(--bg-surface); }
+        .context-menu-item.danger { color: var(--danger); }
 
         .delete-confirm-popup {
             position: absolute; bottom: 100%; right: 0; margin-bottom: 8px;
@@ -775,14 +820,26 @@ function DaySeparator({ label }) {
   );
 }
 
-function MessageBubble({ message, isMine, onDelete, token }) {
+function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
   const [showMenu, setShowMenu] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [draftText, setDraftText] = useState(message?.text || '');
   const [selectedMedia, setSelectedMedia] = useState(null);
   const [audioDurationSec, setAudioDurationSec] = useState(null);
-  const { type: rawType = 'text', text, attachment, createdAt, sender } = message;
+  const { type: rawType = 'text', text, attachment, createdAt, sender, deleted, edited } = message;
+
+  useEffect(() => {
+    setDraftText(message?.text || '');
+    if (message?.deleted) {
+      setIsEditing(false);
+      setShowMenu(false);
+      setShowDeleteConfirm(false);
+    }
+  }, [message]);
 
   const type = (() => {
+    if (deleted) return 'deleted';
     if (rawType !== 'file' && rawType !== 'text') return rawType;
     if (!attachment?.mimeType) return rawType;
     const mime = attachment.mimeType.toLowerCase();
@@ -794,8 +851,12 @@ function MessageBubble({ message, isMine, onDelete, token }) {
 
   const time = formatMessageTime(createdAt);
   const timeTitle = formatMessageDateTime(createdAt);
-
+  const editedTime = formatMessageTime(message?.editedAt || message?.updatedAt);
+  const editedLabel = editedTime ? `изменено ${editedTime}` : 'изменено';
   const senderName = sender?.name || '';
+  const canEdit = Boolean(onEdit) && !deleted && type === 'text';
+  const canDelete = Boolean(onDelete) && !deleted;
+  const canManage = canEdit || canDelete;
 
   const getMediaUrl = (url) => {
     if (!url) return '';
@@ -829,6 +890,18 @@ function MessageBubble({ message, isMine, onDelete, token }) {
     setSelectedMedia(null);
   }, []);
 
+  const handleSaveEdit = async () => {
+    const nextText = draftText.trim();
+    if (!nextText) return;
+    if (nextText === String(text || '').trim()) {
+      setIsEditing(false);
+      return;
+    }
+
+    await onEdit?.(nextText);
+    setIsEditing(false);
+  };
+
   const downloadAttachment = async () => {
     try {
       const url = attachment?.url;
@@ -861,6 +934,44 @@ function MessageBubble({ message, isMine, onDelete, token }) {
   };
 
   const renderContent = () => {
+    if (type === 'deleted') {
+      return <div className="deleted-message">Сообщение удалено</div>;
+    }
+
+    if (isEditing) {
+      return (
+        <div className="message-edit-block">
+          <textarea
+            value={draftText}
+            onChange={(event) => setDraftText(event.target.value)}
+            className="message-edit-input"
+            rows={3}
+            maxLength={10000}
+          />
+          <div className="message-edit-actions">
+            <button
+              type="button"
+              className="message-edit-btn cancel"
+              onClick={() => {
+                setDraftText(message?.text || '');
+                setIsEditing(false);
+              }}
+            >
+              Отмена
+            </button>
+            <button
+              type="button"
+              className="message-edit-btn save"
+              onClick={handleSaveEdit}
+              disabled={!draftText.trim()}
+            >
+              Сохранить
+            </button>
+          </div>
+        </div>
+      );
+    }
+
     switch (type) {
       case 'image':
         return (
@@ -971,12 +1082,11 @@ function MessageBubble({ message, isMine, onDelete, token }) {
   return (
     <div className={`message-row ${isMine ? 'mine' : 'theirs'}`} style={{ justifyContent: isMine ? 'flex-end' : 'flex-start' }}>
       <div
-        className={`message-bubble ${isMine ? 'mine' : 'theirs'}`}
-        onContextMenu={(e) => {
-          if (onDelete) {
-            e.preventDefault();
-            setShowMenu(true);
-          }
+        className={`message-bubble ${isMine ? 'mine' : 'theirs'} ${deleted ? 'deleted' : ''}`}
+        onContextMenu={(event) => {
+          if (!canManage) return;
+          event.preventDefault();
+          setShowMenu(true);
         }}
         onClick={() => setShowMenu(false)}
       >
@@ -984,43 +1094,63 @@ function MessageBubble({ message, isMine, onDelete, token }) {
         {renderContent()}
         <MediaViewerModal media={selectedMedia} onClose={closeMedia} />
         <div className="message-time" title={timeTitle || undefined}>
+          {!deleted && edited && !isEditing && <span className="message-edited">{editedLabel}</span>}
           {time}
-          {isMine && onDelete && (
+          {isMine && canManage && !isEditing && (
             <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowDeleteConfirm(true);
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                setShowMenu((current) => !current);
               }}
               className="delete-msg-btn"
-              title="Удалить сообщение"
+              title="Действия с сообщением"
             >
-              🗑️
+              ⋮
             </button>
           )}
         </div>
 
-        {showMenu && onDelete && (
+        {showMenu && canManage && !isEditing && (
           <div className="message-context-menu">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowMenu(false);
-                setShowDeleteConfirm(true);
-              }}
-              className="context-menu-item"
-            >
-              🗑️ Удалить
-            </button>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setShowMenu(false);
+                  setShowDeleteConfirm(false);
+                  setIsEditing(true);
+                }}
+                className="context-menu-item"
+              >
+                ✏️ Редактировать
+              </button>
+            )}
+            {canDelete && (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setShowMenu(false);
+                  setShowDeleteConfirm(true);
+                }}
+                className="context-menu-item danger"
+              >
+                🗑️ Удалить
+              </button>
+            )}
           </div>
         )}
 
-        {showDeleteConfirm && (
+        {showDeleteConfirm && canDelete && (
           <div className="delete-confirm-popup">
             <div className="delete-confirm-text">Удалить сообщение?</div>
             <div className="delete-confirm-actions">
               <button
-                onClick={(e) => {
-                  e.stopPropagation();
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
                   setShowDeleteConfirm(false);
                 }}
                 className="delete-confirm-cancel"
@@ -1028,9 +1158,10 @@ function MessageBubble({ message, isMine, onDelete, token }) {
                 Отмена
               </button>
               <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDelete();
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onDelete?.();
                   setShowDeleteConfirm(false);
                 }}
                 className="delete-confirm-yes"

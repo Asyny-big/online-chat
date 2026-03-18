@@ -39,6 +39,100 @@ function isPrivateChatWithUser(chat, targetUserId, viewerUserId = '') {
   return participantIds.includes(normalizedViewerUserId);
 }
 
+const DELETED_MESSAGE_TEXT = '\u0421\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u0435 \u0443\u0434\u0430\u043b\u0435\u043d\u043e';
+
+function getMessageIdentity(message) {
+  return String(message?.messageId || message?._id || '').trim();
+}
+
+function getMessageTimestamp(message) {
+  const value = message?.createdAt ? Date.parse(message.createdAt) : 0;
+  return Number.isFinite(value) ? value : 0;
+}
+
+function getMessageRevision(message) {
+  const value = Number(message?.revision ?? 0);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function getMessageMutationTimestamp(message) {
+  const rawValue = message?.updatedAt || message?.editedAt || message?.createdAt || null;
+  const value = rawValue ? Date.parse(rawValue) : 0;
+  return Number.isFinite(value) ? value : 0;
+}
+
+function shouldReplaceMessageState(currentMessage, nextMessage) {
+  if (!nextMessage?._id) return false;
+  if (!currentMessage?._id) return true;
+
+  const currentRevision = getMessageRevision(currentMessage);
+  const nextRevision = getMessageRevision(nextMessage);
+  if (nextRevision !== currentRevision) {
+    return nextRevision > currentRevision;
+  }
+
+  const currentTimestamp = getMessageMutationTimestamp(currentMessage);
+  const nextTimestamp = getMessageMutationTimestamp(nextMessage);
+  if (nextTimestamp !== currentTimestamp) {
+    return nextTimestamp >= currentTimestamp;
+  }
+
+  if (Boolean(nextMessage.deleted) !== Boolean(currentMessage.deleted)) {
+    return Boolean(nextMessage.deleted);
+  }
+
+  if (Boolean(nextMessage.edited) !== Boolean(currentMessage.edited)) {
+    return Boolean(nextMessage.edited);
+  }
+
+  return getMessageTimestamp(nextMessage) >= getMessageTimestamp(currentMessage);
+}
+
+function buildChatLastMessage(message) {
+  if (!message) return null;
+
+  return {
+    ...message,
+    _id: message._id || message.messageId,
+    messageId: getMessageIdentity(message),
+    type: message.deleted ? 'text' : message.type,
+    text: message.deleted ? DELETED_MESSAGE_TEXT : (message.text || '')
+  };
+}
+
+function shouldReplaceLastMessage(currentLastMessage, nextMessage) {
+  if (!nextMessage) return false;
+  if (!currentLastMessage) return true;
+
+  const currentId = getMessageIdentity(currentLastMessage);
+  const nextId = getMessageIdentity(nextMessage);
+  if (currentId && nextId && currentId === nextId) {
+    return true;
+  }
+
+  return getMessageTimestamp(nextMessage) >= getMessageTimestamp(currentLastMessage);
+}
+
+function upsertMessage(messages, incomingMessage, { appendIfMissing = true } = {}) {
+  if (!incomingMessage?._id) return messages;
+
+  const nextMessages = [...messages];
+  const existingIndex = nextMessages.findIndex((item) => item._id === incomingMessage._id);
+
+  if (existingIndex >= 0) {
+    if (!shouldReplaceMessageState(nextMessages[existingIndex], incomingMessage)) {
+      return messages;
+    }
+    nextMessages[existingIndex] = incomingMessage;
+  } else if (appendIfMissing) {
+    nextMessages.push(incomingMessage);
+  } else {
+    return messages;
+  }
+
+  return nextMessages.sort((left, right) => getMessageTimestamp(left) - getMessageTimestamp(right));
+}
+
 function ChatPageInner({
   token,
   onLogout,
@@ -67,6 +161,7 @@ function ChatPageInner({
 
   const socketRef = useRef(null);
   const economyProbeTimersRef = useRef([]);
+  const messagesRef = useRef(messages);
 
   // Refs для использования актуальных значений в обработчиках сокета
   const chatsRef = useRef(chats);
@@ -86,6 +181,124 @@ function ChatPageInner({
   useEffect(() => { currentUserIdRef.current = currentUserId; }, [currentUserId]);
   useEffect(() => { groupCallStateRef.current = groupCallState; }, [groupCallState]);
   useEffect(() => { groupCallDataRef.current = groupCallData; }, [groupCallData]);
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
+
+  const fetchChats = useCallback(async () => {
+    if (!token) {
+      setChats([]);
+      return;
+    }
+
+    try {
+      const response = await axios.get(`${API_URL}/chats`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setChats(Array.isArray(response.data) ? response.data : []);
+    } catch (error) {
+      console.error('[ChatPage] Failed to fetch chats:', error);
+      setChats([]);
+    }
+  }, [token]);
+
+  const fetchMessagesForChat = useCallback(async (chatId) => {
+    if (!token || !chatId) {
+      setMessages([]);
+      return;
+    }
+
+    try {
+      const response = await axios.get(`${API_URL}/messages/${chatId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setMessages(Array.isArray(response.data) ? response.data : []);
+    } catch (error) {
+      console.error('[ChatPage] Failed to fetch messages:', error);
+      setMessages([]);
+    }
+  }, [token]);
+
+  const syncChatLastMessage = useCallback((chatId, message, { promoteToTop = false } = {}) => {
+    if (!chatId || !message) return;
+
+    setChats((prev) => {
+      const index = prev.findIndex((chat) => chat._id === chatId);
+      if (index < 0) return prev;
+
+      const currentChat = prev[index];
+      if (!shouldReplaceLastMessage(currentChat.lastMessage, message)) {
+        return prev;
+      }
+
+      const nextChat = {
+        ...currentChat,
+        lastMessage: buildChatLastMessage(message)
+      };
+      const nextChats = [...prev];
+      nextChats[index] = nextChat;
+
+      if (!promoteToTop || index === 0) {
+        return nextChats;
+      }
+
+      nextChats.splice(index, 1);
+      nextChats.unshift(nextChat);
+      return nextChats;
+    });
+  }, []);
+
+  const applyIncomingMessage = useCallback((chatId, message) => {
+    if (!chatId || !message?._id) return;
+
+    syncChatLastMessage(chatId, message, { promoteToTop: true });
+    setMessages((prev) => {
+      if (selectedChatRef.current?._id !== chatId) {
+        return prev;
+      }
+      return upsertMessage(prev, message);
+    });
+  }, [syncChatLastMessage]);
+
+  const applyUpdatedMessage = useCallback((chatId, message) => {
+    if (!chatId || !message?._id) return;
+
+    syncChatLastMessage(chatId, message, { promoteToTop: false });
+    setMessages((prev) => {
+      if (selectedChatRef.current?._id !== chatId) {
+        return prev;
+      }
+      return upsertMessage(prev, message, { appendIfMissing: false });
+    });
+  }, [syncChatLastMessage]);
+
+  const applyDeletedMessage = useCallback((payload = {}) => {
+    const chatId = String(payload.chatId || '').trim();
+    const messageId = String(payload.messageId || '').trim();
+    const message = payload.message || null;
+
+    if (!chatId || !messageId) return;
+
+    if (payload.scope === 'for_me') {
+      setMessages((prev) => {
+        if (selectedChatRef.current?._id !== chatId) {
+          return prev;
+        }
+        return prev.filter((item) => item._id !== messageId);
+      });
+      return;
+    }
+
+    if (message?._id) {
+      applyUpdatedMessage(chatId, message);
+      return;
+    }
+
+    setMessages((prev) => {
+      if (selectedChatRef.current?._id !== chatId) {
+        return prev;
+      }
+      return prev.filter((item) => item._id !== messageId);
+    });
+  }, [applyUpdatedMessage]);
 
   useEffect(() => {
     const target = pendingPrivateChatTarget;
@@ -294,15 +507,13 @@ function ChatPageInner({
 
   // Загрузка чатов при монтировании
   useEffect(() => {
-    if (!token) return;
+    if (!token) {
+      setChats([]);
+      return;
+    }
 
-    axios
-      .get(`${API_URL}/chats`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      .then((res) => setChats(res.data || []))
-      .catch(() => setChats([]));
-  }, [token]);
+    void fetchChats();
+  }, [token, fetchChats]);
 
   // Подключение Socket.IO - только один раз при логине
   useEffect(() => {
@@ -319,6 +530,12 @@ function ChatPageInner({
     socketRef.current = socket;
 
     socket.on('connect', () => {
+      const activeChatId = selectedChatRef.current?._id;
+      void fetchChats();
+      if (activeChatId) {
+        socket.emit('chat:join', { chatId: activeChatId });
+        void fetchMessagesForChat(activeChatId);
+      }
       console.log('Socket.IO подключен:', socket.id);
     });
 
@@ -326,30 +543,13 @@ function ChatPageInner({
     socket.on('message:new', (payload) => {
       const chatId = payload?.chatId;
       const message = payload?.message ?? payload;
+      applyIncomingMessage(chatId, message);
+    });
 
-      if (!chatId || !message) return;
-
-      // Обновление последнего сообщения в списке чатов
-      setChats((prev) => {
-        const idx = prev.findIndex((c) => c._id === chatId);
-        if (idx === -1) return prev;
-
-        const updated = [...prev];
-        const chat = { ...updated[idx], lastMessage: message };
-        updated.splice(idx, 1);
-        updated.unshift(chat);
-        return updated;
-      });
-
-      // Добавление сообщения в текущий чат
-      setMessages((prev) => {
-        if (selectedChatRef.current?._id === chatId) {
-          // Проверка на дубликат
-          if (prev.some(m => m._id === message._id)) return prev;
-          return [...prev, message];
-        }
-        return prev;
-      });
+    socket.on('message:updated', (payload) => {
+      const chatId = payload?.chatId || payload?.message?.chat;
+      const message = payload?.message ?? null;
+      applyUpdatedMessage(chatId, message);
     });
 
     // Индикатор печати
@@ -378,17 +578,8 @@ function ChatPageInner({
     });
 
     // Сообщение удалено
-    socket.on('message:deleted', ({ chatId, messageId }) => {
-      console.log('[ChatPage] Message deleted:', messageId);
-      setMessages((prev) => prev.filter(m => m._id !== messageId));
-
-      // Обновляем lastMessage в списке чатов если удалено последнее сообщение
-      setChats((prev) => prev.map(chat => {
-        if (chat._id === chatId && chat.lastMessage?._id === messageId) {
-          return { ...chat, lastMessage: null };
-        }
-        return chat;
-      }));
+    socket.on('message:deleted', (payload) => {
+      applyDeletedMessage(payload);
     });
 
     // Чат удалён
@@ -580,7 +771,7 @@ function ChatPageInner({
       economyProbeTimersRef.current = [];
       socket.disconnect();
     };
-  }, [token, showEarn]); // showEarn stable callback from provider
+  }, [token, showEarn, applyDeletedMessage, applyIncomingMessage, applyUpdatedMessage, fetchChats, fetchMessagesForChat]); // showEarn stable callback from provider
 
   useEffect(() => {
     if (!token) return;
@@ -609,18 +800,13 @@ function ChatPageInner({
       return;
     }
 
-    axios
-      .get(`${API_URL}/messages/${selectedChat._id}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      .then((res) => setMessages(res.data || []))
-      .catch(() => setMessages([]));
+    void fetchMessagesForChat(selectedChat._id);
 
     // Присоединение к комнате чата
     if (socketRef.current) {
       socketRef.current.emit('chat:join', { chatId: selectedChat._id });
     }
-  }, [token, selectedChat]);
+  }, [token, selectedChat, fetchMessagesForChat]);
 
   const handleSelectChat = (chat) => {
     setSelectedChat(chat);
@@ -659,20 +845,105 @@ function ChatPageInner({
   }, []);
 
   // === Удаление ===
-  const handleDeleteMessage = useCallback(async (messageId) => {
-    if (!selectedChat || !token) return;
+  const handleEditMessage = useCallback(async (messageId, text) => {
+    if (!token) return;
+    const chatId = selectedChatRef.current?._id;
+    const currentMessage = messagesRef.current.find((item) => item._id === messageId) || null;
+    const optimisticUpdatedAt = new Date().toISOString();
+    const optimisticMessage = currentMessage
+      ? {
+          ...currentMessage,
+          text,
+          edited: true,
+          editedAt: optimisticUpdatedAt,
+          updatedAt: optimisticUpdatedAt,
+          revision: getMessageRevision(currentMessage) + 1
+        }
+      : null;
 
     try {
-      await axios.delete(
-        `${API_URL}/messages/${selectedChat._id}/${messageId}`,
+      if (chatId && optimisticMessage) {
+        applyUpdatedMessage(chatId, optimisticMessage);
+      }
+      const response = await axios.patch(
+        `${API_URL}/messages/${messageId}`,
+        {
+          text,
+          expectedRevision: currentMessage ? getMessageRevision(currentMessage) : undefined,
+          expectedUpdatedAt: currentMessage?.updatedAt || currentMessage?.editedAt || currentMessage?.createdAt
+        },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      // Сообщение удалится через socket событие message:deleted
+
+      if (response?.data?.message) {
+        applyUpdatedMessage(response.data.message.chat || chatId, response.data.message);
+      }
     } catch (error) {
+      if (chatId && currentMessage) {
+        applyUpdatedMessage(chatId, currentMessage);
+        void fetchMessagesForChat(chatId);
+      }
+      console.error('Ошибка редактирования сообщения:', error);
+      alert(error.response?.data?.error || 'Не удалось обновить сообщение');
+      throw error;
+    }
+  }, [token, applyUpdatedMessage, fetchMessagesForChat]);
+
+  const handleDeleteMessage = useCallback(async (messageId) => {
+    const chatId = selectedChatRef.current?._id;
+    if (!chatId || !token) return;
+    const currentMessage = messagesRef.current.find((item) => item._id === messageId) || null;
+    const optimisticUpdatedAt = new Date().toISOString();
+    const optimisticMessage = currentMessage
+      ? {
+          ...currentMessage,
+          text: '',
+          attachment: null,
+          edited: false,
+          editedAt: null,
+          deleted: true,
+          updatedAt: optimisticUpdatedAt,
+          revision: getMessageRevision(currentMessage) + 1
+        }
+      : null;
+
+    try {
+      if (optimisticMessage) {
+        applyDeletedMessage({
+          chatId,
+          messageId,
+          message: optimisticMessage,
+          scope: 'for_all'
+        });
+      }
+      const response = await axios.delete(
+        `${API_URL}/messages/${messageId}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          params: {
+            expectedRevision: currentMessage ? getMessageRevision(currentMessage) : undefined,
+            expectedUpdatedAt: currentMessage?.updatedAt || currentMessage?.editedAt || currentMessage?.createdAt
+          }
+        }
+      );
+
+      if (response?.data) {
+        applyDeletedMessage({
+          chatId: response.data.message?.chat || chatId,
+          messageId,
+          message: response.data.message || null,
+          scope: response.data.scope || 'for_all'
+        });
+      }
+    } catch (error) {
+      if (currentMessage) {
+        applyUpdatedMessage(chatId, currentMessage);
+        void fetchMessagesForChat(chatId);
+      }
       console.error('Ошибка удаления сообщения:', error);
       alert(error.response?.data?.error || 'Не удалось удалить сообщение');
     }
-  }, [selectedChat, token]);
+  }, [token, applyDeletedMessage, applyUpdatedMessage, fetchMessagesForChat]);
 
   const handleDeleteChat = useCallback(async () => {
     if (!selectedChat || !token) return;
@@ -874,6 +1145,7 @@ function ChatPageInner({
           onAcceptGroupCall={handleJoinGroupCall}
           onDeclineGroupCall={handleDeclineGroupCall}
           onBack={() => setSelectedChat(null)}
+          onEditMessage={handleEditMessage}
           onDeleteMessage={handleDeleteMessage}
           onDeleteChat={handleDeleteChat}
         />

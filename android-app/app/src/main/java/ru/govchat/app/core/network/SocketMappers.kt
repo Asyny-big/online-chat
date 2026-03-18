@@ -58,7 +58,13 @@ internal fun JSONObject.toSocketMessage(chatIdHint: String = ""): ChatMessage? {
         text = optString("text"),
         attachment = attachment,
         readByUserIds = readByIds,
-        createdAtMillis = optString("createdAt").toEpochMillisOrZero()
+        createdAtMillis = optString("createdAt").toEpochMillisOrZero(),
+        updatedAtMillis = optString("updatedAt").toEpochMillisOrZero().takeIf { it > 0L },
+        revision = optInt("revision", 0).coerceAtLeast(0),
+        edited = optBoolean("edited"),
+        editedAtMillis = optString("editedAt").toEpochMillisOrZero().takeIf { it > 0L },
+        deleted = optBoolean("deleted"),
+        deletedForUserIds = parseDeletedForIds(optJSONArray("deletedFor"))
     )
 }
 
@@ -73,8 +79,8 @@ internal fun JSONObject.toSocketChatPreview(): ChatPreview? {
     val lastMessage = optJSONObject("lastMessage")
 
     val subtitle = when (lastMessage?.optString("type").orEmpty()) {
-        "voice" -> "��������� ���������"
-        "video_note" -> "�����-������"
+        "voice" -> "Голосовое сообщение"
+        "video_note" -> "Видео-кружок"
         "audio" -> "🎤 Голосовое сообщение"
         "image" -> "📷 Изображение"
         "video" -> "🎥 Видео"
@@ -143,6 +149,18 @@ private fun parseReadByIds(readBy: JSONArray?): Set<String> {
     return result
 }
 
+private fun parseDeletedForIds(deletedFor: JSONArray?): Set<String> {
+    if (deletedFor == null) return emptySet()
+    val result = LinkedHashSet<String>()
+    for (index in 0 until deletedFor.length()) {
+        val value = deletedFor.optString(index)
+        if (value.isNotBlank()) {
+            result.add(value)
+        }
+    }
+    return result
+}
+
 private fun String?.toEpochMillisOrZero(): Long {
     return runCatching { Instant.parse(this).toEpochMilli() }.getOrDefault(0L)
 }
@@ -159,4 +177,3 @@ private fun String.toSocketMessageType(): MessageType {
         else -> MessageType.Text
     }
 }
-

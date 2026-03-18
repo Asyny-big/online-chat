@@ -11,6 +11,7 @@ const {
   getUndeliveredNotifications,
   markNotificationsDelivered
 } = require('../social/services/notificationService');
+const { buildLastMessagePayload } = require('../services/messageStateService');
 
 const userSockets = new Map();
 const activeCalls = new Map();
@@ -143,9 +144,10 @@ module.exports = function (io) {
     }
   });
 
-  io.on('connection', async (socket) => {
+io.on('connection', async (socket) => {
     const userId = socket.userId;
     console.log(`User connected: ${userId}, socket: ${socket.id}`);
+    socket.join(`user:${userId}`);
 
     // Регистрация сокета
     if (!userSockets.has(userId)) {
@@ -244,6 +246,13 @@ module.exports = function (io) {
           createdAt: message.createdAt,
           type: messageType
         };
+        chat.lastMessage = buildLastMessagePayload({
+          ...message.toObject(),
+          sender: {
+            _id: userId,
+            name: socket.user.name
+          }
+        });
         await chat.save();
 
         io.to(`chat:${chatId}`).emit('message:new', {

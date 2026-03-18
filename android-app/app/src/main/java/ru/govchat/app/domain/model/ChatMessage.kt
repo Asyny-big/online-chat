@@ -10,6 +10,12 @@ data class ChatMessage(
     val attachment: MessageAttachment?,
     val readByUserIds: Set<String>,
     val createdAtMillis: Long,
+    val updatedAtMillis: Long? = null,
+    val revision: Int = 0,
+    val edited: Boolean = false,
+    val editedAtMillis: Long? = null,
+    val deleted: Boolean = false,
+    val deletedForUserIds: Set<String> = emptySet(),
     val deliveryStatus: MessageDeliveryStatus = MessageDeliveryStatus.Delivered
 )
 

@@ -40,6 +40,7 @@ const chatSchema = new mongoose.Schema({
   }],
   // Кеш последнего сообщения для быстрого отображения
   lastMessage: {
+    messageId: mongoose.Schema.Types.ObjectId,
     text: String,
     senderId: mongoose.Schema.Types.ObjectId,
     senderName: String,
