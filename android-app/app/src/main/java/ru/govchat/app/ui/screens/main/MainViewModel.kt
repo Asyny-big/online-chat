@@ -128,6 +128,7 @@ class MainViewModel(
     private var tokenInitialized = false
     private val handledNotificationEventIds = LinkedHashSet<String>()
     private val answeredCallHistoryIds = LinkedHashSet<String>()
+    private val recentRealtimeCallEvents = LinkedHashMap<String, Long>()
     private val messagesCache: MutableMap<String, List<ChatMessage>> = LinkedHashMap()
     private val pagingByChat: MutableMap<String, ChatPagingState> = LinkedHashMap()
 
@@ -852,6 +853,179 @@ class MainViewModel(
         }
     }
 
+    private fun handleAiOutgoingCall(event: RealtimeEvent.AiOutgoingCallStarted) {
+        if (!rememberRealtimeCallEvent("private:outgoing", event.callId)) return
+        if (mutableState.value.activeCall != null || mutableState.value.isCallActionInProgress) return
+        requestRecordingPreempt(RecordingCommand.StopAndSend)
+
+        val callType = event.type.ifBlank { "video" }
+        val callStartedAtMillis = System.currentTimeMillis()
+        val chat = mutableState.value.chats.firstOrNull { it.id == event.chatId }
+
+        viewModelScope.launch {
+            if (mutableState.value.selectedChatId != event.chatId) {
+                selectChat(event.chatId)
+            }
+
+            callHistoryRepository.createPendingCall(
+                CallHistoryDraft(
+                    id = event.callId,
+                    serverCallId = event.callId,
+                    chatId = event.chatId,
+                    userId = event.targetUserId.ifBlank { event.chatId },
+                    userName = event.targetUserName.ifBlank { chat?.title ?: event.chatName },
+                    avatarUrl = event.targetUserAvatarUrl ?: chat?.avatarUrl,
+                    direction = CallHistoryDirection.OUTGOING,
+                    callType = callType.toCallHistoryType(),
+                    startedAt = callStartedAtMillis,
+                    isGroupCall = false
+                )
+            )
+
+            mutableState.update {
+                it.copy(
+                    isCallActionInProgress = true,
+                    callErrorMessage = null,
+                    incomingCall = null,
+                    activeCall = ActiveCallUi(
+                        callId = event.callId,
+                        chatId = event.chatId,
+                        chatName = event.chatName.ifBlank { chat?.title ?: event.targetUserName },
+                        type = callType,
+                        isGroup = false,
+                        phase = ActiveCallPhase.Outgoing,
+                        startedAtMillis = callStartedAtMillis
+                    )
+                )
+            }
+
+            try {
+                initializeWebRtc(
+                    callId = event.callId,
+                    callType = callType,
+                    isInitiator = true,
+                    remoteUserId = event.targetUserId.ifBlank { null }
+                )
+                mutableState.update {
+                    it.copy(
+                        isCallActionInProgress = false
+                    )
+                }
+                showCallControlsTemporarily()
+            } catch (error: Throwable) {
+                callHistoryRepository.markCancelled(event.callId)
+                leaveCallUseCase(event.callId)
+                try {
+                    callManager.close()
+                } catch (_: Throwable) {
+                }
+                mutableState.update {
+                    it.copy(
+                        isCallActionInProgress = false,
+                        activeCall = null,
+                        callErrorMessage = error.message ?: "WebRTC init failed"
+                    )
+                }
+            }
+        }
+    }
+
+    private fun closeCallManagerAsync() {
+        viewModelScope.launch {
+            runCatching { callManager.close() }
+        }
+    }
+
+    private fun restorePrivateCallFromSync(event: RealtimeEvent.CallSync) {
+        if (event.callId.isBlank() || event.chatId.isBlank()) return
+        val currentActiveCall = mutableState.value.activeCall
+        if (currentActiveCall != null && currentActiveCall.callId != event.callId) {
+            closeCallManagerAsync()
+            mutableState.update {
+                it.copy(
+                    activeCall = null,
+                    incomingCall = null,
+                    isCallActionInProgress = false
+                )
+            }
+        } else if (mutableState.value.isCallActionInProgress && currentActiveCall?.callId != event.callId) {
+            return
+        }
+        requestRecordingPreempt(RecordingCommand.StopAndSend)
+
+        val callType = event.type.ifBlank { "audio" }
+        val callStartedAtMillis = System.currentTimeMillis()
+        val isInitiator = event.direction == "outgoing"
+        val shouldMarkActive = event.status == "active"
+        val peerUserId = if (isInitiator) event.targetUserId else event.initiatorId
+        val chatTitleFallback = mutableState.value.chats.firstOrNull { it.id == event.chatId }?.title ?: "GovChat"
+
+        viewModelScope.launch {
+            IncomingCallService.cancelIncomingCall(applicationContext, event.callId)
+            if (mutableState.value.selectedChatId != event.chatId) {
+                selectChat(event.chatId)
+            }
+
+            mutableState.update {
+                it.copy(
+                    isCallActionInProgress = true,
+                    callErrorMessage = null,
+                    incomingCall = null,
+                    activeCall = ActiveCallUi(
+                        callId = event.callId,
+                        chatId = event.chatId,
+                        chatName = event.chatName.ifBlank { chatTitleFallback },
+                        type = callType,
+                        isGroup = false,
+                        phase = when {
+                            shouldMarkActive -> ActiveCallPhase.Active
+                            isInitiator -> ActiveCallPhase.Outgoing
+                            else -> ActiveCallPhase.Connecting
+                        },
+                        startedAtMillis = callStartedAtMillis
+                    )
+                )
+            }
+
+            try {
+                ensureRealtimeWarmup()
+                initializeWebRtc(
+                    callId = event.callId,
+                    callType = callType,
+                    isInitiator = isInitiator,
+                    remoteUserId = peerUserId.ifBlank { null }
+                )
+                mutableState.update {
+                    it.copy(
+                        isCallActionInProgress = false,
+                        activeCall = it.activeCall?.takeIf { active -> active.callId == event.callId }?.copy(
+                            phase = when {
+                                shouldMarkActive -> ActiveCallPhase.Active
+                                isInitiator -> ActiveCallPhase.Outgoing
+                                else -> ActiveCallPhase.Connecting
+                            }
+                        ) ?: it.activeCall
+                    )
+                }
+                showCallControlsTemporarily()
+            } catch (error: Throwable) {
+                callHistoryRepository.markCancelled(event.callId)
+                leaveCallUseCase(event.callId)
+                try {
+                    callManager.close()
+                } catch (_: Throwable) {
+                }
+                mutableState.update {
+                    it.copy(
+                        isCallActionInProgress = false,
+                        activeCall = null,
+                        callErrorMessage = error.message ?: "WebRTC sync restore failed"
+                    )
+                }
+            }
+        }
+    }
+
     fun confirmJoinExistingGroupCall() {
         val prompt = mutableState.value.existingGroupCallPrompt ?: return
         if (mutableState.value.isCallActionInProgress) return
@@ -1257,9 +1431,10 @@ class MainViewModel(
 
                 is RealtimeEvent.MessageCreated -> {
                     val message = normalizeDeliveryStatus(event.message)
-                    appendMessage(message)
-                    updateChatWithMessage(event.chatId, message)
-                    maybeMarkMessagesRead(event.chatId, listOf(message))
+                    if (appendMessage(message)) {
+                        updateChatWithMessage(event.chatId, message)
+                        maybeMarkMessagesRead(event.chatId, listOf(message))
+                    }
                 }
 
                 is RealtimeEvent.MessageUpdated -> {
@@ -1270,7 +1445,131 @@ class MainViewModel(
                     applyUserStatusChange(event)
                 }
 
+                is RealtimeEvent.AiOutgoingCallStarted -> {
+                    handleAiOutgoingCall(event)
+                }
+
+                is RealtimeEvent.CallSync -> {
+                    val active = mutableState.value.activeCall
+                    if (active?.callId == event.callId) {
+                        return@collect
+                    }
+                    val normalizedStatus = event.status.ifBlank { "ringing" }
+
+                    if (event.direction == "outgoing" || normalizedStatus == "active") {
+                        restorePrivateCallFromSync(event.copy(status = normalizedStatus))
+                        return@collect
+                    }
+
+                    if (mutableState.value.activeCall != null) {
+                        closeCallManagerAsync()
+                        mutableState.update {
+                            it.copy(
+                                activeCall = null,
+                                incomingCall = null,
+                                isCallActionInProgress = false
+                            )
+                        }
+                    }
+
+                    val incomingEvent = RealtimeEvent.IncomingCall(
+                        callId = event.callId,
+                        chatId = event.chatId,
+                        chatName = event.chatName,
+                        type = event.type,
+                        initiatorId = event.initiatorId,
+                        initiatorName = event.initiatorName,
+                        initiatorAvatarUrl = event.initiatorAvatarUrl,
+                        isGroup = false
+                    )
+                    if (!rememberRealtimeCallEvent("private:incoming", incomingEvent.callId)) {
+                        return@collect
+                    }
+
+                    requestRecordingPreempt(RecordingCommand.StopAndSend)
+                    val currentUserId = mutableState.value.currentUserId
+                    if (incomingEvent.initiatorId.isNotBlank() && incomingEvent.initiatorId == currentUserId) {
+                        return@collect
+                    }
+                    if (CallNotificationManager.isIncomingCallStillPending(applicationContext, incomingEvent.callId)) {
+                        return@collect
+                    }
+                    val command = NotificationIntents.incomingCallCommand(
+                        callId = incomingEvent.callId,
+                        chatId = incomingEvent.chatId,
+                        chatName = incomingEvent.chatName.ifBlank {
+                            mutableState.value.chats.firstOrNull { it.id == incomingEvent.chatId }?.title ?: "GovChat"
+                        },
+                        callType = incomingEvent.type.ifBlank { "audio" },
+                        isGroupCall = false,
+                        initiatorId = incomingEvent.initiatorId,
+                        initiatorName = incomingEvent.initiatorName.ifBlank { "Контакт" },
+                        initiatorAvatarUrl = incomingEvent.initiatorAvatarUrl,
+                        participantCount = 0
+                    )
+                    val showNotification = !ProcessLifecycleOwner.get().lifecycle.currentState
+                        .isAtLeast(Lifecycle.State.STARTED)
+                    IncomingCallService.showIncomingCall(
+                        context = applicationContext,
+                        command = command,
+                        showNotification = showNotification
+                    )
+                    if (mutableState.value.selectedChatId != incomingEvent.chatId) {
+                        selectChat(incomingEvent.chatId)
+                    }
+                }
+
+                is RealtimeEvent.CallSyncComplete -> {
+                    val privateCallIds = event.privateCallIds.toSet()
+                    val groupCallIds = event.groupCallIds.toSet()
+                    val incoming = mutableState.value.incomingCall
+                    val active = mutableState.value.activeCall
+
+                    val staleIncoming = incoming != null && (
+                        (incoming.isGroup && !groupCallIds.contains(incoming.callId))
+                            || (!incoming.isGroup && !privateCallIds.contains(incoming.callId))
+                        )
+                    val staleActive = active != null && (
+                        (active.isGroup && !groupCallIds.contains(active.callId))
+                            || (!active.isGroup && !privateCallIds.contains(active.callId))
+                        )
+
+                    if (!staleIncoming && !staleActive) {
+                        return@collect
+                    }
+
+                    val staleCallId = when {
+                        staleActive -> active?.callId
+                        staleIncoming -> incoming?.callId
+                        else -> null
+                    }
+
+                    if (!staleCallId.isNullOrBlank()) {
+                        callHistoryRepository.markEnded(
+                            callReference = staleCallId,
+                            fallbackStatus = resolveTerminalStatus(reason = "completed", callId = staleCallId)
+                        )
+                        IncomingCallService.cancelIncomingCall(applicationContext, staleCallId)
+                    }
+
+                    if (staleActive) {
+                        closeCallManagerAsync()
+                    }
+
+                    mutableState.update { current ->
+                        current.copy(
+                            incomingCall = if (staleIncoming) null else current.incomingCall,
+                            activeCall = if (staleActive) null else current.activeCall,
+                            isCallActionInProgress = if (staleActive) false else current.isCallActionInProgress,
+                            existingGroupCallPrompt = if (staleIncoming || staleActive) null else current.existingGroupCallPrompt
+                        )
+                    }
+                }
+
                 is RealtimeEvent.IncomingCall -> {
+                    if (!rememberRealtimeCallEvent("private:incoming", event.callId)) {
+                        return@collect
+                    }
                     if (mutableState.value.activeCall != null) {
                         return@collect
                     }
@@ -1433,6 +1732,79 @@ class MainViewModel(
                             incomingCall = if (incoming?.callId == event.callId) null else incoming,
                             activeCall = if (active?.callId == event.callId) null else active
                         )
+                    }
+                }
+
+                is RealtimeEvent.GroupCallSync -> {
+                    val active = mutableState.value.activeCall
+                    if (active?.callId == event.callId) {
+                        return@collect
+                    }
+                    val normalizedStatus = event.status.ifBlank { "ringing" }
+                    if (active != null && active.callId != event.callId) {
+                        closeCallManagerAsync()
+                        mutableState.update {
+                            it.copy(
+                                activeCall = null,
+                                incomingCall = null,
+                                isCallActionInProgress = false,
+                                existingGroupCallPrompt = null
+                            )
+                        }
+                    }
+
+                    if (event.direction == "outgoing" || normalizedStatus == "active") {
+                        if (!rememberRealtimeCallEvent("group:outgoing", event.callId)) {
+                            return@collect
+                        }
+                        IncomingCallService.cancelIncomingCall(applicationContext, event.callId)
+                        mutableState.update { current ->
+                            current.copy(
+                                activeCall = ActiveCallUi(
+                                    callId = event.callId,
+                                    chatId = event.chatId,
+                                    chatName = event.chatName.ifBlank {
+                                        current.chats.firstOrNull { it.id == event.chatId }?.title ?: "GovChat"
+                                    },
+                                    type = event.type.ifBlank { "audio" },
+                                    isGroup = true,
+                                    phase = ActiveCallPhase.Active,
+                                    startedAtMillis = System.currentTimeMillis()
+                                ),
+                                incomingCall = null,
+                                isCallActionInProgress = false,
+                                existingGroupCallPrompt = null
+                            )
+                        }
+                        return@collect
+                    }
+
+                    if (!rememberRealtimeCallEvent("group:incoming", event.callId)) {
+                        return@collect
+                    }
+
+                    val command = NotificationIntents.incomingCallCommand(
+                        callId = event.callId,
+                        chatId = event.chatId,
+                        chatName = event.chatName.ifBlank {
+                            mutableState.value.chats.firstOrNull { it.id == event.chatId }?.title ?: "GovChat"
+                        },
+                        callType = event.type.ifBlank { "audio" },
+                        isGroupCall = true,
+                        initiatorId = event.initiatorId,
+                        initiatorName = event.initiatorName.ifBlank { "Контакт" },
+                        initiatorAvatarUrl = event.initiatorAvatarUrl,
+                        participantCount = event.participantCount
+                    )
+                    val showNotification = !ProcessLifecycleOwner.get().lifecycle.currentState
+                        .isAtLeast(Lifecycle.State.STARTED)
+                    IncomingCallService.showIncomingCall(
+                        context = applicationContext,
+                        command = command,
+                        showNotification = showNotification
+                    )
+                    if (mutableState.value.selectedChatId != event.chatId) {
+                        selectChat(event.chatId)
                     }
                 }
 
@@ -1982,8 +2354,17 @@ class MainViewModel(
         }
     }
 
-    private fun appendMessage(message: ChatMessage) {
+    private fun appendMessage(message: ChatMessage): Boolean {
         val chatId = message.chatId
+        val existingMessage = messagesForChat(chatId).firstOrNull { it.id == message.id }
+        if (existingMessage != null) {
+            if (isMessageEquivalent(existingMessage, message)) {
+                return false
+            }
+            if (!shouldReplaceMessage(existingMessage, message)) {
+                return false
+            }
+        }
         val merged = mergeMessages(
             base = messagesForChat(chatId),
             incoming = listOf(message)
@@ -2000,6 +2381,7 @@ class MainViewModel(
             if (current.selectedChatId != chatId) return@update current
             current.copy(messages = merged)
         }
+        return true
     }
 
     private fun applyMessageMutation(message: ChatMessage) {
@@ -2008,6 +2390,9 @@ class MainViewModel(
         val currentMessage = existing.firstOrNull { it.id == message.id }
         if (currentMessage == null) {
             updateChatWithMessage(chatId, message, moveToTop = false)
+            if (mutableState.value.selectedChatId == chatId) {
+                refreshChatMessages(chatId)
+            }
             return
         }
         if (!shouldReplaceMessage(currentMessage, message)) {
@@ -2137,6 +2522,31 @@ class MainViewModel(
         }
     }
 
+    private fun rememberRealtimeCallEvent(kind: String, callId: String, windowMs: Long = 1_500L): Boolean {
+        if (callId.isBlank()) return false
+        val now = SystemClock.elapsedRealtime()
+        val iterator = recentRealtimeCallEvents.entries.iterator()
+        while (iterator.hasNext()) {
+            val entry = iterator.next()
+            if (now - entry.value > 15_000L) {
+                iterator.remove()
+            }
+        }
+
+        val key = "$kind:$callId"
+        val lastHandledAt = recentRealtimeCallEvents[key]
+        if (lastHandledAt != null && now - lastHandledAt < windowMs) {
+            return false
+        }
+
+        recentRealtimeCallEvents[key] = now
+        while (recentRealtimeCallEvents.size > MAX_HANDLED_NOTIFICATION_EVENTS) {
+            val oldest = recentRealtimeCallEvents.entries.firstOrNull()?.key ?: break
+            recentRealtimeCallEvents.remove(oldest)
+        }
+        return true
+    }
+
     private fun messagesForChat(chatId: String): List<ChatMessage> {
         return messagesCache[chatId]
             ?: if (mutableState.value.selectedChatId == chatId) mutableState.value.messages else emptyList()
@@ -2181,6 +2591,19 @@ class MainViewModel(
         }
 
         return incoming.createdAtMillis >= current.createdAtMillis
+    }
+
+    private fun isMessageEquivalent(left: ChatMessage, right: ChatMessage): Boolean {
+        return left.id == right.id
+            && left.revision == right.revision
+            && left.text == right.text
+            && left.deleted == right.deleted
+            && left.createdAtMillis == right.createdAtMillis
+            && left.updatedAtMillis == right.updatedAtMillis
+            && left.editedAtMillis == right.editedAtMillis
+            && left.readByUserIds == right.readByUserIds
+            && left.deliveryStatus == right.deliveryStatus
+            && left.attachment == right.attachment
     }
 
     private fun buildOptimisticEditedMessage(message: ChatMessage, text: String): ChatMessage {

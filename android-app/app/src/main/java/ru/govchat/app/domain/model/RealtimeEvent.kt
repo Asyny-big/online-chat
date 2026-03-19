@@ -36,6 +36,33 @@ sealed interface RealtimeEvent {
         val isGroup: Boolean,
         val participantCount: Int = 0
     ) : RealtimeEvent
+    data class AiOutgoingCallStarted(
+        val callId: String,
+        val chatId: String,
+        val chatName: String,
+        val type: String,
+        val targetUserId: String,
+        val targetUserName: String,
+        val targetUserAvatarUrl: String?
+    ) : RealtimeEvent
+    data class CallSync(
+        val callId: String,
+        val chatId: String,
+        val chatName: String,
+        val type: String,
+        val status: String,
+        val direction: String,
+        val initiatorId: String,
+        val initiatorName: String,
+        val initiatorAvatarUrl: String?,
+        val targetUserId: String,
+        val targetUserName: String,
+        val targetUserAvatarUrl: String?
+    ) : RealtimeEvent
+    data class CallSyncComplete(
+        val privateCallIds: List<String>,
+        val groupCallIds: List<String>
+    ) : RealtimeEvent
     data class CallParticipantJoined(
         val callId: String,
         val userId: String,
@@ -65,6 +92,18 @@ sealed interface RealtimeEvent {
         val callId: String,
         val chatId: String,
         val reason: String
+    ) : RealtimeEvent
+    data class GroupCallSync(
+        val callId: String,
+        val chatId: String,
+        val chatName: String,
+        val type: String,
+        val status: String,
+        val direction: String,
+        val initiatorId: String,
+        val initiatorName: String,
+        val initiatorAvatarUrl: String?,
+        val participantCount: Int
     ) : RealtimeEvent
     data class CallSignalReceived(
         val callId: String,

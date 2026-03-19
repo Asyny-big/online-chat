@@ -40,6 +40,8 @@ function isPrivateChatWithUser(chat, targetUserId, viewerUserId = '') {
 }
 
 const DELETED_MESSAGE_TEXT = '\u0421\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u0435 \u0443\u0434\u0430\u043b\u0435\u043d\u043e';
+const DEFAULT_PRIVATE_USER_NAME = '\u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044c';
+const DEFAULT_GROUP_CHAT_NAME = '\u0413\u0440\u0443\u043f\u043f\u043e\u0432\u043e\u0439 \u0447\u0430\u0442';
 
 function getMessageIdentity(message) {
   return String(message?.messageId || message?._id || '').trim();
@@ -162,6 +164,8 @@ function ChatPageInner({
   const socketRef = useRef(null);
   const economyProbeTimersRef = useRef([]);
   const messagesRef = useRef(messages);
+  const messagesRequestIdRef = useRef(0);
+  const recentPrivateCallEventsRef = useRef(new Map());
 
   // Refs для использования актуальных значений в обработчиках сокета
   const chatsRef = useRef(chats);
@@ -183,6 +187,27 @@ function ChatPageInner({
   useEffect(() => { groupCallDataRef.current = groupCallData; }, [groupCallData]);
   useEffect(() => { messagesRef.current = messages; }, [messages]);
 
+  const shouldHandlePrivateCallEvent = useCallback((direction, rawCallId) => {
+    const callId = String(rawCallId || '').trim();
+    if (!callId) return false;
+
+    const key = `${direction}:${callId}`;
+    const now = Date.now();
+    recentPrivateCallEventsRef.current.forEach((handledAt, storedKey) => {
+      if (now - handledAt > 15000) {
+        recentPrivateCallEventsRef.current.delete(storedKey);
+      }
+    });
+
+    const lastHandledAt = recentPrivateCallEventsRef.current.get(key);
+    if (lastHandledAt && now - lastHandledAt < 1500) {
+      return false;
+    }
+
+    recentPrivateCallEventsRef.current.set(key, now);
+    return true;
+  }, []);
+
   const fetchChats = useCallback(async () => {
     if (!token) {
       setChats([]);
@@ -193,7 +218,19 @@ function ChatPageInner({
       const response = await axios.get(`${API_URL}/chats`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      setChats(Array.isArray(response.data) ? response.data : []);
+      const nextChats = Array.isArray(response.data) ? response.data : [];
+      setChats(nextChats);
+      const currentSelectedChatId = String(selectedChatRef.current?._id || '').trim();
+      if (!currentSelectedChatId) {
+        return;
+      }
+      const refreshedSelectedChat = nextChats.find((chat) => chat?._id === currentSelectedChatId) || null;
+      if (refreshedSelectedChat) {
+        setSelectedChat(refreshedSelectedChat);
+      } else if (selectedChatRef.current?._id) {
+        setSelectedChat(null);
+        setMessages([]);
+      }
     } catch (error) {
       console.error('[ChatPage] Failed to fetch chats:', error);
       setChats([]);
@@ -206,13 +243,22 @@ function ChatPageInner({
       return;
     }
 
+    const requestId = messagesRequestIdRef.current + 1;
+    messagesRequestIdRef.current = requestId;
+
     try {
       const response = await axios.get(`${API_URL}/messages/${chatId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
+      if (messagesRequestIdRef.current !== requestId || selectedChatRef.current?._id !== chatId) {
+        return;
+      }
       setMessages(Array.isArray(response.data) ? response.data : []);
     } catch (error) {
       console.error('[ChatPage] Failed to fetch messages:', error);
+      if (messagesRequestIdRef.current !== requestId || selectedChatRef.current?._id !== chatId) {
+        return;
+      }
       setMessages([]);
     }
   }, [token]);
@@ -266,9 +312,14 @@ function ChatPageInner({
       if (selectedChatRef.current?._id !== chatId) {
         return prev;
       }
+      const hasMessage = prev.some((item) => item._id === message._id);
+      if (!hasMessage) {
+        void fetchMessagesForChat(chatId);
+        return prev;
+      }
       return upsertMessage(prev, message, { appendIfMissing: false });
     });
-  }, [syncChatLastMessage]);
+  }, [fetchMessagesForChat, syncChatLastMessage]);
 
   const applyDeletedMessage = useCallback((payload = {}) => {
     const chatId = String(payload.chatId || '').trim();
@@ -595,8 +646,166 @@ function ChatPageInner({
     });
 
     // === ЗВОНКИ ===
+    socket.on('call:sync', ({ callId: syncCallId, chatId: syncChatId, chatName, targetUser, initiator, type, direction, status }) => {
+      if (!syncCallId || !syncChatId) return;
+      if (!shouldHandlePrivateCallEvent(direction === 'outgoing' ? 'outgoing' : 'incoming', syncCallId)) return;
+      const normalizedStatus = String(status || 'ringing').toLowerCase();
+      const normalizedInitiator = initiator && typeof initiator === 'object' ? initiator : {};
+      const normalizedTargetUser = targetUser && typeof targetUser === 'object' ? targetUser : {};
+      if (callIdRef.current && callIdRef.current !== syncCallId) {
+        resetCallState();
+      }
+      if (groupCallDataRef.current?.callId) {
+        resetGroupCallState();
+      }
+      if (callIdRef.current === syncCallId && callStateRef.current !== 'idle') {
+        const shouldUpgradeToActive = normalizedStatus === 'active' && callStateRef.current !== 'active';
+        if (!shouldUpgradeToActive) {
+          return;
+        }
+      }
+
+      const existingChat = chatsRef.current.find(c => c._id === syncChatId);
+      const peer = direction === 'outgoing' ? normalizedTargetUser : normalizedInitiator;
+      const chat = existingChat || {
+        _id: syncChatId,
+        type: 'private',
+        displayName: chatName || peer?.name || 'Пользователь',
+        name: chatName || peer?.name || 'Пользователь',
+        participants: []
+      };
+
+      if (!existingChat) {
+        setChats(prev => prev.some(c => c._id === syncChatId) ? prev : [chat, ...prev]);
+      }
+
+      if (!selectedChatRef.current || selectedChatRef.current._id !== syncChatId) {
+        setSelectedChat(chat);
+      }
+
+      if (direction === 'outgoing') {
+        setIncomingCallData(null);
+        setRemoteUser({
+          _id: normalizedTargetUser?._id,
+          name: targetUser?.name || chat?.displayName || chat?.name || 'Пользователь',
+          avatarUrl: normalizedTargetUser?.avatarUrl || null
+        });
+        setCallType(type || 'video');
+        setCallId(syncCallId);
+        setCallState(normalizedStatus === 'active' ? 'active' : 'outgoing');
+        return;
+      }
+
+      if (normalizedStatus === 'active') {
+        setIncomingCallData(null);
+        setCallState('active');
+        setCallType(type);
+        setCallId(syncCallId);
+        setRemoteUser({
+          _id: normalizedInitiator?._id,
+          name: initiator?.name || chatName || 'Пользователь',
+          avatarUrl: normalizedInitiator?.avatarUrl || null
+        });
+        return;
+      }
+
+      setIncomingCallData({
+        callId: syncCallId,
+        chatId: syncChatId,
+        initiator: {
+          _id: initiator?._id,
+          name: initiator?.name || chatName || 'Пользователь',
+          avatarUrl: initiator?.avatarUrl || null
+        },
+        type
+      });
+      setCallState('incoming');
+      setCallType(type);
+      setCallId(syncCallId);
+      setRemoteUser({
+        _id: initiator?._id,
+        name: initiator?.name || chatName || 'Пользователь',
+        avatarUrl: initiator?.avatarUrl || null
+      });
+    });
+
+    socket.on('call:sync:complete', ({ privateCallIds = [], groupCallIds = [] } = {}) => {
+      const activePrivateCallIds = new Set((Array.isArray(privateCallIds) ? privateCallIds : []).map((value) => String(value || '').trim()).filter(Boolean));
+      const activeGroupCallIds = new Set((Array.isArray(groupCallIds) ? groupCallIds : []).map((value) => String(value || '').trim()).filter(Boolean));
+      const currentPrivateCallId = String(callIdRef.current || '').trim();
+      const currentGroupCallId = String(groupCallDataRef.current?.callId || '').trim();
+
+      if (currentPrivateCallId && !activePrivateCallIds.has(currentPrivateCallId)) {
+        setIncomingCallData(null);
+        setCallState('idle');
+        setCallType(null);
+        setCallId(null);
+        setRemoteUser(null);
+      }
+
+      if (currentGroupCallId && !activeGroupCallIds.has(currentGroupCallId)) {
+        setGroupCallState('idle');
+        setGroupCallData(null);
+      }
+
+      setChats((prev) => prev.map((chat) => {
+        if (!chat?.activeGroupCall?.callId) {
+          return chat;
+        }
+
+        return activeGroupCallIds.has(String(chat.activeGroupCall.callId))
+          ? chat
+          : { ...chat, activeGroupCall: null };
+      }));
+    });
+
+    socket.on('call:start:ai', ({ callId: startedCallId, chatId: startedChatId, targetUser, type }) => {
+      console.log('[ChatPage] AI started outgoing call:', { startedCallId, startedChatId, targetUser, type });
+      if (!shouldHandlePrivateCallEvent('outgoing', startedCallId)) {
+        return;
+      }
+
+      if (callStateRef.current !== 'idle' || groupCallStateRef.current !== 'idle') {
+        return;
+      }
+
+      const existingChat = chatsRef.current.find(c => c._id === startedChatId);
+      const chat = existingChat || {
+        _id: startedChatId,
+        type: 'private',
+        displayName: targetUser?.name || 'Пользователь',
+        name: targetUser?.name || 'Пользователь',
+        participants: []
+      };
+
+      if (!existingChat) {
+        setChats(prev => prev.some(c => c._id === startedChatId) ? prev : [chat, ...prev]);
+      }
+
+      if (!selectedChatRef.current || selectedChatRef.current._id !== startedChatId) {
+        setSelectedChat(chat);
+      }
+
+      setIncomingCallData(null);
+      setRemoteUser({
+        _id: targetUser?._id,
+        name: targetUser?.name || chat?.displayName || chat?.name || 'Пользователь',
+        avatarUrl: targetUser?.avatarUrl || null
+      });
+      setCallType(type || 'video');
+      setCallId(startedCallId);
+      setCallState('outgoing');
+    });
+
     socket.on('call:incoming', ({ callId: incomingCallId, chatId: incomingChatId, chatName, initiator, type }) => {
       console.log('[ChatPage] Incoming call:', { incomingCallId, incomingChatId, initiator, type });
+      if (!shouldHandlePrivateCallEvent('incoming', incomingCallId)) {
+        return;
+      }
+      const normalizedInitiator = initiator && typeof initiator === 'object' ? initiator : {};
+      if ((callStateRef.current !== 'idle' || groupCallStateRef.current !== 'idle') && callIdRef.current !== incomingCallId) {
+        return;
+      }
 
       // Ищем чат для отображения
       const chat = chatsRef.current.find(c => c._id === incomingChatId);
@@ -606,9 +815,9 @@ function ChatPageInner({
         callId: incomingCallId,
         chatId: incomingChatId,
         initiator: {
-          _id: initiator._id,
+          _id: normalizedInitiator._id,
           name: initiator.name || chatName || 'Пользователь',
-          avatarUrl: initiator.avatarUrl
+          avatarUrl: normalizedInitiator.avatarUrl || null
         },
         type
       });
@@ -617,9 +826,9 @@ function ChatPageInner({
       setCallType(type);
       setCallId(incomingCallId);
       setRemoteUser({
-        _id: initiator._id,
+        _id: normalizedInitiator._id,
         name: initiator.name || chatName || 'Пользователь',
-        avatarUrl: initiator.avatarUrl
+        avatarUrl: normalizedInitiator.avatarUrl || null
       });
 
       // Если мы не в этом чате - переключаемся
@@ -632,6 +841,9 @@ function ChatPageInner({
 
     socket.on('call:participant_joined', ({ callId: cId, userId: joinedUserId, userName }) => {
       console.log('[ChatPage] Participant joined:', { cId, joinedUserId, userName, currentCallId: callIdRef.current, currentCallState: callStateRef.current, currentUserId: currentUserIdRef.current });
+      if (!cId || callIdRef.current !== cId) {
+        return;
+      }
 
       // Игнорируем если это мы сами
       if (joinedUserId === currentUserIdRef.current) {
@@ -647,19 +859,83 @@ function ChatPageInner({
 
     socket.on('call:ended', ({ callId: cId, reason }) => {
       console.log('[ChatPage] Call ended:', { cId, reason, currentCallId: callIdRef.current });
+      if (!cId || callIdRef.current !== cId) {
+        return;
+      }
       resetCallState();
       setIncomingCallData(null);
     });
 
     socket.on('call:participant_left', ({ callId: cId, callEnded }) => {
       console.log('[ChatPage] Participant left:', { cId, callEnded });
-      if (callEnded) {
+      if (callEnded && cId && callIdRef.current === cId) {
         resetCallState();
         setIncomingCallData(null);
       }
     });
 
     // === ГРУППОВЫЕ ЗВОНКИ ===
+    socket.on('group-call:sync', ({ callId, chatId, chatName, initiator, type, participantCount, direction, status }) => {
+      if (!callId || !chatId) return;
+      const normalizedStatus = String(status || 'ringing').toLowerCase();
+      if (groupCallDataRef.current?.callId && groupCallDataRef.current.callId !== callId) {
+        resetGroupCallState();
+      }
+      if (callIdRef.current) {
+        resetCallState();
+      }
+      if (groupCallDataRef.current?.callId === callId) {
+        const shouldUpgradeToActive = normalizedStatus === 'active' && groupCallStateRef.current !== 'active';
+        if (!shouldUpgradeToActive) {
+          return;
+        }
+      }
+
+      const existingChat = chatsRef.current.find(chat => chat._id === chatId);
+      const fallbackChat = existingChat || {
+        _id: chatId,
+        type: 'group',
+        displayName: chatName || 'Групповой чат',
+        name: chatName || 'Групповой чат',
+        participants: []
+      };
+
+      setChats(prev => {
+        const index = prev.findIndex(chat => chat._id === chatId);
+        if (index >= 0) {
+          return prev.map(chat => {
+            if (chat._id === chatId) {
+              return {
+                ...chat,
+                activeGroupCall: { callId, initiator, type, participantCount }
+              };
+            }
+            return chat;
+          });
+        }
+
+        return [{
+          ...fallbackChat,
+          activeGroupCall: { callId, initiator, type, participantCount }
+        }, ...prev];
+      });
+
+      if (groupCallStateRef.current !== 'idle') return;
+
+      const nextState = direction === 'outgoing' || normalizedStatus === 'active' ? 'active' : 'incoming';
+      setGroupCallState(nextState);
+      setGroupCallData({
+        callId,
+        chatId,
+        chatName: chatName || chatsRef.current.find(c => c._id === chatId)?.name || 'Групповой чат',
+        initiator,
+        type,
+        participantCount,
+        autoJoin: direction === 'outgoing' || normalizedStatus === 'active',
+        isExisting: true
+      });
+    });
+
     socket.on('group-call:incoming', ({ callId, chatId, chatName, initiator, type, participantCount }) => {
       console.log('[ChatPage] Incoming group call:', { callId, chatId, chatName, initiator });
 
@@ -771,7 +1047,7 @@ function ChatPageInner({
       economyProbeTimersRef.current = [];
       socket.disconnect();
     };
-  }, [token, showEarn, applyDeletedMessage, applyIncomingMessage, applyUpdatedMessage, fetchChats, fetchMessagesForChat]); // showEarn stable callback from provider
+  }, [token, showEarn, applyDeletedMessage, applyIncomingMessage, applyUpdatedMessage, fetchChats, fetchMessagesForChat, shouldHandlePrivateCallEvent]); // showEarn stable callback from provider
 
   useEffect(() => {
     if (!token) return;

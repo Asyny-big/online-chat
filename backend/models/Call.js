@@ -19,8 +19,12 @@ const callSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['ringing', 'active', 'ended', 'missed', 'declined'],
+    enum: ['ringing', 'active', 'ended', 'missed', 'declined', 'busy'],
     default: 'ringing'
+  },
+  activeChatLock: {
+    type: String,
+    default: null
   },
   // Текущие участники звонка
   participants: [{
@@ -55,7 +59,25 @@ callSchema.methods.isInCall = function(userId) {
 };
 
 // Индексы
+callSchema.pre('validate', function(next) {
+  if (this.chat && ['ringing', 'active'].includes(String(this.status || ''))) {
+    this.activeChatLock = `chat:${this.chat.toString()}`;
+  } else {
+    this.activeChatLock = null;
+  }
+  next();
+});
+
 callSchema.index({ chat: 1, status: 1 });
 callSchema.index({ startedAt: -1 });
+callSchema.index(
+  { activeChatLock: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      activeChatLock: { $type: 'string' }
+    }
+  }
+);
 
 module.exports = mongoose.model('Call', callSchema);

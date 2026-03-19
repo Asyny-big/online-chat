@@ -3,6 +3,11 @@ const router = express.Router();
 
 const livekit = require('livekit-server-sdk');
 const AccessToken = livekit.AccessToken;
+const authMiddleware = require('../middleware/auth');
+const Call = require('../models/Call');
+const Chat = require('../models/Chat');
+
+router.use(authMiddleware);
 
 router.get('/token', async (req, res) => {
   const { room, identity } = req.query;
@@ -17,7 +22,21 @@ router.get('/token', async (req, res) => {
     });
   }
 
+  if (String(identity) !== String(req.userId)) {
+    return res.status(403).json({ error: 'identity does not match authenticated user' });
+  }
+
   try {
+    const call = await Call.findById(room).select('_id chat status');
+    if (!call || !['ringing', 'active'].includes(String(call.status || ''))) {
+      return res.status(404).json({ error: 'call not found' });
+    }
+
+    const chat = await Chat.findById(call.chat).select('_id participants.user');
+    if (!chat || !chat.isParticipant(req.userId)) {
+      return res.status(403).json({ error: 'chat access denied' });
+    }
+
     const at = new AccessToken(
       process.env.LIVEKIT_API_KEY,
       process.env.LIVEKIT_API_SECRET,

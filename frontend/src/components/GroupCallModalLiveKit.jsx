@@ -1203,7 +1203,10 @@ function GroupCallModalLiveKit({
   useEffect(() => {
     if (!socket) return undefined;
 
-    const handleEnded = () => {
+    const handleEnded = (payload) => {
+      if (String(payload?.callId || '').trim() !== String(callId || '').trim()) {
+        return;
+      }
       handleLeave();
     };
 
@@ -1219,6 +1222,7 @@ function GroupCallModalLiveKit({
 
     const onJoined = (payload) => {
       try {
+        if (String(payload?.callId || '').trim() !== String(callId || '').trim()) return;
         const pid = String(payload?.oderId || '').trim();
         const name = String(payload?.userName || '').trim();
         if (!pid) return;
@@ -1231,6 +1235,7 @@ function GroupCallModalLiveKit({
 
     const onLeft = (payload) => {
       try {
+        if (String(payload?.callId || '').trim() !== String(callId || '').trim()) return;
         const pid = String(payload?.oderId || '').trim();
         if (!pid) return;
         // Не удаляем запись — имена могут понадобиться для UI истории/анимаций.

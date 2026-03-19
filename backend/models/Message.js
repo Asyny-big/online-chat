@@ -61,8 +61,15 @@ const messageSchema = new mongoose.Schema({
   }],
   systemEvent: {
     type: { type: String },
+    stage: {
+      type: String,
+      enum: ['progress', 'final'],
+      default: 'final'
+    },
     targetUser: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    actorUser: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
+    actorUser: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    sourceMessageId: { type: mongoose.Schema.Types.ObjectId, ref: 'Message', default: null },
+    planId: { type: String, default: null }
   },
   createdAt: {
     type: Date,

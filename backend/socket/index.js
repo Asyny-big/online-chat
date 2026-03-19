@@ -4,7 +4,7 @@ const Chat = require('../models/Chat');
 const Message = require('../models/Message');
 const Call = require('../models/Call');
 const config = require('../config.local');
-const { maybeRewardMessage, maybeRewardCallStart } = require('../economy/rewardsService');
+const { maybeRewardMessage } = require('../economy/rewardsService');
 const { NotificationService } = require('../services/notificationService');
 const {
   createBulkNotifications,
@@ -18,13 +18,39 @@ const {
   emitChatCreatedToUser,
   checkAiRateLimit,
   ensureAiTextLimit,
-  queueAiResponse
+  queueAiResponse,
+  recoverPendingAiResponses,
+  startAiQueueWatchdog,
+  rememberAiUserMessage
 } = require('../services/aiChatService');
+const { startPrivateCallFlow, syncActiveCallsForUser } = require('../services/callOrchestrator');
 
 const userSockets = new Map();
 const activeCalls = new Map();
 const activeGroupCalls = new Map(); // chatId -> { callId, type, participants:Set<userId> }
 const activeGroupCallStreams = new Map(); // callId -> Map<userId, streamId>
+
+function isUserActiveInCall(call, targetUserId) {
+  const normalizedTargetUserId = String(targetUserId || '');
+  return Boolean((call?.participants || []).some((participant) => (
+    participant?.user?.toString?.() === normalizedTargetUserId && !participant?.leftAt
+  )));
+}
+
+function ensureUserIsActiveParticipant(call, targetUserId) {
+  const normalizedTargetUserId = String(targetUserId || '');
+  const existingParticipant = (call?.participants || []).find((participant) => (
+    participant?.user?.toString?.() === normalizedTargetUserId
+  ));
+
+  if (existingParticipant) {
+    existingParticipant.leftAt = null;
+    existingParticipant.joinedAt = existingParticipant.joinedAt || new Date();
+    return;
+  }
+
+  call.participants.push({ user: normalizedTargetUserId });
+}
 
 async function forceLeaveUserFromCall({ io, userId, call, notificationService, senderName = '' }) {
   // Помечаем пользователя вышедшим из звонка (на случай закрытия вкладки/потери сети)
@@ -57,6 +83,7 @@ async function forceLeaveUserFromCall({ io, userId, call, notificationService, s
     io.to(`chat:${chat._id}`).emit('group-call:participant-left', {
       callId: call._id.toString(),
       chatId: chat._id.toString(),
+      userId,
       oderId: userId
     });
 
@@ -155,6 +182,7 @@ module.exports = function (io) {
 io.on('connection', async (socket) => {
     const userId = socket.userId;
     const appFacade = createAppFacade({ io, userSockets, activeCalls, activeGroupCalls });
+    startAiQueueWatchdog({ app: appFacade });
     console.log(`User connected: ${userId}, socket: ${socket.id}`);
     socket.join(`user:${userId}`);
 
@@ -190,6 +218,23 @@ io.on('connection', async (socket) => {
     }
 
     broadcastUserStatus(io, userId, 'online');
+    Promise.resolve(
+      syncActiveCallsForUser({
+        app: appFacade,
+        userId,
+        socketId: socket.id
+      })
+    ).catch((error) => {
+      console.warn('[Socket] active call sync failed:', error?.message || error);
+    });
+    Promise.resolve(
+      recoverPendingAiResponses({
+        app: appFacade,
+        limit: 20
+      })
+    ).catch((error) => {
+      console.warn('[Socket] AI queue recovery failed:', error?.message || error);
+    });
 
     Promise.resolve().then(async () => {
       const pending = await getUndeliveredNotifications({
@@ -232,6 +277,30 @@ io.on('connection', async (socket) => {
         return null;
       }
       return chat;
+    };
+
+    const findCurrentCallParticipant = (callDoc, participantUserId) => (
+      callDoc?.participants?.find((participant) => (
+        participant?.user?.toString?.() === String(participantUserId)
+      )) || null
+    );
+
+    const findJoinedCallParticipant = (callDoc, participantUserId) => (
+      callDoc?.participants?.find((participant) => (
+        participant?.user?.toString?.() === String(participantUserId) && !participant?.leftAt
+      )) || null
+    );
+
+    const ensureJoinedCallParticipant = (callDoc, participantUserId) => {
+      const existingParticipant = findCurrentCallParticipant(callDoc, participantUserId);
+      if (existingParticipant) {
+        existingParticipant.leftAt = null;
+        existingParticipant.joinedAt = new Date();
+        return existingParticipant;
+      }
+
+      callDoc.participants.push({ user: participantUserId });
+      return callDoc.participants[callDoc.participants.length - 1] || null;
     };
 
     // === СООБЩЕНИЯ ===
@@ -318,9 +387,19 @@ io.on('connection', async (socket) => {
         callback?.({ success: true, message: message.toObject() });
 
         if (chat.isAiChat) {
+          Promise.resolve(
+            rememberAiUserMessage({
+              userId,
+              text: normalizedText
+            })
+          ).catch((error) => {
+            console.warn('[AI] memory save failed:', error?.message || error);
+          });
+
           queueAiResponse({
             app: appFacade,
-            chatId
+            chatId,
+            messageId: message._id
           }).catch((error) => {
             console.warn('[AI] queue failed:', error?.message || error);
           });
@@ -445,18 +524,51 @@ io.on('connection', async (socket) => {
     socket.on('messages:read', async ({ chatId, messageIds }) => {
       const chat = await verifyAccess(chatId);
       if (!chat) return;
+      const normalizedMessageIds = Array.isArray(messageIds)
+        ? messageIds
+          .map((messageId) => String(messageId || '').trim())
+          .filter(Boolean)
+        : [];
+      if (normalizedMessageIds.length === 0) return;
 
       await Message.updateMany(
-        { _id: { $in: messageIds }, 'readBy.user': { $ne: userId } },
+        {
+          chat: chat._id,
+          _id: { $in: normalizedMessageIds },
+          'readBy.user': { $ne: userId }
+        },
         { $push: { readBy: { user: userId, readAt: new Date() } } }
       );
 
-      io.to(`chat:${chatId}`).emit('messages:read', { chatId, userId, messageIds });
+      io.to(`chat:${chatId}`).emit('messages:read', { chatId, userId, messageIds: normalizedMessageIds });
     });
 
     // === ЗВОНКИ ===
 
     socket.on('call:start', async ({ chatId, type = 'video' }, callback) => {
+      try {
+        const result = await startPrivateCallFlow({
+          app: appFacade,
+          fromUserId: userId,
+          chatId,
+          type,
+          notifyInitiator: false,
+          source: 'user',
+          initiatorUser: socket.user
+        });
+
+        callback?.({ success: true, callId: result.call._id.toString() });
+        return;
+      } catch (error) {
+        console.error('call:start error:', error);
+        callback?.({
+          error: error?.message || 'Ошибка начала звонка',
+          callId: error?.callId || undefined,
+          type: error?.callType || undefined
+        });
+        return;
+      }
+
       try {
         console.log(`[Socket] call:start from ${userId}, chatId: ${chatId}, type: ${type}`);
 
@@ -577,6 +689,39 @@ io.on('connection', async (socket) => {
     });
 
     // === ГРУППОВЫЕ ЗВОНКИ ===
+    socket.on('__disabled:call:start:ai', async ({ fromUserId, toUserId, type = 'video' }, callback) => {
+      callback?.({ error: 'Client-side AI call start is disabled' });
+      return;
+      try {
+        if (fromUserId && String(fromUserId) !== String(userId)) {
+          return callback?.({ error: 'Нельзя запускать AI-звонок от имени другого пользователя' });
+        }
+
+        const result = await startPrivateCallFlow({
+          app: appFacade,
+          fromUserId: userId,
+          toUserId,
+          type,
+          notifyInitiator: true,
+          source: 'ai',
+          initiatorUser: socket.user
+        });
+
+        callback?.({
+          success: true,
+          callId: result.call._id.toString(),
+          chatId: result.chat._id.toString()
+        });
+      } catch (error) {
+        console.error('call:start:ai error:', error);
+        callback?.({
+          error: error?.message || 'Ошибка AI-старта звонка',
+          callId: error?.callId || undefined,
+          type: error?.callType || undefined
+        });
+      }
+    });
+
     socket.on('group-call:start', async ({ chatId, type = 'video' }, callback) => {
       try {
         const chat = await Chat.findById(chatId).populate('participants.user', 'name');
@@ -590,13 +735,24 @@ io.on('connection', async (socket) => {
           return callback?.({ error: 'already_active', callId: existing._id.toString(), type: existing.type });
         }
 
-        const call = await Call.create({
-          chat: chatId,
-          initiator: userId,
-          type,
-          status: 'active',
-          participants: [{ user: userId }]
-        });
+        let call;
+        try {
+          call = await Call.create({
+            chat: chatId,
+            initiator: userId,
+            type,
+            status: 'active',
+            participants: [{ user: userId }]
+          });
+        } catch (error) {
+          if (error?.code === 11000) {
+            const lockedCall = await Call.findOne({ chat: chatId, status: { $in: ['ringing', 'active'] } });
+            if (lockedCall) {
+              return callback?.({ error: 'already_active', callId: lockedCall._id.toString(), type: lockedCall.type });
+            }
+          }
+          throw error;
+        }
 
         activeGroupCalls.set(chatId.toString(), {
           callId: call._id.toString(),
@@ -675,12 +831,48 @@ io.on('connection', async (socket) => {
       try {
         const call = await Call.findById(callId);
         if (!call) return callback?.({ error: 'Звонок не найден' });
+        if (!['ringing', 'active'].includes(String(call.status || ''))) {
+          return callback?.({ error: 'Звонок уже завершён' });
+        }
+        if (chatId && String(call.chat) !== String(chatId)) {
+          return callback?.({ error: 'Некорректный chatId для звонка' });
+        }
+        if (call && !['ringing', 'active'].includes(String(call.status || ''))) {
+          return callback?.({ error: 'Р—РІРѕРЅРѕРє СѓР¶Рµ Р·Р°РІРµСЂС€С‘РЅ' });
+        }
+        if (!call) return callback?.({ error: 'Р—РІРѕРЅРѕРє РЅРµ РЅР°Р№РґРµРЅ' });
+        if (!['ringing', 'active'].includes(String(call.status || ''))) {
+          return callback?.({ error: 'Р—РІРѕРЅРѕРє СѓР¶Рµ Р·Р°РІРµСЂС€С‘РЅ' });
+        }
+        if (chatId && String(call.chat) !== String(chatId)) {
+          return callback?.({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ chatId РґР»СЏ Р·РІРѕРЅРєР°' });
+        }
+        if (!call) return callback?.({ error: 'Звонок не найден' });
         const chat = await Chat.findById(call.chat);
         if (!chat || !chat.isParticipant(userId)) return callback?.({ error: 'Нет доступа' });
 
-        if (!call.isInCall(userId)) {
-          call.participants.push({ user: userId });
+        if (!['ringing', 'active'].includes(String(call.status || ''))) {
+          return callback?.({ error: 'Р—РІРѕРЅРѕРє СѓР¶Рµ Р·Р°РІРµСЂС€С‘РЅ' });
         }
+        if (String(call.initiator) === String(userId)) {
+          return callback?.({ error: 'РРЅРёС†РёР°С‚РѕСЂ РЅРµ РјРѕР¶РµС‚ РїСЂРёРЅСЏС‚СЊ СЃРІРѕР№ Р·РІРѕРЅРѕРє' });
+        }
+
+        if (!call.canJoin(userId)) {
+          return callback?.({ error: 'Р—РІРѕРЅРѕРє СѓР¶Рµ Р·Р°РІРµСЂС€РµРЅ РёР»Рё РЅРµРґРѕСЃС‚СѓРїРµРЅ' });
+        }
+
+        if (!['ringing', 'active'].includes(String(call.status || ''))) {
+          return callback?.({ error: 'Call already ended' });
+        }
+        if (String(call.initiator) === String(userId)) {
+          return callback?.({ error: 'Initiator cannot accept own call' });
+        }
+        if (!call.canJoin(userId)) {
+          return callback?.({ error: 'Call is not available for join' });
+        }
+
+        ensureJoinedCallParticipant(call, userId);
         if (call.status === 'ringing') call.status = 'active';
         await call.save();
 
@@ -696,9 +888,9 @@ io.on('connection', async (socket) => {
           .map(p => {
             const pid = p.user?._id?.toString?.() || p.user?.toString?.();
             const userName = p.user?.name;
-            return { oderId: pid, userName };
+            return { userId: pid, oderId: pid, userName };
           })
-          .filter(p => !!p.oderId);
+          .filter(p => !!p.userId);
 
         callback?.({ success: true, participants: existing });
 
@@ -712,6 +904,7 @@ io.on('connection', async (socket) => {
               io.to(sid).emit('group-call:participant-joined', {
                 callId: call._id.toString(),
                 chatId: chat._id.toString(),
+                userId,
                 oderId: userId,
                 userName: socket.user.name
               });
@@ -729,11 +922,27 @@ io.on('connection', async (socket) => {
       }
     });
 
-    socket.on('group-call:signal', async ({ callId, oderId, signal }) => {
+    socket.on('group-call:signal', async ({ callId, targetUserId, oderId, signal }) => {
       try {
         const call = await Call.findById(callId);
         if (!call) return;
-        const targetSockets = userSockets.get(oderId);
+        if (!['ringing', 'active'].includes(String(call.status || ''))) return;
+        const normalizedTargetUserId = String(targetUserId || oderId || '').trim();
+        if (!normalizedTargetUserId || normalizedTargetUserId === String(userId)) return;
+
+        const chat = await Chat.findById(call.chat);
+        if (!chat || !chat.isParticipant(userId)) return callback?.({ error: 'Нет доступа' });
+        if (String(call.initiator) === String(userId)) {
+          return callback?.({ error: 'Инициатор не может принять свой звонок' });
+        }
+        if (!call.canJoin(userId)) {
+          return callback?.({ error: 'Звонок уже завершён или недоступен' });
+        }
+        if (!chat || !chat.isParticipant(userId) || !chat.isParticipant(normalizedTargetUserId)) return;
+        if (!findJoinedCallParticipant(call, userId) || !findJoinedCallParticipant(call, normalizedTargetUserId)) return;
+        if (!call.canJoin(userId) || !call.isInCall(userId)) return;
+        if (!call.isInCall(normalizedTargetUserId)) return;
+        const targetSockets = userSockets.get(normalizedTargetUserId);
         if (!targetSockets) return;
         targetSockets.forEach(sid => {
           io.to(sid).emit('group-call:signal', {
@@ -791,7 +1000,10 @@ io.on('connection', async (socket) => {
         if (!chat) return callback?.({ error: 'Чат не найден' });
 
         const participant = call.participants.find(p => p.user.toString() === userId && !p.leftAt);
-        if (participant) participant.leftAt = new Date();
+        if (!chat?.isParticipant?.(userId)) return callback?.({ error: 'Access denied' });
+        if (!['ringing', 'active'].includes(String(call.status || ''))) return callback?.({ error: 'Call already ended' });
+        if (!participant) return callback?.({ error: 'User is not an active call participant' });
+        participant.leftAt = new Date();
 
         const stillIn = call.participants.filter(p => !p.leftAt);
         if (stillIn.length <= 0) {
@@ -806,6 +1018,7 @@ io.on('connection', async (socket) => {
         io.to(`chat:${chat._id}`).emit('group-call:participant-left', {
           callId: call._id.toString(),
           chatId: chat._id.toString(),
+          userId,
           oderId: userId
         });
 
@@ -872,9 +1085,20 @@ io.on('connection', async (socket) => {
           return callback?.({ error: 'Нет доступа к звонку' });
         }
 
-        if (!call.isInCall(userId)) {
-          call.participants.push({ user: userId });
+        if (!['ringing', 'active'].includes(String(call.status || ''))) {
+          console.log('[Socket] call:accept - call already ended');
+          return callback?.({ error: 'Call already ended' });
         }
+        if (String(call.initiator) === String(userId)) {
+          console.log('[Socket] call:accept - initiator tried to accept own call');
+          return callback?.({ error: 'Initiator cannot accept own call' });
+        }
+        if (!call.canJoin(userId)) {
+          console.log('[Socket] call:accept - call unavailable for join');
+          return callback?.({ error: 'Call is not available for join' });
+        }
+
+        ensureJoinedCallParticipant(call, userId);
 
         if (call.status === 'ringing') {
           call.status = 'active';
@@ -918,6 +1142,18 @@ io.on('connection', async (socket) => {
         console.log('[Socket] call:signal - call not found:', callId);
         return;
       }
+      if (!call.canJoin(userId) || !call.isInCall(userId)) {
+        console.log('[Socket] call:signal - sender is not in active call');
+        return;
+      }
+      if (!['ringing', 'active'].includes(String(call.status || ''))) {
+        console.log('[Socket] call:signal - call is not active:', call.status);
+        return;
+      }
+      if (!findJoinedCallParticipant(call, userId)) {
+        console.log('[Socket] call:signal - sender is not in call:', userId);
+        return;
+      }
 
       // Проверяем что отправитель участник звонка
       const chat = await Chat.findById(call.chat);
@@ -925,10 +1161,24 @@ io.on('connection', async (socket) => {
         console.log('[Socket] call:signal - user not in chat');
         return;
       }
+      if (!chat.isParticipant(targetUserId) || !findJoinedCallParticipant(call, targetUserId)) {
+        console.log('[Socket] call:signal - invalid target:', targetUserId);
+        return;
+      }
 
-      const targetSockets = userSockets.get(targetUserId);
+      const normalizedTargetUserId = String(targetUserId || '').trim();
+      if (!normalizedTargetUserId || normalizedTargetUserId === String(userId)) {
+        console.log('[Socket] call:signal - invalid target');
+        return;
+      }
+      if (!chat.isParticipant(normalizedTargetUserId) || !call.isInCall(normalizedTargetUserId)) {
+        console.log('[Socket] call:signal - target is not in active call');
+        return;
+      }
+
+      const targetSockets = userSockets.get(normalizedTargetUserId);
       if (targetSockets && targetSockets.size > 0) {
-        console.log(`[Socket] Sending signal to ${targetUserId}, sockets: ${targetSockets.size}`);
+        console.log(`[Socket] Sending signal to ${normalizedTargetUserId}, sockets: ${targetSockets.size}`);
         targetSockets.forEach(socketId => {
           io.to(socketId).emit('call:signal', {
             callId,
@@ -937,7 +1187,7 @@ io.on('connection', async (socket) => {
           });
         });
       } else {
-        console.log(`[Socket] Target user ${targetUserId} not connected`);
+        console.log(`[Socket] Target user ${normalizedTargetUserId} not connected`);
       }
     });
 
@@ -946,15 +1196,26 @@ io.on('connection', async (socket) => {
         const call = await Call.findById(callId);
         if (!call) return callback?.({ error: 'Звонок не найден' });
         const chat = await Chat.findById(call.chat).select('_id name type participants');
+        if (!chat?.isParticipant?.(userId)) return callback?.({ error: 'РќРµС‚ РґРѕСЃС‚СѓРїР° Рє Р·РІРѕРЅРєСѓ' });
+        if (!['ringing', 'active'].includes(String(call.status || ''))) {
+          return callback?.({ error: 'Р—РІРѕРЅРѕРє СѓР¶Рµ Р·Р°РІРµСЂС€С‘РЅ' });
+        }
+        if (!chat || !chat.isParticipant(userId)) {
+          return callback?.({ error: 'РќРµС‚ РґРѕСЃС‚СѓРїР°' });
+        }
         if (!chat) return callback?.({ error: 'Чат не найден' });
 
         const participant = call.participants.find(
           p => p.user.toString() === userId && !p.leftAt
         );
+        if (!participant) {
+          return callback?.({ error: 'РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅРµ СѓС‡Р°СЃС‚РІСѓРµС‚ РІ Р·РІРѕРЅРєРµ' });
+        }
         if (participant) {
           participant.leftAt = new Date();
         }
 
+        if (!participant) return callback?.({ error: 'РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅРµ СѓС‡Р°СЃС‚РІСѓРµС‚ РІ Р·РІРѕРЅРєРµ' });
         const activeParticipants = call.participants.filter(p => !p.leftAt);
 
         if (activeParticipants.length <= 1) {

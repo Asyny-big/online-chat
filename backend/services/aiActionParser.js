@@ -21,6 +21,30 @@ function extractJsonCandidate(text) {
   return null;
 }
 
+function normalizeParams(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+
+  return value;
+}
+
+function normalizeActions(actions) {
+  if (!Array.isArray(actions)) return [];
+
+  return actions
+    .map((step) => {
+      const action = String(step?.action || '').trim();
+      if (!action) return null;
+
+      return {
+        action,
+        params: normalizeParams(step?.params)
+      };
+    })
+    .filter(Boolean);
+}
+
 function parseAiAction(rawText) {
   const text = String(rawText || '').trim();
   if (!text) {
@@ -40,11 +64,16 @@ function parseAiAction(rawText) {
 
   try {
     const parsed = JSON.parse(candidate);
-    const action = String(parsed?.action || '').trim();
-    const params = parsed?.params && typeof parsed.params === 'object' && !Array.isArray(parsed.params)
-      ? parsed.params
-      : {};
+    const actions = normalizeActions(parsed?.actions);
+    if (actions.length > 0) {
+      return {
+        type: 'actions',
+        actions,
+        rawText: text
+      };
+    }
 
+    const action = String(parsed?.action || '').trim();
     if (!action) {
       return {
         type: 'text',
@@ -55,7 +84,7 @@ function parseAiAction(rawText) {
     return {
       type: 'action',
       action,
-      params,
+      params: normalizeParams(parsed?.params),
       rawText: text
     };
   } catch (_) {

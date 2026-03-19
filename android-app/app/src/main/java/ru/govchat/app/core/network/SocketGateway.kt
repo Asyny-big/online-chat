@@ -163,6 +163,72 @@ class SocketGateway(
             )
         }
 
+        socket.on("call:start:ai") { args ->
+            val payload = args.firstOrNull() as? JSONObject ?: return@on
+            val targetUser = payload.optJSONObject("targetUser")
+            emit(
+                RealtimeEvent.AiOutgoingCallStarted(
+                    callId = payload.optString("callId"),
+                    chatId = payload.optString("chatId"),
+                    chatName = payload.optString("chatName"),
+                    type = payload.optString("type").trim().lowercase(),
+                    targetUserId = targetUser?.optString("_id").orEmpty(),
+                    targetUserName = targetUser?.optString("name").orEmpty(),
+                    targetUserAvatarUrl = targetUser?.optString("avatarUrl")?.takeIf { it.isNotBlank() }
+                )
+            )
+        }
+
+        socket.on("call:sync") { args ->
+            val payload = args.firstOrNull() as? JSONObject ?: return@on
+            val initiator = payload.optJSONObject("initiator")
+            val targetUser = payload.optJSONObject("targetUser")
+            emit(
+                RealtimeEvent.CallSync(
+                    callId = payload.optString("callId"),
+                    chatId = payload.optString("chatId"),
+                    chatName = payload.optString("chatName"),
+                    type = payload.optString("type").trim().lowercase(),
+                    status = payload.optString("status").trim().lowercase(),
+                    direction = payload.optString("direction").trim().lowercase(),
+                    initiatorId = initiator?.optString("_id").orEmpty(),
+                    initiatorName = initiator?.optString("name").orEmpty(),
+                    initiatorAvatarUrl = initiator?.optString("avatarUrl")?.takeIf { it.isNotBlank() },
+                    targetUserId = targetUser?.optString("_id").orEmpty(),
+                    targetUserName = targetUser?.optString("name").orEmpty(),
+                    targetUserAvatarUrl = targetUser?.optString("avatarUrl")?.takeIf { it.isNotBlank() }
+                )
+            )
+        }
+
+        socket.on("call:sync:complete") { args ->
+            val payload = args.firstOrNull() as? JSONObject ?: return@on
+            val privateCallIds = buildList {
+                val array = payload.optJSONArray("privateCallIds")
+                if (array != null) {
+                    for (index in 0 until array.length()) {
+                        val value = array.optString(index)
+                        if (value.isNotBlank()) add(value)
+                    }
+                }
+            }
+            val groupCallIds = buildList {
+                val array = payload.optJSONArray("groupCallIds")
+                if (array != null) {
+                    for (index in 0 until array.length()) {
+                        val value = array.optString(index)
+                        if (value.isNotBlank()) add(value)
+                    }
+                }
+            }
+            emit(
+                RealtimeEvent.CallSyncComplete(
+                    privateCallIds = privateCallIds,
+                    groupCallIds = groupCallIds
+                )
+            )
+        }
+
         socket.on("call:incoming") { args ->
             val payload = args.firstOrNull() as? JSONObject ?: return@on
             val initiator = payload.optJSONObject("initiator")
@@ -281,6 +347,28 @@ class SocketGateway(
                     callId = callId,
                     chatId = chatId,
                     reason = payload.optString("reason")
+                )
+            )
+        }
+
+        socket.on("group-call:sync") { args ->
+            val payload = args.firstOrNull() as? JSONObject ?: return@on
+            val callId = payload.optString("callId")
+            val chatId = payload.optString("chatId")
+            if (callId.isBlank() || chatId.isBlank()) return@on
+            val initiator = payload.optJSONObject("initiator")
+            emit(
+                RealtimeEvent.GroupCallSync(
+                    callId = callId,
+                    chatId = chatId,
+                    chatName = payload.optString("chatName"),
+                    type = payload.optString("type").trim().lowercase(),
+                    status = payload.optString("status").trim().lowercase(),
+                    direction = payload.optString("direction").trim().lowercase(),
+                    initiatorId = initiator?.optString("_id").orEmpty(),
+                    initiatorName = initiator?.optString("name").orEmpty(),
+                    initiatorAvatarUrl = initiator?.optString("avatarUrl")?.takeIf { it.isNotBlank() },
+                    participantCount = payload.optInt("participantCount")
                 )
             )
         }

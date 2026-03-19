@@ -950,13 +950,19 @@ function CallModal({
       }
     };
     
-    const handleCallEnded = ({ reason }) => {
+    const handleCallEnded = ({ callId: endedCallId, reason }) => {
+      if (String(endedCallId || '').trim() !== String(callId || '').trim()) {
+        return;
+      }
       console.log('[CallModal] Call ended, reason:', reason);
       cleanup();
       onClose?.();
     };
     
-    const handleParticipantJoined = async ({ userId: joinedUserId, userName }) => {
+    const handleParticipantJoined = async ({ callId: joinedCallId, userId: joinedUserId, userName }) => {
+      if (String(joinedCallId || '').trim() !== String(callId || '').trim()) {
+        return;
+      }
       console.log('[CallModal] Participant joined:', userName, 'joinedUserId:', joinedUserId, 'isInitiator:', isInitiatorRef.current, 'currentUserId:', currentUserId);
       
       // Игнорируем если это мы сами присоединились
@@ -1001,7 +1007,10 @@ function CallModal({
       }
     };
     
-    const handleParticipantLeft = ({ callEnded }) => {
+    const handleParticipantLeft = ({ callId: leftCallId, callEnded }) => {
+      if (String(leftCallId || '').trim() !== String(callId || '').trim()) {
+        return;
+      }
       console.log('[CallModal] Participant left, ended:', callEnded);
       if (callEnded) {
         cleanup();

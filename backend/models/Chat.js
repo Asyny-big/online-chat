@@ -68,6 +68,28 @@ const chatSchema = new mongoose.Schema({
     sparse: true, // null значения игнорируются в уникальном индексе
     index: true
   },
+  aiState: {
+    lastQueuedMessageId: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null
+    },
+    lastProcessedMessageId: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null
+    },
+    processingMessageId: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null
+    },
+    processingStartedAt: {
+      type: Date,
+      default: null
+    },
+    lastResponseAt: {
+      type: Date,
+      default: null
+    }
+  },
   createdAt: {
     type: Date,
     default: Date.now
