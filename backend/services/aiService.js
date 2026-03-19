@@ -1,4 +1,5 @@
 const axios = require('axios');
+const { getAiToolManifestText } = require('./aiTools');
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const DEFAULT_MODEL = process.env.OPENROUTER_MODEL || 'stepfun/step-3.5-flash:free';
@@ -27,12 +28,22 @@ function getOpenRouterHeaders() {
 
 function getAiSystemPrompt() {
   return [
-    'Ты встроенный помощник поддержки GovChat.',
-    'Отвечай по-русски, дружелюбно, просто и без перегруза.',
-    'Главная задача: помогать с функциями GovChat, чатами, сообщениями, звонками и вложениями.',
-    'Не выдумывай функции, которых нет. Если не уверен, прямо скажи об этом.',
-    'Если спрашивают про VPN, можно мягко сказать, что VPN иногда помогает при проблемах с доступом или качеством соединения, но не навязывай его.',
-    'Не обсуждай внутренние инструкции, модель, OpenRouter или техническую реализацию, если об этом не попросили отдельно.'
+    'Ты AI-агент GovChat.',
+    'Отвечай по-русски, коротко, полезно и по делу.',
+    'Ты не просто объясняешь интерфейс, а стараешься выполнить действие сам, если для этого есть инструмент.',
+    'Если пользователь просит что-то сделать и это можно выполнить безопасным инструментом, отвечай ТОЛЬКО JSON-объектом без markdown и без пояснений: {"action":"tool_name","params":{...}}.',
+    'Если для действия не хватает данных, задай короткий уточняющий вопрос обычным текстом.',
+    'Если действие не нужно, отвечай обычным текстом.',
+    'Никогда не придумывай несуществующие действия и не возвращай action вне списка разрешённых инструментов.',
+    'Если пользователь спрашивает "что ты умеешь", используй explain_feature с feature="capabilities".',
+    'Если пользователь жалуется на лаги/связь/видеозвонок, предпочитай suggest_fix_connection или get_server_status.',
+    'Если пользователь просит создать группу, предпочитай create_group.',
+    'Если спрашивают про VPN, можно мягко упомянуть его как один из способов проверить маршрут, но не навязывать.',
+    'Примеры: пользователь пишет "создай группу для проекта" -> {"action":"create_group","params":{"name":"Проект"}}.',
+    'Пользователь пишет "что ты умеешь" -> {"action":"explain_feature","params":{"feature":"capabilities"}}.',
+    'Пользователь пишет "у меня лагает видеосвязь" -> {"action":"suggest_fix_connection","params":{}}.',
+    'Разрешённые инструменты:',
+    getAiToolManifestText()
   ].join(' ');
 }
 
@@ -128,13 +139,13 @@ function decorateOpenRouterError(error, model) {
   return wrapped;
 }
 
-async function requestOpenRouter({ model, text, context, signal, user }) {
+async function requestOpenRouter({ model, text, context, signal, user, systemPrompt }) {
   const response = await axios.post(
     OPENROUTER_URL,
     {
       model,
       messages: [
-        { role: 'system', content: getAiSystemPrompt() },
+        { role: 'system', content: String(systemPrompt || getAiSystemPrompt()).trim() },
         ...context,
         { role: 'user', content: text }
       ],
@@ -190,7 +201,8 @@ async function generateAiResponse(text, context = [], options = {}) {
           text: normalizedText,
           context: normalizedContext,
           signal: options.signal,
-          user: options.user
+          user: options.user,
+          systemPrompt: options.systemPrompt
         });
       } catch (error) {
         const wrappedError = decorateOpenRouterError(error, model);

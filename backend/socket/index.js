@@ -154,7 +154,7 @@ module.exports = function (io) {
 
 io.on('connection', async (socket) => {
     const userId = socket.userId;
-    const appFacade = createAppFacade({ io, userSockets });
+    const appFacade = createAppFacade({ io, userSockets, activeCalls, activeGroupCalls });
     console.log(`User connected: ${userId}, socket: ${socket.id}`);
     socket.join(`user:${userId}`);
 

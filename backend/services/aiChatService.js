@@ -5,6 +5,9 @@ const Message = require('../models/Message');
 const { buildLastMessagePayload } = require('./messageStateService');
 const { formatChatForUser } = require('../social/services/chatService');
 const { generateAiResponse } = require('./aiService');
+const { parseAiAction } = require('./aiActionParser');
+const { executeAiAction } = require('./aiActionExecutor');
+const { getAiToolProgressText } = require('./aiTools');
 
 const AI_BOT_SYSTEM_KEY = 'ai-bot';
 const AI_BOT_NAME = 'Поддержка GovChat';
@@ -38,11 +41,11 @@ function normalizePhone(phone) {
   return String(phone || '').replace(/[\s\-()]/g, '');
 }
 
-function createAppFacade({ io, userSockets }) {
+function createAppFacade({ io, userSockets, activeCalls, activeGroupCalls }) {
   return {
     get(key) {
       if (key === 'io') return io;
-      if (key === 'socketData') return { userSockets };
+      if (key === 'socketData') return { userSockets, activeCalls, activeGroupCalls };
       return undefined;
     }
   };
@@ -371,6 +374,17 @@ async function createAiMessage({ chatId, aiBot, text }) {
   return message;
 }
 
+async function createAndEmitAiMessage({ io, chatId, aiBot, text }) {
+  const message = await createAiMessage({
+    chatId,
+    aiBot,
+    text
+  });
+
+  emitAiMessage(io, chatId, message);
+  return message;
+}
+
 function emitAiMessage(io, chatId, message) {
   if (!io || !message) return;
 
@@ -410,19 +424,27 @@ async function maybeSendFallbackMessage({ io, chatId, aiBot, error }) {
     throw error;
   }
 
-  const fallbackMessage = await createAiMessage({
+  await createAndEmitAiMessage({
+    io,
     chatId,
     aiBot,
     text: AI_UNAVAILABLE_TEXT
   });
+}
 
-  emitAiMessage(io, chatId, fallbackMessage);
+function resolveAiActorUserId(chat, aiBotId) {
+  const participant = (chat?.participants || []).find((item) => {
+    const participantId = item?.user?._id?.toString?.() || item?.user?.toString?.() || '';
+    return participantId && participantId !== String(aiBotId);
+  });
+
+  return participant?.user?._id?.toString?.() || participant?.user?.toString?.() || null;
 }
 
 async function handleAiResponseNow({ app, chatId, signal }) {
   const { io } = getSocketHelpers(app);
   const [chat, aiBot] = await Promise.all([
-    Chat.findById(chatId).select('_id isAiChat'),
+    Chat.findById(chatId).select('_id isAiChat participants'),
     ensureAiBotUser()
   ]);
 
@@ -453,18 +475,65 @@ async function handleAiResponseNow({ app, chatId, signal }) {
       throw createAbortError('AI response timed out', 'AI_ABORTED');
     }
 
+    const parsed = parseAiAction(responseText);
     const remainingDelay = responseDelayMs - (Date.now() - startedAt);
     if (remainingDelay > 0) {
       await sleep(remainingDelay, signal);
     }
 
-    const message = await createAiMessage({
+    if (parsed.type === 'action') {
+      const actorUserId = resolveAiActorUserId(chat, aiBot._id);
+      if (!actorUserId) {
+        throw new Error('AI actor user was not resolved');
+      }
+
+      await createAndEmitAiMessage({
+        io,
+        chatId,
+        aiBot,
+        text: getAiToolProgressText(parsed.action)
+      });
+
+      try {
+        const result = await executeAiAction({
+          app,
+          actorUserId,
+          chatId,
+          action: parsed.action,
+          params: parsed.params
+        });
+
+        await createAndEmitAiMessage({
+          io,
+          chatId,
+          aiBot,
+          text: normalizeAiReply(result?.responseText || 'Готово ✅')
+        });
+      } catch (actionError) {
+        console.warn('[AI] action execution failed:', {
+          chatId: String(chatId),
+          action: parsed.action,
+          code: actionError?.code || null,
+          message: actionError?.message || actionError
+        });
+
+        await createAndEmitAiMessage({
+          io,
+          chatId,
+          aiBot,
+          text: normalizeAiReply(`Не получилось 😅 ${actionError?.message || 'Попробуйте ещё раз чуть позже.'}`)
+        });
+      }
+
+      return;
+    }
+
+    await createAndEmitAiMessage({
+      io,
       chatId,
       aiBot,
-      text: normalizeAiReply(responseText)
+      text: normalizeAiReply(parsed.text || responseText)
     });
-
-    emitAiMessage(io, chatId, message);
   } catch (error) {
     console.warn('[AI] response failed:', {
       chatId: String(chatId),
