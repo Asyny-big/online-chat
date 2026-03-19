@@ -30,26 +30,52 @@ const activeCalls = new Map();
 const activeGroupCalls = new Map(); // chatId -> { callId, type, participants:Set<userId> }
 const activeGroupCallStreams = new Map(); // callId -> Map<userId, streamId>
 
-function isUserActiveInCall(call, targetUserId) {
-  const normalizedTargetUserId = String(targetUserId || '');
-  return Boolean((call?.participants || []).some((participant) => (
-    participant?.user?.toString?.() === normalizedTargetUserId && !participant?.leftAt
-  )));
-}
+async function joinCallParticipantAtomically({ callId, userId, promoteToActive = false }) {
+  const normalizedUserId = String(userId || '').trim();
+  const joinedAt = new Date();
+  const statusPatch = promoteToActive ? { status: 'active' } : {};
 
-function ensureUserIsActiveParticipant(call, targetUserId) {
-  const normalizedTargetUserId = String(targetUserId || '');
-  const existingParticipant = (call?.participants || []).find((participant) => (
-    participant?.user?.toString?.() === normalizedTargetUserId
-  ));
-
-  if (existingParticipant) {
-    existingParticipant.leftAt = null;
-    existingParticipant.joinedAt = existingParticipant.joinedAt || new Date();
-    return;
+  let call = await Call.findOneAndUpdate(
+    {
+      _id: callId,
+      status: { $in: ['ringing', 'active'] },
+      participants: { $elemMatch: { user: normalizedUserId, leftAt: { $ne: null } } },
+      $nor: [{ participants: { $elemMatch: { user: normalizedUserId, leftAt: null } } }]
+    },
+    {
+      $set: {
+        ...statusPatch,
+        'participants.$[participant].leftAt': null,
+        'participants.$[participant].joinedAt': joinedAt
+      }
+    },
+    {
+      new: true,
+      arrayFilters: [{ 'participant.user': normalizedUserId, 'participant.leftAt': { $ne: null } }]
+    }
+  );
+  if (call) {
+    return { call, joinedNow: true };
   }
 
-  call.participants.push({ user: normalizedTargetUserId });
+  call = await Call.findOneAndUpdate(
+    {
+      _id: callId,
+      status: { $in: ['ringing', 'active'] },
+      participants: { $not: { $elemMatch: { user: normalizedUserId, leftAt: null } } }
+    },
+    {
+      ...(promoteToActive ? { $set: { status: 'active' } } : {}),
+      $push: { participants: { user: normalizedUserId, joinedAt } }
+    },
+    { new: true }
+  );
+  if (call) {
+    return { call, joinedNow: true };
+  }
+
+  call = await Call.findById(callId);
+  return { call, joinedNow: false };
 }
 
 async function forceLeaveUserFromCall({ io, userId, call, notificationService, senderName = '' }) {
@@ -531,16 +557,30 @@ io.on('connection', async (socket) => {
         : [];
       if (normalizedMessageIds.length === 0) return;
 
+      const readAt = new Date();
       await Message.updateMany(
         {
           chat: chat._id,
           _id: { $in: normalizedMessageIds },
           'readBy.user': { $ne: userId }
         },
-        { $push: { readBy: { user: userId, readAt: new Date() } } }
+        { $push: { readBy: { user: userId, readAt } } }
       );
 
-      io.to(`chat:${chatId}`).emit('messages:read', { chatId, userId, messageIds: normalizedMessageIds });
+      const updatedMessageIds = await Message.find(
+        {
+          chat: chat._id,
+          _id: { $in: normalizedMessageIds },
+          readBy: { $elemMatch: { user: userId, readAt } }
+        }
+      )
+        .select('_id')
+        .lean();
+
+      const validMessageIds = updatedMessageIds.map((message) => String(message._id));
+      if (validMessageIds.length === 0) return;
+
+      io.to(`chat:${chatId}`).emit('messages:read', { chatId, userId, messageIds: validMessageIds });
     });
 
     // === ЗВОНКИ ===
@@ -837,34 +877,8 @@ io.on('connection', async (socket) => {
         if (chatId && String(call.chat) !== String(chatId)) {
           return callback?.({ error: 'Некорректный chatId для звонка' });
         }
-        if (call && !['ringing', 'active'].includes(String(call.status || ''))) {
-          return callback?.({ error: 'Р—РІРѕРЅРѕРє СѓР¶Рµ Р·Р°РІРµСЂС€С‘РЅ' });
-        }
-        if (!call) return callback?.({ error: 'Р—РІРѕРЅРѕРє РЅРµ РЅР°Р№РґРµРЅ' });
-        if (!['ringing', 'active'].includes(String(call.status || ''))) {
-          return callback?.({ error: 'Р—РІРѕРЅРѕРє СѓР¶Рµ Р·Р°РІРµСЂС€С‘РЅ' });
-        }
-        if (chatId && String(call.chat) !== String(chatId)) {
-          return callback?.({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ chatId РґР»СЏ Р·РІРѕРЅРєР°' });
-        }
-        if (!call) return callback?.({ error: 'Звонок не найден' });
         const chat = await Chat.findById(call.chat);
         if (!chat || !chat.isParticipant(userId)) return callback?.({ error: 'Нет доступа' });
-
-        if (!['ringing', 'active'].includes(String(call.status || ''))) {
-          return callback?.({ error: 'Р—РІРѕРЅРѕРє СѓР¶Рµ Р·Р°РІРµСЂС€С‘РЅ' });
-        }
-        if (String(call.initiator) === String(userId)) {
-          return callback?.({ error: 'РРЅРёС†РёР°С‚РѕСЂ РЅРµ РјРѕР¶РµС‚ РїСЂРёРЅСЏС‚СЊ СЃРІРѕР№ Р·РІРѕРЅРѕРє' });
-        }
-
-        if (!call.canJoin(userId)) {
-          return callback?.({ error: 'Р—РІРѕРЅРѕРє СѓР¶Рµ Р·Р°РІРµСЂС€РµРЅ РёР»Рё РЅРµРґРѕСЃС‚СѓРїРµРЅ' });
-        }
-
-        if (!['ringing', 'active'].includes(String(call.status || ''))) {
-          return callback?.({ error: 'Call already ended' });
-        }
         if (String(call.initiator) === String(userId)) {
           return callback?.({ error: 'Initiator cannot accept own call' });
         }
@@ -1073,7 +1087,7 @@ io.on('connection', async (socket) => {
       try {
         console.log(`[Socket] call:accept from ${userId}, callId: ${callId}`);
 
-        const call = await Call.findById(callId);
+        let call = await Call.findById(callId);
         if (!call) {
           console.log('[Socket] call:accept - call not found');
           return callback?.({ error: 'Звонок не найден' });
@@ -1098,12 +1112,29 @@ io.on('connection', async (socket) => {
           return callback?.({ error: 'Call is not available for join' });
         }
 
-        ensureJoinedCallParticipant(call, userId);
+        const alreadyJoined = Boolean(findJoinedCallParticipant(call, userId));
+        let joinedNow = false;
 
-        if (call.status === 'ringing') {
-          call.status = 'active';
+        if (alreadyJoined) {
+          if (call.status === 'ringing') {
+            call.status = 'active';
+            await call.save();
+          }
+        } else {
+          const joinResult = await joinCallParticipantAtomically({
+            callId: call._id,
+            userId,
+            promoteToActive: call.status === 'ringing'
+          });
+
+          call = joinResult.call;
+          joinedNow = Boolean(joinResult.joinedNow);
+
+          if (!call || !findJoinedCallParticipant(call, userId)) {
+            console.log('[Socket] call:accept - participant join lost in race');
+            return callback?.({ error: 'Call is not available for join' });
+          }
         }
-        await call.save();
 
         const activeCall = activeCalls.get(chat._id.toString());
         if (activeCall) {
@@ -1116,7 +1147,7 @@ io.on('connection', async (socket) => {
 
         console.log(`[Socket] Notifying initiator ${initiatorId} about accepted call, accepter: ${userId}`);
 
-        if (initiatorSockets) {
+        if (joinedNow && initiatorSockets) {
           initiatorSockets.forEach(socketId => {
             io.to(socketId).emit('call:participant_joined', {
               callId: callId.toString(),

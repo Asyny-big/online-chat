@@ -165,6 +165,7 @@ function ChatPageInner({
   const economyProbeTimersRef = useRef([]);
   const messagesRef = useRef(messages);
   const messagesRequestIdRef = useRef(0);
+  const pendingMessageUpdatesRef = useRef(new Map());
   const recentPrivateCallEventsRef = useRef(new Map());
 
   // Refs для использования актуальных значений в обработчиках сокета
@@ -253,7 +254,26 @@ function ChatPageInner({
       if (messagesRequestIdRef.current !== requestId || selectedChatRef.current?._id !== chatId) {
         return;
       }
-      setMessages(Array.isArray(response.data) ? response.data : []);
+      const fetchedMessages = Array.isArray(response.data) ? response.data : [];
+      const pendingUpdates = pendingMessageUpdatesRef.current.get(chatId);
+      let mergedMessages = fetchedMessages;
+
+      if (pendingUpdates?.size) {
+        pendingUpdates.forEach((pendingMessage, messageId) => {
+          if (!mergedMessages.some((item) => item._id === messageId)) {
+            return;
+          }
+
+          mergedMessages = upsertMessage(mergedMessages, pendingMessage, { appendIfMissing: false });
+          pendingUpdates.delete(messageId);
+        });
+
+        if (pendingUpdates.size === 0) {
+          pendingMessageUpdatesRef.current.delete(chatId);
+        }
+      }
+
+      setMessages(mergedMessages);
     } catch (error) {
       console.error('[ChatPage] Failed to fetch messages:', error);
       if (messagesRequestIdRef.current !== requestId || selectedChatRef.current?._id !== chatId) {
@@ -300,7 +320,20 @@ function ChatPageInner({
       if (selectedChatRef.current?._id !== chatId) {
         return prev;
       }
-      return upsertMessage(prev, message);
+
+      let nextMessages = upsertMessage(prev, message);
+      const pendingUpdates = pendingMessageUpdatesRef.current.get(chatId);
+      const pendingMessage = pendingUpdates?.get(message._id);
+
+      if (pendingMessage) {
+        nextMessages = upsertMessage(nextMessages, pendingMessage, { appendIfMissing: false });
+        pendingUpdates.delete(message._id);
+        if (pendingUpdates.size === 0) {
+          pendingMessageUpdatesRef.current.delete(chatId);
+        }
+      }
+
+      return nextMessages;
     });
   }, [syncChatLastMessage]);
 
@@ -308,12 +341,19 @@ function ChatPageInner({
     if (!chatId || !message?._id) return;
 
     syncChatLastMessage(chatId, message, { promoteToTop: false });
+    if (selectedChatRef.current?._id !== chatId) {
+      const pendingUpdates = pendingMessageUpdatesRef.current.get(chatId) || new Map();
+      pendingUpdates.set(message._id, message);
+      pendingMessageUpdatesRef.current.set(chatId, pendingUpdates);
+      return;
+    }
+
     setMessages((prev) => {
-      if (selectedChatRef.current?._id !== chatId) {
-        return prev;
-      }
       const hasMessage = prev.some((item) => item._id === message._id);
       if (!hasMessage) {
+        const pendingUpdates = pendingMessageUpdatesRef.current.get(chatId) || new Map();
+        pendingUpdates.set(message._id, message);
+        pendingMessageUpdatesRef.current.set(chatId, pendingUpdates);
         void fetchMessagesForChat(chatId);
         return prev;
       }

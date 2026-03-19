@@ -225,12 +225,10 @@ async function createGroupTool({ app, actorUserId, params }) {
     ok: true,
     action: 'create_group',
     responseText: `Готово. Создал группу «${name}».`,
-    responseText: `Готово. Создал группу «${name}».`,
     data: {
       chatId: String(chat._id),
       name
-    },
-    responseText: `Готово. Создал группу «${name}».`
+    }
   };
 }
 

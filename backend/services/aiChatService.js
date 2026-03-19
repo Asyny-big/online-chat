@@ -445,17 +445,23 @@ function normalizeAiReply(text) {
 }
 
 function resolveAiMessageStage({ systemType, systemStage, text }) {
-  if (systemStage === 'progress') return 'progress';
-  if (systemStage === 'final') return 'final';
-  if (systemType !== 'ai_response') return 'final';
+  const normalizedStage = String(systemStage || '').trim().toLowerCase();
+  if (normalizedStage === 'progress' || normalizedStage === 'final') {
+    return normalizedStage;
+  }
 
   const normalizedText = String(text || '').trim();
   if (
-    /^\u0412\u044b\u043f\u043e\u043b\u043d\u044f\u044e\s+\u043d\u0435\u0441\u043a\u043e\u043b\u044c\u043a\u043e\s+\u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0439/i.test(normalizedText)
-    || /^\u0428\u0430\u0433\s+\d+\/\d+\s+\u0432\u044b\u043f\u043e\u043b\u043d\u0435\u043d/i.test(normalizedText)
-    || /^\u041e\u0448\u0438\u0431\u043a\u0430\s+\u043d\u0430\s+\u0448\u0430\u0433\u0435/i.test(normalizedText)
+    /^Выполняю\s+несколько\s+действий/i.test(normalizedText)
+    || /^Шаг\s+\d+\/\d+\s+выполнен/i.test(normalizedText)
+    || /^Ошибка\s+на\s+шаге/i.test(normalizedText)
   ) {
     return 'progress';
+  }
+
+  const normalizedType = String(systemType || '').trim().toLowerCase();
+  if (normalizedType && normalizedType !== 'ai_response' && normalizedType !== 'ai_confirmation') {
+    return 'final';
   }
 
   return 'final';

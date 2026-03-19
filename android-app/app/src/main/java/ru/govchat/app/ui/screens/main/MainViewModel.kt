@@ -75,6 +75,7 @@ import ru.govchat.app.domain.usecase.CreateChatUseCase
 import ru.govchat.app.domain.usecase.CreateGroupChatUseCase
 import ru.govchat.app.service.call.IncomingCallService
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 
 class MainViewModel(
     appContext: Context,
@@ -131,6 +132,7 @@ class MainViewModel(
     private val recentRealtimeCallEvents = LinkedHashMap<String, Long>()
     private val messagesCache: MutableMap<String, List<ChatMessage>> = LinkedHashMap()
     private val pagingByChat: MutableMap<String, ChatPagingState> = LinkedHashMap()
+    private val isClosingCallManager = AtomicBoolean(false)
 
     init {
         CallNotificationManager.ensureInitialized(applicationContext)
@@ -750,10 +752,7 @@ class MainViewModel(
             } catch (error: Throwable) {
                 callHistoryRepository.markCancelled(callId.ifBlank { historyEntryId })
                 leaveCallUseCase(callId)
-                try {
-                    callManager.close()
-                } catch (_: Throwable) {
-                }
+                closeCallManagerSafely()
                 mutableState.update {
                     it.copy(
                         isCallActionInProgress = false,
@@ -820,10 +819,7 @@ class MainViewModel(
                     } catch (error: Throwable) {
                         callHistoryRepository.markCancelled(callId.ifBlank { historyEntryId })
                         leaveGroupCallUseCase(callId)
-                        try {
-                            callManager.close()
-                        } catch (_: Throwable) {
-                        }
+                closeCallManagerSafely()
                         mutableState.update {
                             it.copy(
                                 isCallActionInProgress = false,
@@ -835,12 +831,7 @@ class MainViewModel(
                 }
                 .onFailure { error ->
                     callHistoryRepository.markCancelled(historyEntryId)
-                    viewModelScope.launch {
-                        try {
-                            callManager.close()
-                        } catch (_: Throwable) {
-                        }
-                    }
+                    closeCallManagerAsync()
                     mutableState.update {
                         it.copy(
                             isCallActionInProgress = false,
@@ -915,10 +906,7 @@ class MainViewModel(
             } catch (error: Throwable) {
                 callHistoryRepository.markCancelled(event.callId)
                 leaveCallUseCase(event.callId)
-                try {
-                    callManager.close()
-                } catch (_: Throwable) {
-                }
+                closeCallManagerSafely()
                 mutableState.update {
                     it.copy(
                         isCallActionInProgress = false,
@@ -930,9 +918,18 @@ class MainViewModel(
         }
     }
 
+    private suspend fun closeCallManagerSafely() {
+        if (!isClosingCallManager.compareAndSet(false, true)) return
+        try {
+            runCatching { callManager.close() }
+        } finally {
+            isClosingCallManager.set(false)
+        }
+    }
+
     private fun closeCallManagerAsync() {
         viewModelScope.launch {
-            runCatching { callManager.close() }
+            closeCallManagerSafely()
         }
     }
 
@@ -1011,10 +1008,7 @@ class MainViewModel(
             } catch (error: Throwable) {
                 callHistoryRepository.markCancelled(event.callId)
                 leaveCallUseCase(event.callId)
-                try {
-                    callManager.close()
-                } catch (_: Throwable) {
-                }
+                        closeCallManagerSafely()
                 mutableState.update {
                     it.copy(
                         isCallActionInProgress = false,
@@ -1064,10 +1058,7 @@ class MainViewModel(
             } catch (error: Throwable) {
                 callHistoryRepository.markCancelled(prompt.callId)
                 leaveGroupCallUseCase(prompt.callId)
-                try {
-                    callManager.close()
-                } catch (_: Throwable) {
-                }
+                closeCallManagerSafely()
                 mutableState.update {
                     it.copy(
                         isCallActionInProgress = false,
@@ -1238,12 +1229,7 @@ class MainViewModel(
                 if (incoming.isGroup) {
                     leaveGroupCallUseCase(incoming.callId)
                 }
-                viewModelScope.launch {
-                    try {
-                        callManager.close()
-                    } catch (_: Throwable) {
-                    }
-                }
+                closeCallManagerAsync()
                 mutableState.update {
                     it.copy(
                         isCallActionInProgress = false,
@@ -1289,12 +1275,7 @@ class MainViewModel(
                     callReference = activeCall.callId,
                     fallbackStatus = CallHistoryStatus.CANCELLED
                 )
-                viewModelScope.launch {
-                    try {
-                        callManager.close()
-                    } catch (_: Throwable) {
-                    }
-                }
+                closeCallManagerAsync()
                 mutableState.update {
                     it.copy(
                         isCallActionInProgress = false,
@@ -1669,10 +1650,7 @@ class MainViewModel(
                         fallbackStatus = resolveTerminalStatus(reason = "completed", callId = event.callId)
                     )
                     IncomingCallService.cancelIncomingCall(applicationContext, event.callId)
-                    try {
-                        callManager.close()
-                    } catch (_: Throwable) {
-                    }
+                    closeCallManagerSafely()
                     mutableState.update { current ->
                         val incoming = current.incomingCall
                         val active = current.activeCall
@@ -1689,10 +1667,7 @@ class MainViewModel(
                         fallbackStatus = resolveTerminalStatus(reason = event.reason, callId = event.callId)
                     )
                     IncomingCallService.cancelIncomingCall(applicationContext, event.callId)
-                    try {
-                        callManager.close()
-                    } catch (_: Throwable) {
-                    }
+                    closeCallManagerSafely()
                     mutableState.update { current ->
                         val incoming = current.incomingCall
                         val active = current.activeCall
@@ -1721,10 +1696,7 @@ class MainViewModel(
                         fallbackStatus = resolveTerminalStatus(reason = event.reason, callId = event.callId)
                     )
                     IncomingCallService.cancelIncomingCall(applicationContext, event.callId)
-                    try {
-                        callManager.close()
-                    } catch (_: Throwable) {
-                    }
+                    closeCallManagerSafely()
                     mutableState.update { current ->
                         val incoming = current.incomingCall
                         val active = current.activeCall
@@ -2357,7 +2329,8 @@ class MainViewModel(
     private fun appendMessage(message: ChatMessage): Boolean {
         val chatId = message.chatId
         val existingMessage = messagesForChat(chatId).firstOrNull { it.id == message.id }
-        if (existingMessage != null) {
+        val hasNewerRevision = existingMessage?.let { message.revision > it.revision } == true
+        if (existingMessage != null && !hasNewerRevision) {
             if (isMessageEquivalent(existingMessage, message)) {
                 return false
             }
@@ -2572,8 +2545,11 @@ class MainViewModel(
     private fun shouldReplaceMessage(current: ChatMessage?, incoming: ChatMessage): Boolean {
         if (current == null) return true
 
-        if (incoming.revision != current.revision) {
-            return incoming.revision > current.revision
+        if (incoming.revision > current.revision) {
+            return true
+        }
+        if (incoming.revision < current.revision) {
+            return false
         }
 
         val currentTimestamp = messageMutationTimestamp(current) ?: 0L
@@ -2644,6 +2620,10 @@ class MainViewModel(
         base.forEach { byId[it.id] = it }
         incoming.forEach { message ->
             val current = byId[message.id]
+            if (current != null && message.revision > current.revision) {
+                byId[message.id] = message
+                return@forEach
+            }
             if (shouldReplaceMessage(current, message)) {
                 byId[message.id] = message
             }
@@ -2783,7 +2763,7 @@ class MainViewModel(
         recordingTickerJob?.cancel()
         uploadJob?.cancel()
         cleanupScope.launch {
-            runCatching { callManager.close() }
+            closeCallManagerSafely()
         }
         super.onCleared()
     }
