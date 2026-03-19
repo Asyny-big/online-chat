@@ -85,6 +85,7 @@ async function findUserByExactPhone({ phone, excludeUserId }) {
   if (!candidates.length) return null;
 
   const query = {
+    isSystem: { $ne: true },
     $or: [
       { phone: { $in: candidates } },
       { phoneNormalized: { $in: candidates } }

@@ -2300,50 +2300,54 @@ private fun ChatContent(
                             modifier = Modifier.size(20.dp)
                         )
                     }
-                    IconButton(
-                        onClick = { onStartGroupCall("audio") },
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Call,
-                            contentDescription = "Звонок",
-                            tint = Color(0xFF8296AC),
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                    IconButton(
-                        onClick = { onStartGroupCall("video") },
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Videocam,
-                            contentDescription = "Видео",
-                            tint = Color(0xFF8296AC),
-                            modifier = Modifier.size(20.dp)
-                        )
+                    if (!chat.isAiChat) {
+                        IconButton(
+                            onClick = { onStartGroupCall("audio") },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Call,
+                                contentDescription = "Звонок",
+                                tint = Color(0xFF8296AC),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        IconButton(
+                            onClick = { onStartGroupCall("video") },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Videocam,
+                                contentDescription = "Видео",
+                                tint = Color(0xFF8296AC),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 } else {
-                    IconButton(
-                        onClick = { onStartCall("audio") },
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Call,
-                            contentDescription = "Звонок",
-                            tint = Color(0xFF8296AC),
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                    IconButton(
-                        onClick = { onStartCall("video") },
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Videocam,
-                            contentDescription = "Видео",
-                            tint = Color(0xFF8296AC),
-                            modifier = Modifier.size(20.dp)
-                        )
+                    if (!chat.isAiChat) {
+                        IconButton(
+                            onClick = { onStartCall("audio") },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Call,
+                                contentDescription = "Звонок",
+                                tint = Color(0xFF8296AC),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        IconButton(
+                            onClick = { onStartCall("video") },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Videocam,
+                                contentDescription = "Видео",
+                                tint = Color(0xFF8296AC),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 }
             }

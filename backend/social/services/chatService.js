@@ -65,20 +65,30 @@ function formatChatForUser({ app, chat, viewerUserId }) {
       return participantId && participantId !== viewerId;
     });
     const otherUser = resolveParticipantUser(otherParticipant);
+    const peerUserId = otherUser?._id?.toString?.() || otherParticipant?.user?.toString?.() || null;
+    const prefersChatTitle = Boolean(plain.isAiChat && (plain.name || plain.displayName));
 
-    payload.displayName = otherUser?.name || plain.displayName || 'User';
+    payload.displayName = prefersChatTitle
+      ? (plain.name || plain.displayName || otherUser?.name || 'Support')
+      : (otherUser?.name || plain.displayName || plain.name || 'User');
     payload.displayPhone = otherUser?.phone || plain.displayPhone || '';
     payload.displayAvatar = otherUser?.avatarUrl || plain.displayAvatar || null;
-    payload.displayStatus = otherUser?._id
-      ? (isUserOnlineBySockets(app, otherUser._id) ? 'online' : 'offline')
-      : 'offline';
+    payload.displayStatus = (plain.isAiChat || otherUser?.isSystem)
+      ? 'online'
+      : (
+        otherUser?._id
+          ? (isUserOnlineBySockets(app, otherUser._id) ? 'online' : 'offline')
+          : 'offline'
+      );
     payload.displayLastSeen = otherUser?.lastSeen || null;
+    payload.peerUserId = peerUserId;
     return payload;
   }
 
   payload.displayName = plain.name || plain.displayName || 'Group';
   payload.displayAvatar = plain.avatarUrl || plain.displayAvatar || null;
   payload.participantCount = Array.isArray(plain.participants) ? plain.participants.length : 0;
+  payload.peerUserId = null;
   return payload;
 }
 

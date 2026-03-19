@@ -4,7 +4,7 @@ import { API_URL } from '@/config';
 import { getTransactions } from '@/domains/hrum/api/economyApi';
 import { useHrumToast } from './HrumToast';
 
-function MessageInput({ chatId, socket, token, onTyping }) {
+function MessageInput({ chat, chatId, socket, token, onTyping }) {
   const { showEarn } = useHrumToast();
   const [input, setInput] = useState('');
   const [isRecording, setIsRecording] = useState(false);
@@ -18,6 +18,7 @@ function MessageInput({ chatId, socket, token, onTyping }) {
   const timerRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const lastEconomyProbeAtRef = useRef(0);
+  const maxLength = chat?.isAiChat ? 2000 : 10000;
 
   // Очистка при размонтировании
   useEffect(() => {
@@ -29,7 +30,7 @@ function MessageInput({ chatId, socket, token, onTyping }) {
 
   // Индикатор «печатает»
   const handleInputChange = (e) => {
-    setInput(e.target.value);
+    setInput(String(e.target.value || '').slice(0, maxLength));
 
     if (socket && chatId) {
       socket.emit('typing:start', { chatId });
@@ -341,6 +342,7 @@ function MessageInput({ chatId, socket, token, onTyping }) {
             onChange={handleInputChange}
             placeholder={uploading ? 'Загрузка...' : 'Введите сообщение...'}
             className="message-input-field"
+            maxLength={maxLength}
             disabled={uploading}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {

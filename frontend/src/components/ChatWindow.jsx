@@ -261,6 +261,7 @@ function ChatWindow({
   const displayName = chat.displayName || chat.name || 'Чат';
   const typingList = typingUsers?.filter(u => u.chatId === chat._id && u.userId !== currentUserId) || [];
   const isGroupChat = chat.type === 'group' || chat.isGroup === true;
+  const isAiChat = chat.isAiChat === true;
   const participantCount = chat.participants?.length || 0;
   const hasIncomingCall = incomingCall && incomingCall.chatId === chat._id;
   const hasIncomingGroupCall = incomingGroupCall && incomingGroupCall.chatId === chat._id;
@@ -362,7 +363,7 @@ function ChatWindow({
           </div>
         </div>
         <div className="header-actions">
-          {!isGroupChat && (
+          {!isGroupChat && !isAiChat && (
             <>
               <button onClick={() => onStartCall?.('audio')} className="header-action-btn" title="Аудиозвонок">
                 📞
@@ -372,7 +373,7 @@ function ChatWindow({
               </button>
             </>
           )}
-          {isGroupChat && (
+          {isGroupChat && !isAiChat && (
             <>
               <button onClick={() => onStartGroupCall?.('audio')} className="header-action-btn group" title="Групповой аудиозвонок">
                 📞
@@ -448,6 +449,7 @@ function ChatWindow({
 
       {/* Input */}
       <MessageInput
+        chat={chat}
         chatId={chat._id}
         socket={socket}
         token={token}

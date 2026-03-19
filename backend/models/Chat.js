@@ -16,6 +16,20 @@ const chatSchema = new mongoose.Schema({
     type: String,
     default: null
   },
+  isAiChat: {
+    type: Boolean,
+    default: false,
+    index: true
+  },
+  isSystemChat: {
+    type: Boolean,
+    default: false
+  },
+  systemChatKey: {
+    type: String,
+    default: null,
+    index: true
+  },
   // Участники чата
   participants: [{
     user: {
@@ -140,5 +154,6 @@ chatSchema.pre('save', function(next) {
 // Составной индекс для быстрого поиска чатов пользователя
 chatSchema.index({ 'participants.user': 1, updatedAt: -1 });
 chatSchema.index({ type: 1 });
+chatSchema.index({ 'participants.user': 1, systemChatKey: 1 });
 
 module.exports = mongoose.model('Chat', chatSchema);

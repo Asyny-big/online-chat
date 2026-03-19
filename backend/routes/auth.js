@@ -3,6 +3,7 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const config = require('../config.local');
+const { ensureSupportChatForUser } = require('../services/aiChatService');
 
 // Нормализация номера телефона
 function normalizePhone(phone) {
@@ -43,6 +44,7 @@ router.post('/register', async (req, res) => {
     });
     await user.setPassword(password);
     await user.save();
+    await ensureSupportChatForUser({ app: req.app, userId: user._id });
 
     // Генерация токена
     const token = jwt.sign(
@@ -92,6 +94,7 @@ router.post('/login', async (req, res) => {
       config.JWT_SECRET,
       { expiresIn: '30d' }
     );
+    await ensureSupportChatForUser({ app: req.app, userId: user._id });
 
     res.json({
       token,

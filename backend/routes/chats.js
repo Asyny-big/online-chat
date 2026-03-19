@@ -63,7 +63,7 @@ router.get('/', async (req, res) => {
     };
 
     const chats = await Chat.find({ 'participants.user': userId })
-      .populate('participants.user', 'name phone avatarUrl status lastSeen')
+      .populate('participants.user', 'name phone avatarUrl status lastSeen isSystem systemKey')
       .sort({ updatedAt: -1 })
       .lean(); // lean() для производительности
 
@@ -100,16 +100,22 @@ router.get('/', async (req, res) => {
         );
         if (otherParticipant) {
           const otherUserId = otherParticipant.user._id.toString();
-          chat.displayName = otherParticipant.user.name;
+          chat.displayName = chat.isAiChat
+            ? (chat.name || 'Поддержка')
+            : otherParticipant.user.name;
           chat.displayPhone = otherParticipant.user.phone;
           chat.displayAvatar = otherParticipant.user.avatarUrl;
-          chat.displayStatus = isUserOnlineBySockets(otherUserId) ? 'online' : 'offline';
+          chat.displayStatus = (chat.isAiChat || otherParticipant.user.isSystem)
+            ? 'online'
+            : (isUserOnlineBySockets(otherUserId) ? 'online' : 'offline');
           chat.displayLastSeen = otherParticipant.user.lastSeen;
+          chat.peerUserId = otherUserId;
         }
       } else {
         chat.displayName = chat.name;
         chat.displayAvatar = chat.avatarUrl;
         chat.participantCount = chat.participants.length;
+        chat.peerUserId = null;
       }
       chat.unreadCount = unreadByChatId.get(chat._id.toString()) || 0;
       return chat;

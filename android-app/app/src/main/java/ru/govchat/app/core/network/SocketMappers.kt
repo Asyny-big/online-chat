@@ -101,7 +101,9 @@ internal fun JSONObject.toSocketChatPreview(): ChatPreview? {
             ?: "Чат",
         subtitle = subtitle,
         avatarUrl = optString("displayAvatar").takeIf { it.isNotBlank() },
-        peerUserId = resolvePeerUserId(type = type, participants = participants),
+        peerUserId = optString("peerUserId").takeIf { it.isNotBlank() }
+            ?: resolvePeerUserId(type = type, participants = participants),
+        isAiChat = optBoolean("isAiChat"),
         isOnline = optString("displayStatus") == "online",
         unreadCount = unreadCount,
         participantCount = participantCount,

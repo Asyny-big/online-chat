@@ -26,6 +26,18 @@ const userSchema = new mongoose.Schema({
     minlength: 1,
     maxlength: 100
   },
+  systemKey: {
+    type: String,
+    unique: true,
+    sparse: true,
+    index: true,
+    default: null
+  },
+  isSystem: {
+    type: Boolean,
+    default: false,
+    index: true
+  },
   passwordHash: {
     type: String,
     required: true
@@ -98,6 +110,8 @@ userSchema.methods.toPublicJSON = function() {
     name: this.name,
     username: this.name,
     avatarUrl: this.avatarUrl,
+    systemKey: this.systemKey || null,
+    isSystem: Boolean(this.isSystem),
     city: this.city,
     status: this.status,
     age: this.age,

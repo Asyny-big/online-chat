@@ -7,6 +7,7 @@ data class ChatPreview(
     val subtitle: String,
     val avatarUrl: String?,
     val peerUserId: String? = null,
+    val isAiChat: Boolean = false,
     val isOnline: Boolean,
     val unreadCount: Int,
     val participantCount: Int,

@@ -12,6 +12,14 @@ const {
   markNotificationsDelivered
 } = require('../social/services/notificationService');
 const { buildLastMessagePayload } = require('../services/messageStateService');
+const {
+  createAppFacade,
+  ensureSupportChatForUser,
+  emitChatCreatedToUser,
+  checkAiRateLimit,
+  ensureAiTextLimit,
+  queueAiResponse
+} = require('../services/aiChatService');
 
 const userSockets = new Map();
 const activeCalls = new Map();
@@ -146,6 +154,7 @@ module.exports = function (io) {
 
 io.on('connection', async (socket) => {
     const userId = socket.userId;
+    const appFacade = createAppFacade({ io, userSockets });
     console.log(`User connected: ${userId}, socket: ${socket.id}`);
     socket.join(`user:${userId}`);
 
@@ -160,12 +169,25 @@ io.on('connection', async (socket) => {
 
     // Обновление статуса
     await User.findByIdAndUpdate(userId, { status: 'online' });
+    const ensuredSupportChat = await ensureSupportChatForUser({ app: appFacade, userId });
 
     // Присоединение к чатам
     const userChats = await Chat.find({ 'participants.user': userId }).select('_id');
     userChats.forEach(chat => {
       socket.join(`chat:${chat._id}`);
     });
+
+    if (ensuredSupportChat?.chat?._id) {
+      socket.join(`chat:${ensuredSupportChat.chat._id}`);
+      const existedBeforeConnect = userChats.some((chat) => String(chat._id) === String(ensuredSupportChat.chat._id));
+      if (!existedBeforeConnect) {
+        emitChatCreatedToUser({
+          app: appFacade,
+          userId,
+          chat: ensuredSupportChat.chat
+        });
+      }
+    }
 
     broadcastUserStatus(io, userId, 'online');
 
@@ -218,17 +240,46 @@ io.on('connection', async (socket) => {
       try {
         const { chatId, text, type = 'text', attachment } = data;
         const messageType = String(type || 'text').toLowerCase();
+        const normalizedText = typeof text === 'string'
+          ? text.trim()
+          : String(text || '').trim();
+        const hasAttachment = Boolean(
+          attachment?.url
+          || attachment?.originalName
+          || attachment?.name
+          || attachment?.mimeType
+          || attachment?.size
+        );
 
         const chat = await verifyAccess(chatId);
         if (!chat) {
           return callback?.({ error: 'Нет доступа к чату' });
         }
 
+        if (messageType === 'text' && !normalizedText && !hasAttachment) {
+          return callback?.({ error: 'Нельзя отправить пустое сообщение' });
+        }
+
+        if (normalizedText.length > 10000) {
+          return callback?.({ error: 'Сообщение превышает лимит в 10000 символов' });
+        }
+
+        if (chat.isAiChat) {
+          if (messageType !== 'text' || hasAttachment) {
+            return callback?.({ error: 'Чат поддержки принимает только текстовые сообщения' });
+          }
+
+          ensureAiTextLimit(normalizedText);
+          if (!checkAiRateLimit({ userId, chatId })) {
+            return callback?.({ error: 'Для чата поддержки действует лимит: 1 сообщение в секунду.' });
+          }
+        }
+
         const message = await Message.create({
           chat: chatId,
           sender: userId,
           type: messageType,
-          text: text || '',
+          text: normalizedText,
           attachment,
           readBy: [{ user: userId }]
         });
@@ -236,7 +287,7 @@ io.on('connection', async (socket) => {
         await message.populate('sender', 'name phone avatarUrl');
 
         chat.lastMessage = {
-          text: text || (
+          text: normalizedText || (
             ['audio', 'voice'].includes(messageType)
               ? '🎤 Голосовое'
               : (messageType === 'video_note' ? '🎥 Видеокружок' : '📎 Вложение')
@@ -265,6 +316,16 @@ io.on('connection', async (socket) => {
         });
 
         callback?.({ success: true, message: message.toObject() });
+
+        if (chat.isAiChat) {
+          queueAiResponse({
+            app: appFacade,
+            chatId
+          }).catch((error) => {
+            console.warn('[AI] queue failed:', error?.message || error);
+          });
+          return;
+        }
 
         Promise.resolve().then(async () => {
           const recipientIds = (chat?.participants || [])
@@ -310,7 +371,7 @@ io.on('connection', async (socket) => {
               message,
               senderId: userId,
               senderName: socket.user.name,
-              text: text || ''
+              text: normalizedText
             });
             if (pushResult?.skipped) {
               console.log('[Push] group message skipped:', pushResult);
@@ -323,7 +384,7 @@ io.on('connection', async (socket) => {
             message,
             senderId: userId,
             senderName: socket.user.name,
-            text: text || ''
+            text: normalizedText
           });
           if (pushResult?.skipped) {
             console.log('[Push] message skipped:', pushResult);
@@ -339,7 +400,7 @@ io.on('connection', async (socket) => {
               userId,
               messageId: message._id.toString(),
               chatId,
-              text: text || ''
+              text: normalizedText
             })
           )
             .then((r) => {
@@ -353,7 +414,7 @@ io.on('connection', async (socket) => {
         } catch (_) { }
       } catch (error) {
         console.error('message:send error:', error);
-        callback?.({ error: 'Ошибка отправки' });
+        callback?.({ error: error?.message || 'Ошибка отправки' });
       }
     });
 
@@ -415,6 +476,10 @@ io.on('connection', async (socket) => {
         }
 
         // Проверка активного звонка
+        if (chat.isAiChat) {
+          return callback?.({ error: 'В чате поддержки звонки недоступны' });
+        }
+
         const existingCall = await Call.findOne({
           chat: chatId,
           status: { $in: ['ringing', 'active'] }

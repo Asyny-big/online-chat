@@ -677,6 +677,12 @@ class MainViewModel(
             startGroupCall(type)
             return
         }
+        if (chat.isAiChat) {
+            mutableState.update {
+                it.copy(callErrorMessage = "В чате поддержки звонки недоступны")
+            }
+            return
+        }
         requestRecordingPreempt(RecordingCommand.StopAndSend)
         val callStartedAtMillis = System.currentTimeMillis()
         val historyEntryId = UUID.randomUUID().toString()
