@@ -843,6 +843,7 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
   });
   const { type: rawType = 'text', text, attachment, createdAt, sender, deleted, edited } = message;
   const audioSourceUrl = resolveMessageMediaUrl(attachment?.url);
+  const audioElementKey = `${rawType}:${audioSourceUrl || attachment?.originalName || message?._id || 'empty'}`;
 
   useEffect(() => {
     setDraftText(message?.text || '');
@@ -1019,6 +1020,7 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
           <div className="audio-wrapper">
             <span className="audio-icon">🎤</span>
             <audio
+              key={audioElementKey}
               src={audioSourceUrl}
               controls
               preload="metadata"
@@ -1035,6 +1037,7 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
           <div className="audio-wrapper">
             <span className="audio-icon">🎙️</span>
             <audio
+              key={audioElementKey}
               src={audioSourceUrl}
               controls
               preload="metadata"
