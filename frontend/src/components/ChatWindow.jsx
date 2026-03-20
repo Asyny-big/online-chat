@@ -898,6 +898,10 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
     }
   }, []);
 
+  const stopAudioEventPropagation = useCallback((event) => {
+    event.stopPropagation();
+  }, []);
+
   const openMedia = useCallback((media) => {
     if (!media?.url) return;
     setSelectedMedia(media);
@@ -1017,7 +1021,12 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
       case 'audio':
         
         return (
-          <div className="audio-wrapper">
+          <div
+            className="audio-wrapper"
+            onClick={stopAudioEventPropagation}
+            onMouseDownCapture={stopAudioEventPropagation}
+            onPointerDownCapture={stopAudioEventPropagation}
+          >
             <span className="audio-icon">🎤</span>
             <audio
               key={audioElementKey}
@@ -1026,6 +1035,9 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
               preload="metadata"
               className="audio-player"
               onLoadedMetadata={handleAudioMetadata}
+              onClick={stopAudioEventPropagation}
+              onMouseDownCapture={stopAudioEventPropagation}
+              onPointerDownCapture={stopAudioEventPropagation}
             >
               Ваш браузер не поддерживает аудио
             </audio>
@@ -1034,7 +1046,12 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
         );
       case 'voice':
         return (
-          <div className="audio-wrapper">
+          <div
+            className="audio-wrapper"
+            onClick={stopAudioEventPropagation}
+            onMouseDownCapture={stopAudioEventPropagation}
+            onPointerDownCapture={stopAudioEventPropagation}
+          >
             <span className="audio-icon">🎙️</span>
             <audio
               key={audioElementKey}
@@ -1043,6 +1060,9 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
               preload="metadata"
               className="audio-player"
               onLoadedMetadata={handleAudioMetadata}
+              onClick={stopAudioEventPropagation}
+              onMouseDownCapture={stopAudioEventPropagation}
+              onPointerDownCapture={stopAudioEventPropagation}
             >
             </audio>
             <span className="audio-duration">{formatMediaDuration(audioDurationSec)}</span>
