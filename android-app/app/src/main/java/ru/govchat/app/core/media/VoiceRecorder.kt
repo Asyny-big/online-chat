@@ -2,6 +2,7 @@ package ru.govchat.app.core.media
 
 import android.content.Context
 import android.media.MediaRecorder
+import android.os.Build
 import java.io.File
 
 class VoiceRecorder(
@@ -20,34 +21,47 @@ class VoiceRecorder(
         }
 
         val cacheDir = File(appContext.cacheDir, "recordings/voice").apply { mkdirs() }
-        val file = File(cacheDir, "voice_${System.currentTimeMillis()}.m4a")
         reachedMaxDuration = false
 
-        return runCatching {
-            val recorder = createRecorder().apply {
-                setAudioSource(MediaRecorder.AudioSource.MIC)
-                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                setAudioEncodingBitRate(AUDIO_BITRATE)
-                setAudioSamplingRate(AUDIO_SAMPLE_RATE)
-                setOutputFile(file.absolutePath)
-                setMaxDuration(maxDurationMs)
-                setOnInfoListener { _, what, _ ->
-                    if (what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_DURATION_REACHED) {
-                        reachedMaxDuration = true
+        val formats = buildPreferredFormats()
+        var lastError: Throwable? = null
+
+        formats.forEach { format ->
+            val file = File(cacheDir, "voice_${System.currentTimeMillis()}.${format.extension}")
+            val result = runCatching {
+                val recorder = createRecorder().apply {
+                    setAudioSource(MediaRecorder.AudioSource.MIC)
+                    setOutputFormat(format.outputFormat)
+                    setAudioEncoder(format.audioEncoder)
+                    setAudioEncodingBitRate(AUDIO_BITRATE)
+                    setAudioSamplingRate(AUDIO_SAMPLE_RATE)
+                    setOutputFile(file.absolutePath)
+                    setMaxDuration(maxDurationMs)
+                    setOnInfoListener { _, what, _ ->
+                        if (what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_DURATION_REACHED) {
+                            reachedMaxDuration = true
+                        }
                     }
+                    prepare()
+                    start()
                 }
-                prepare()
-                start()
+                mediaRecorder = recorder
+                outputFile = file
+                startedAtMs = System.currentTimeMillis()
             }
-            mediaRecorder = recorder
-            outputFile = file
-            startedAtMs = System.currentTimeMillis()
-        }.recoverCatching { error ->
+
+            if (result.isSuccess) {
+                return Result.success(Unit)
+            }
+
             file.delete()
             releaseInternal()
-            throw error
+            lastError = result.exceptionOrNull()
         }
+
+        return Result.failure(
+            lastError ?: IllegalStateException("Voice recorder format initialization failed")
+        )
     }
 
     @Synchronized
@@ -101,12 +115,35 @@ class VoiceRecorder(
         }
     }
 
+    private fun buildPreferredFormats(): List<RecordingFormat> {
+        val formats = mutableListOf<RecordingFormat>()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            formats += RecordingFormat(
+                extension = "webm",
+                outputFormat = MediaRecorder.OutputFormat.WEBM,
+                audioEncoder = MediaRecorder.AudioEncoder.OPUS
+            )
+        }
+        formats += RecordingFormat(
+            extension = "m4a",
+            outputFormat = MediaRecorder.OutputFormat.MPEG_4,
+            audioEncoder = MediaRecorder.AudioEncoder.AAC
+        )
+        return formats
+    }
+
     companion object {
         const val DEFAULT_MAX_DURATION_MS = 2 * 60 * 1000
         private const val AUDIO_BITRATE = 128_000
         private const val AUDIO_SAMPLE_RATE = 44_100
     }
 }
+
+private data class RecordingFormat(
+    val extension: String,
+    val outputFormat: Int,
+    val audioEncoder: Int
+)
 
 data class VoiceRecordingResult(
     val file: File,

@@ -822,28 +822,73 @@ function DaySeparator({ label }) {
   );
 }
 
+function resolveMessageMediaUrl(url) {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  const normalizedUrl = url.startsWith('/') ? url : `/${url}`;
+  if (normalizedUrl.startsWith('/uploads/')) return `${API_URL}${normalizedUrl}`;
+  if (normalizedUrl.startsWith('/api/uploads/')) return `${API_URL.replace(/\/api\/?$/, '')}${normalizedUrl}`;
+  return `${API_URL.replace(/\/api\/?$/, '')}${normalizedUrl}`;
+}
+
+function inferAudioPlaybackMimeType({ mimeType, originalName, url } = {}) {
+  const normalizedMime = String(mimeType || '').trim().toLowerCase();
+  if (normalizedMime) {
+    if (normalizedMime === 'audio/m4a' || normalizedMime === 'audio/x-m4a') return 'audio/mp4';
+    if (normalizedMime === 'audio/mp3' || normalizedMime === 'audio/x-mp3') return 'audio/mpeg';
+    if (normalizedMime === 'audio/x-wav') return 'audio/wav';
+    if (normalizedMime === 'audio/oga') return 'audio/ogg';
+    return normalizedMime;
+  }
+
+  const source = String(originalName || url || '').trim().toLowerCase();
+  if (source.endsWith('.m4a')) return 'audio/mp4';
+  if (source.endsWith('.mp3')) return 'audio/mpeg';
+  if (source.endsWith('.ogg') || source.endsWith('.oga')) return 'audio/ogg';
+  if (source.endsWith('.opus')) return 'audio/opus';
+  if (source.endsWith('.wav')) return 'audio/wav';
+  if (source.endsWith('.webm')) return 'audio/webm';
+  return '';
+}
+
 function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
   const [showMenu, setShowMenu] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [draftText, setDraftText] = useState(message?.text || '');
   const [selectedMedia, setSelectedMedia] = useState(null);
+  const [audioSourceUrl, setAudioSourceUrl] = useState(() => resolveMessageMediaUrl(message?.attachment?.url));
   const [audioDurationSec, setAudioDurationSec] = useState(() => {
     const durationMs = Number(message?.attachment?.durationMs || 0);
     return durationMs > 0 ? Math.round(durationMs / 1000) : null;
   });
+  const audioObjectUrlRef = useRef(null);
+  const audioBlobFallbackTriedRef = useRef(false);
   const { type: rawType = 'text', text, attachment, createdAt, sender, deleted, edited } = message;
 
   useEffect(() => {
     setDraftText(message?.text || '');
     const durationMs = Number(message?.attachment?.durationMs || 0);
     setAudioDurationSec(durationMs > 0 ? Math.round(durationMs / 1000) : null);
+    if (audioObjectUrlRef.current) {
+      URL.revokeObjectURL(audioObjectUrlRef.current);
+      audioObjectUrlRef.current = null;
+    }
+    setAudioSourceUrl(resolveMessageMediaUrl(message?.attachment?.url));
+    audioBlobFallbackTriedRef.current = false;
     if (message?.deleted) {
       setIsEditing(false);
       setShowMenu(false);
       setShowDeleteConfirm(false);
     }
   }, [message]);
+
+  useEffect(() => () => {
+    if (audioObjectUrlRef.current) {
+      URL.revokeObjectURL(audioObjectUrlRef.current);
+      audioObjectUrlRef.current = null;
+    }
+  }, []);
 
   const type = (() => {
     if (deleted) return 'deleted';
@@ -864,15 +909,6 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
   const canEdit = Boolean(onEdit) && !deleted && type === 'text';
   const canDelete = Boolean(onDelete) && !deleted;
   const canManage = canEdit || canDelete;
-
-  const getMediaUrl = (url) => {
-    if (!url) return '';
-    if (url.startsWith('http://') || url.startsWith('https://')) return url;
-    const normalizedUrl = url.startsWith('/') ? url : `/${url}`;
-    if (normalizedUrl.startsWith('/uploads/')) return `${API_URL}${normalizedUrl}`;
-    if (normalizedUrl.startsWith('/api/uploads/')) return `${API_URL.replace(/\/api\/?$/, '')}${normalizedUrl}`;
-    return `${API_URL.replace(/\/api\/?$/, '')}${normalizedUrl}`;
-  };
 
   const normalizeFilename = (name) => {
     if (!name) return '';
@@ -895,6 +931,38 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
       setAudioDurationSec(Math.round(duration));
     }
   }, []);
+
+  const handleAudioError = useCallback(async () => {
+    const directAudioUrl = resolveMessageMediaUrl(attachment?.url);
+    if (!directAudioUrl || audioBlobFallbackTriedRef.current) return;
+
+    audioBlobFallbackTriedRef.current = true;
+    try {
+      const response = await axios.get(directAudioUrl, { responseType: 'blob' });
+      const blob = response?.data;
+      if (!(blob instanceof Blob) || blob.size <= 0) {
+        return;
+      }
+
+      const responseMimeType = String(response.headers?.['content-type'] || '').trim();
+      const playbackMimeType = inferAudioPlaybackMimeType({
+        mimeType: attachment?.mimeType || responseMimeType,
+        originalName: attachment?.originalName,
+        url: attachment?.url
+      });
+      const normalizedBlob = playbackMimeType && blob.type !== playbackMimeType
+        ? new Blob([blob], { type: playbackMimeType })
+        : blob;
+
+      if (audioObjectUrlRef.current) {
+        URL.revokeObjectURL(audioObjectUrlRef.current);
+      }
+      audioObjectUrlRef.current = URL.createObjectURL(normalizedBlob);
+      setAudioSourceUrl(audioObjectUrlRef.current);
+    } catch (error) {
+      console.error('[ChatWindow] Audio fallback failed:', error);
+    }
+  }, [attachment?.mimeType, attachment?.originalName, attachment?.url]);
 
   const openMedia = useCallback((media) => {
     if (!media?.url) return;
@@ -991,10 +1059,10 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
         return (
           <div className="media-wrapper">
             <img
-              src={getMediaUrl(attachment?.url)}
+              src={resolveMessageMediaUrl(attachment?.url)}
               alt={attachment?.originalName || 'Изображение'}
               className="image-preview"
-              onClick={() => window.open(getMediaUrl(attachment?.url), '_blank')}
+              onClick={() => window.open(resolveMessageMediaUrl(attachment?.url), '_blank')}
             />
             {text && <div className="media-caption">{text}</div>}
           </div>
@@ -1003,7 +1071,7 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
         return (
           <div className="media-wrapper">
             <video
-              src={getMediaUrl(attachment?.url)}
+              src={resolveMessageMediaUrl(attachment?.url)}
               controls
               preload="metadata"
               className="videoPreview" // Keeping inline style for now or add class
@@ -1013,16 +1081,17 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
           </div>
         );
       case 'audio':
-        const audioUrl = getMediaUrl(attachment?.url);
+        
         return (
           <div className="audio-wrapper">
             <span className="audio-icon">🎤</span>
             <audio
-              src={audioUrl}
+              src={audioSourceUrl}
               controls
               preload="metadata"
               className="audio-player"
               onLoadedMetadata={handleAudioMetadata}
+              onError={handleAudioError}
             >
               Ваш браузер не поддерживает аудио
             </audio>
@@ -1034,11 +1103,12 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
           <div className="audio-wrapper">
             <span className="audio-icon">🎙️</span>
             <audio
-              src={getMediaUrl(attachment?.url)}
+              src={audioSourceUrl}
               controls
               preload="metadata"
               className="audio-player"
               onLoadedMetadata={handleAudioMetadata}
+              onError={handleAudioError}
             >
             </audio>
             <span className="audio-duration">{formatMediaDuration(audioDurationSec)}</span>
@@ -1048,11 +1118,11 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
         return (
           <div className="video-note-wrapper">
             <video
-              src={getMediaUrl(attachment?.url)}
+              src={resolveMessageMediaUrl(attachment?.url)}
               muted
               playsInline
               preload="metadata"
-              onClick={() => openMedia({ type: 'video', url: getMediaUrl(attachment?.url) })}
+              onClick={() => openMedia({ type: 'video', url: resolveMessageMediaUrl(attachment?.url) })}
               title="Открыть видеокружок"
               className="video-note-thumb"
               style={{

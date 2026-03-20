@@ -398,12 +398,7 @@ class ChatRepositoryImpl(
             val file = runCatching { uri.path?.let(::File) }.getOrNull() ?: return null
             if (!file.exists() || !file.isFile) return null
             val extension = file.extension.lowercase()
-            val mimeType = when (extension) {
-                in IMAGE_EXTENSIONS -> "image/$extension"
-                in VIDEO_EXTENSIONS -> "video/$extension"
-                in AUDIO_EXTENSIONS -> "audio/$extension"
-                else -> null
-            }
+            val mimeType = resolveMimeTypeFromExtension(extension)
             return LocalAttachmentMeta(
                 fileName = file.name.takeIf { it.isNotBlank() } ?: "attachment_${System.currentTimeMillis()}",
                 mimeType = mimeType,
@@ -436,10 +431,13 @@ class ChatRepositoryImpl(
         }
 
         val fallbackName = "attachment_${System.currentTimeMillis()}"
+        val resolvedFileName = fileName?.takeIf { it.isNotBlank() } ?: fallbackName
         val mimeType = appContext.contentResolver.getType(uri)
+            ?.let(::normalizeMimeType)
+            ?: resolveMimeTypeFromExtension(resolvedFileName.substringAfterLast('.', "").lowercase())
 
         return LocalAttachmentMeta(
-            fileName = fileName?.takeIf { it.isNotBlank() } ?: fallbackName,
+            fileName = resolvedFileName,
             mimeType = mimeType,
             sizeBytes = sizeBytes
         )
@@ -493,6 +491,45 @@ class ChatRepositoryImpl(
                 total
             } ?: -1L
         }.getOrElse { -1L }
+    }
+
+    private fun resolveMimeTypeFromExtension(extension: String): String? {
+        if (extension.isBlank()) return null
+        return when (extension) {
+            "jpg", "jpeg" -> "image/jpeg"
+            "png" -> "image/png"
+            "gif" -> "image/gif"
+            "webp" -> "image/webp"
+            "bmp" -> "image/bmp"
+            "svg" -> "image/svg+xml"
+            "mp4", "m4v" -> "video/mp4"
+            "webm" -> "video/webm"
+            "mov" -> "video/quicktime"
+            "avi" -> "video/x-msvideo"
+            "mkv" -> "video/x-matroska"
+            "mp3" -> "audio/mpeg"
+            "ogg", "oga" -> "audio/ogg"
+            "opus" -> "audio/opus"
+            "wav" -> "audio/wav"
+            "m4a" -> "audio/mp4"
+            "aac" -> "audio/aac"
+            else -> when {
+                extension in IMAGE_EXTENSIONS -> "image/$extension"
+                extension in VIDEO_EXTENSIONS -> "video/$extension"
+                extension in AUDIO_EXTENSIONS -> "audio/$extension"
+                else -> null
+            }
+        }
+    }
+
+    private fun normalizeMimeType(mimeType: String): String {
+        return when (mimeType.trim().lowercase()) {
+            "audio/m4a", "audio/x-m4a" -> "audio/mp4"
+            "audio/mp3", "audio/x-mp3" -> "audio/mpeg"
+            "audio/x-wav" -> "audio/wav"
+            "audio/oga" -> "audio/ogg"
+            else -> mimeType
+        }
     }
 
     private data class LocalAttachmentMeta(
