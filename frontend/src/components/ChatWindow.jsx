@@ -4,6 +4,7 @@ import MessageInput from './MessageInput';
 import MediaViewerModal from './MediaViewerModal';
 import { API_URL } from '@/config';
 import { DuckIcon, MessageIcon, PlusIcon, SearchIcon } from '@/shared/ui/Icons';
+import { getPreferredPlayableAudioMimeType } from '@/utils/audioFormats';
 
 function ChatWindow({
   token,
@@ -857,7 +858,8 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
   const { type: rawType = 'text', text, attachment, createdAt, sender, deleted, edited } = message;
   const audioSourceUrl = resolveMessageMediaUrl(attachment?.url);
   const audioMimeType = resolveAudioMimeType(attachment, audioSourceUrl);
-  const audioPreload = audioMimeType === 'audio/webm' ? 'auto' : 'metadata';
+  const preferredPlayableAudioMimeType = getPreferredPlayableAudioMimeType(audioMimeType, audioSourceUrl);
+  const audioPreload = audioMimeType.startsWith('audio/webm') ? 'auto' : 'metadata';
   const audioElementKey = `${rawType}:${audioSourceUrl || attachment?.originalName || message?._id || 'empty'}`;
 
   useEffect(() => {
@@ -928,6 +930,8 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
       browser: navigator.userAgent,
       messageId: message?._id || null,
       type,
+      declaredType: audioMimeType,
+      preferredPlayableType: preferredPlayableAudioMimeType,
       src: audioSourceUrl,
       currentSrc: element.currentSrc || '',
       readyState: element.readyState,
@@ -938,7 +942,7 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
       duration: element.duration,
       error: mediaError
     });
-  }, [audioSourceUrl, message?._id, type]);
+  }, [audioMimeType, audioSourceUrl, message?._id, preferredPlayableAudioMimeType, type]);
 
   const handleAudioDebugEvent = useCallback((event) => {
     logAudioDebug(event.type, event.currentTarget);
@@ -972,6 +976,8 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
       browser: navigator.userAgent,
       messageId: message?._id || null,
       type,
+      declaredType: audioMimeType,
+      preferredPlayableType: preferredPlayableAudioMimeType,
       src: audioSourceUrl,
       key: audioElementKey
     });
@@ -982,11 +988,13 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
         browser: navigator.userAgent,
         messageId: message?._id || null,
         type,
+        declaredType: audioMimeType,
+        preferredPlayableType: preferredPlayableAudioMimeType,
         src: audioSourceUrl,
         key: audioElementKey
       });
     };
-  }, [audioElementKey, audioSourceUrl, message?._id, type]);
+  }, [audioElementKey, audioMimeType, audioSourceUrl, message?._id, preferredPlayableAudioMimeType, type]);
 
   const handleSaveEdit = async () => {
     const nextText = draftText.trim();
@@ -1108,6 +1116,7 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
             <span className="audio-icon">🎤</span>
             <audio
               key={audioElementKey}
+              src={audioSourceUrl}
               controls
               preload={audioPreload}
               playsInline
@@ -1130,7 +1139,6 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
               onMouseDownCapture={stopAudioEventPropagation}
               onPointerDownCapture={stopAudioEventPropagation}
             >
-              <source src={audioSourceUrl} type={audioMimeType || undefined} />
               Ваш браузер не поддерживает аудио
             </audio>
             <span className="audio-duration">{formatMediaDuration(audioDurationSec)}</span>
@@ -1147,6 +1155,7 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
             <span className="audio-icon">🎙️</span>
             <audio
               key={audioElementKey}
+              src={audioSourceUrl}
               controls
               preload={audioPreload}
               playsInline
@@ -1168,9 +1177,7 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
               onClick={stopAudioEventPropagation}
               onMouseDownCapture={stopAudioEventPropagation}
               onPointerDownCapture={stopAudioEventPropagation}
-            >
-              <source src={audioSourceUrl} type={audioMimeType || undefined} />
-            </audio>
+            />
             <span className="audio-duration">{formatMediaDuration(audioDurationSec)}</span>
           </div>
         );

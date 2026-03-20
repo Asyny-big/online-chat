@@ -3,6 +3,7 @@ import axios from 'axios';
 import { API_URL } from '@/config';
 import { getTransactions } from '@/domains/hrum/api/economyApi';
 import { useHrumToast } from './HrumToast';
+import { getAudioFileExtensionFromMimeType, pickSupportedAudioRecordingMimeType } from '@/utils/audioFormats';
 
 function getBlobDurationMs(blob) {
   return new Promise((resolve) => {
@@ -150,8 +151,10 @@ function MessageInput({ chat, chatId, socket, token, onTyping }) {
         type,
         text: '',
         attachment: {
+          url: res.data.url,
           originalName: res.data.originalName,
           mimeType: res.data.mimeType,
+          size: res.data.size
         }
       });
     } catch (err) {
@@ -188,17 +191,8 @@ function MessageInput({ chat, chatId, socket, token, onTyping }) {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-      // Определяем поддерживаемый MIME-тип
-      let mimeType = 'audio/webm';
-      if (!MediaRecorder.isTypeSupported('audio/webm')) {
-        if (MediaRecorder.isTypeSupported('audio/ogg')) {
-          mimeType = 'audio/ogg';
-        } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
-          mimeType = 'audio/mp4';
-        } else {
-          mimeType = ''; // Использовать дефолтный
-        }
-      }
+      // Предпочитаем формат, который браузер умеет и записывать, и воспроизводить.
+      const mimeType = pickSupportedAudioRecordingMimeType();
 
       console.log('[MessageInput] Recording with mimeType:', mimeType);
 
@@ -212,6 +206,10 @@ function MessageInput({ chat, chatId, socket, token, onTyping }) {
         if (e.data.size > 0) {
           audioChunksRef.current.push(e.data);
         }
+      };
+
+      mediaRecorder.onerror = (event) => {
+        console.error('[MessageInput] Recorder error:', event?.error || event);
       };
 
       mediaRecorder.onstop = async () => {
@@ -271,11 +269,7 @@ function MessageInput({ chat, chatId, socket, token, onTyping }) {
   const uploadVoiceMessage = async (blob, mimeType, durationMs) => {
     setUploading(true);
     try {
-      // Определяем расширение файла на основе MIME-типа
-      let extension = '.webm';
-      if (mimeType.includes('ogg')) extension = '.ogg';
-      else if (mimeType.includes('mp4') || mimeType.includes('m4a')) extension = '.m4a';
-      else if (mimeType.includes('mpeg') || mimeType.includes('mp3')) extension = '.mp3';
+      const extension = getAudioFileExtensionFromMimeType(mimeType);
 
       const formData = new FormData();
       formData.append('file', blob, `voice_${Date.now()}${extension}`);
