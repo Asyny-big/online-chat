@@ -902,6 +902,14 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
     event.stopPropagation();
   }, []);
 
+  const handleBubbleClick = useCallback((event) => {
+    const target = event.target;
+    if (target instanceof Element && target.closest('.audio-wrapper')) {
+      return;
+    }
+    setShowMenu(false);
+  }, []);
+
   const openMedia = useCallback((media) => {
     if (!media?.url) return;
     setSelectedMedia(media);
@@ -1115,7 +1123,7 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
           event.preventDefault();
           setShowMenu(true);
         }}
-        onClick={() => setShowMenu(false)}
+        onClick={handleBubbleClick}
       >
         {!isMine && senderName && <div className="sender-name">{senderName}</div>}
         {renderContent()}
