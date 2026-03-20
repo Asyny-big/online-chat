@@ -1,6 +1,8 @@
 const mongoose = require('mongoose');
 
-const CONNECTION_ISSUE_PATTERN = /\b(лагает|лаги|тормозит|плохо слышно|не слышно|звук пропадает|звонок тормозит|видеозвонок.*лагает|связь плохая)\b/i;
+const CONNECTION_ISSUE_PATTERN = /\b(лагает|лаги|тормозит|плохо слышно|не слышно|звук пропадает|звонок тормозит|видеозвонок.*лагает|связь плохая|сокет.*отвали|realtime|socket)\b/i;
+const SERVER_PERFORMANCE_PATTERN = /\b(почему тормозит сервер|сервер тормозит|сервер лагает|высокая нагрузка|медленный api|slow request|медленные запросы|backend тормозит)\b/i;
+const CALL_ISSUE_PATTERN = /\b(звонок.*лагает|звонок.*тормозит|webrtc|turn|sfu|livekit|видео.*лагает|обрывается звонок)\b/i;
 const GROUP_NAME_QUOTED_PATTERN = /[«"]([^"»]{2,80})[»"]/;
 const GROUP_NAME_NAMED_PATTERN = /\b(?:группу|группа)\s+(?:для|под|с названием)\s+([^.!?\n]{2,80})/i;
 const CAPABILITIES_PATTERN = /\b(что ты умеешь|твои возможности|capabilities)\b/i;
@@ -18,9 +20,18 @@ function isConnectionIssueText(text) {
   const normalized = normalizeText(text);
   if (!normalized) return false;
   return CONNECTION_ISSUE_PATTERN.test(normalized);
+}
 
-  return /\b(лагает|лаги|тормозит|плохо слышно|не слышно|звук пропадает|звонок тормозит|видеозвонок.*лагает|связь плохая)\b/i
-    .test(normalized);
+function isServerPerformanceText(text) {
+  const normalized = normalizeText(text);
+  if (!normalized) return false;
+  return SERVER_PERFORMANCE_PATTERN.test(normalized);
+}
+
+function isCallIssueText(text) {
+  const normalized = normalizeText(text);
+  if (!normalized) return false;
+  return CALL_ISSUE_PATTERN.test(normalized);
 }
 
 function extractGroupName(text) {
@@ -37,17 +48,34 @@ function extractGroupName(text) {
     return normalizedNamed[1].trim();
   }
 
-  const quoted = normalized.match(/[«"]([^"»]{2,80})[»"]/);
-  if (quoted?.[1]) {
-    return quoted[1].trim();
-  }
-
-  const named = normalized.match(/\b(?:группу|группа)\s+(?:для|под|с названием)\s+([^.!?\n]{2,80})/i);
-  if (named?.[1]) {
-    return named[1].trim();
-  }
-
   return '';
+}
+
+function buildServerDiagnosticsPlan(issue) {
+  return {
+    type: 'actions',
+    reason: 'server_diagnostics_shortcut',
+    actions: [
+      { action: 'system_diagnostics', params: {} },
+      { action: 'analyze_slow_requests', params: {} },
+      { action: 'check_realtime_health', params: {} },
+      { action: 'check_calls_health', params: {} },
+      { action: 'explain_issue', params: { issue } }
+    ]
+  };
+}
+
+function buildRealtimeDiagnosticsPlan(issue) {
+  return {
+    type: 'actions',
+    reason: 'realtime_diagnostics_shortcut',
+    actions: [
+      { action: 'system_diagnostics', params: {} },
+      { action: 'check_realtime_health', params: {} },
+      { action: 'check_calls_health', params: {} },
+      { action: 'explain_issue', params: { issue } }
+    ]
+  };
 }
 
 function resolveFallbackAiPlan({ text }) {
@@ -56,15 +84,12 @@ function resolveFallbackAiPlan({ text }) {
     return null;
   }
 
-  if (isConnectionIssueText(normalized)) {
-    return {
-      type: 'actions',
-      reason: 'connection_support_fallback',
-      actions: [
-        { action: 'get_server_status', params: {} },
-        { action: 'suggest_fix_connection', params: { usePreviousServerStatus: true } }
-      ]
-    };
+  if (isServerPerformanceText(normalized)) {
+    return buildServerDiagnosticsPlan(normalized);
+  }
+
+  if (isCallIssueText(normalized) || isConnectionIssueText(normalized)) {
+    return buildRealtimeDiagnosticsPlan(normalized);
   }
 
   if (CAPABILITIES_PATTERN.test(normalized)) {
@@ -107,62 +132,19 @@ function resolveFallbackAiPlan({ text }) {
     };
   }
 
-  if (/\b(что ты умеешь|твои возможности|capabilities)\b/i.test(normalized)) {
-    return {
-      type: 'action',
-      reason: 'capabilities_fallback',
-      action: 'explain_feature',
-      params: { feature: 'capabilities' }
-    };
-  }
-
-  if (/\b(мои чаты|покажи чаты|какие у меня чаты|список чатов)\b/i.test(normalized)) {
-    return {
-      type: 'action',
-      reason: 'chat_list_fallback',
-      action: 'get_user_chats',
-      params: {}
-    };
-  }
-
-  if (/\b(создай|сделай)\b.*\bгрупп/i.test(normalized)) {
-    const name = extractGroupName(normalized);
-    if (name) {
-      return {
-        type: 'action',
-        reason: 'create_group_fallback',
-        action: 'create_group',
-        params: { name }
-      };
-    }
-  }
-
-  const legacyExplicitUserId = normalized.match(/\b[0-9a-f]{24}\b/i)?.[0] || '';
-  if (/\b(позвони|начни звонок|созвонись)\b/i.test(normalized) && mongoose.Types.ObjectId.isValid(legacyExplicitUserId)) {
-    return {
-      type: 'action',
-      reason: 'start_call_fallback',
-      action: 'start_call',
-      params: { userId: legacyExplicitUserId }
-    };
-  }
-
   return null;
 }
 
 function resolveSupportShortcut(text) {
-  if (!isConnectionIssueText(text)) {
-    return null;
+  if (isServerPerformanceText(text)) {
+    return buildServerDiagnosticsPlan(normalizeText(text));
   }
 
-  return {
-    type: 'actions',
-    reason: 'smart_support_shortcut',
-    actions: [
-      { action: 'get_server_status', params: {} },
-      { action: 'suggest_fix_connection', params: { usePreviousServerStatus: true } }
-    ]
-  };
+  if (isCallIssueText(text) || isConnectionIssueText(text)) {
+    return buildRealtimeDiagnosticsPlan(normalizeText(text));
+  }
+
+  return null;
 }
 
 module.exports = {

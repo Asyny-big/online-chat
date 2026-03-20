@@ -4,11 +4,12 @@ const { getAiToolManifestText } = require('./aiTools');
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const DEFAULT_MODEL = process.env.OPENROUTER_MODEL || 'stepfun/step-3.5-flash:free';
 const DEFAULT_FALLBACK_MODEL = process.env.OPENROUTER_FALLBACK_MODEL || 'openrouter/free';
-const DEFAULT_MAX_TOKENS = Math.min(Math.max(Number(process.env.OPENROUTER_MAX_TOKENS || 320), 64), 512);
-const DEFAULT_TEMPERATURE = Math.min(Math.max(Number(process.env.OPENROUTER_TEMPERATURE || 0.7), 0), 1.5);
+const DEFAULT_MAX_TOKENS = Math.min(Math.max(Number(process.env.OPENROUTER_MAX_TOKENS || 900), 128), 1600);
+const DEFAULT_TEMPERATURE = Math.min(Math.max(Number(process.env.OPENROUTER_TEMPERATURE || 0.45), 0), 1.5);
 const DEFAULT_TIMEOUT_MS = Math.max(Number(process.env.OPENROUTER_TIMEOUT_MS || 25_000), 5_000);
 const DEFAULT_MAX_ATTEMPTS = Math.min(Math.max(Number(process.env.OPENROUTER_MAX_ATTEMPTS || 2), 1), 3);
 const RETRY_BASE_DELAY_MS = Math.max(Number(process.env.OPENROUTER_RETRY_BASE_DELAY_MS || 700), 100);
+const ERR_CANCELED_RETRY_LIMIT = 1;
 
 function getOpenRouterApiKey() {
   return String(process.env.OPENROUTER_API_KEY || '').trim();
@@ -28,27 +29,28 @@ function getOpenRouterHeaders() {
 
 function getAiSystemPrompt() {
   return [
-    'Ты AI-агент GovChat.',
-    'Отвечай по-русски, коротко, полезно и по делу.',
-    'Если задачу можно выполнить безопасным инструментом, предпочитай действие, а не объяснение.',
+    'Ты AI-инженер поддержки GovChat.',
+    'Отвечай по-русски, по делу и человеческим языком.',
+    'Если для ответа нужны данные, сначала анализируй и выбирай инструменты, а не выдавай пустой вывод.',
     'Для одного шага возвращай только JSON без markdown: {"action":"tool_name","params":{...}}.',
     'Для нескольких шагов возвращай только JSON без markdown: {"actions":[{"action":"tool","params":{}},{"action":"tool2","params":{}}]}.',
-    'Если сразу после create_group нужно add_user, можно не указывать chatId во втором шаге.',
-    'Для add_user, start_call, find_user и create_group.participants можно передавать номер телефона или identifier. Не требуй внутренний userId, если пользователь назвал номер.',
-    'Если данных не хватает, задай короткий уточняющий вопрос обычным текстом.',
-    'Никогда не придумывай несуществующие действия и не используй action вне разрешённого списка.',
-    'Если пользователь жалуется на лаги, связь, плохой звук или тормозящий звонок, предпочитай get_server_status и suggest_fix_connection.',
+    'Если задача диагностическая, не ограничивайся одним инструментом. Сначала собери данные, потом делай вывод.',
+    'Для проблем вроде "почему тормозит сервер", "лагают сокеты", "плохо работает realtime", "звонки тормозят" предпочитай multi-step план.',
+    'Для серверной деградации предпочитай system_diagnostics, analyze_slow_requests, check_realtime_health, check_calls_health, explain_issue.',
+    'Для проблем связи и звонков предпочитай system_diagnostics, check_realtime_health, check_calls_health, explain_issue.',
+    'Не отвечай шаблонно и не повторяй одни и те же формулировки из последних сообщений.',
+    'Не делай вывод без данных, если данные можно получить инструментами.',
+    'Если данных все равно недостаточно и инструменты не помогут, задай один короткий уточняющий вопрос обычным текстом.',
+    'Если сразу после create_group нужен add_user, можно не указывать chatId во втором шаге.',
+    'Для add_user, start_call, find_user и create_group.participants можно передавать номер телефона или identifier.',
+    'Никогда не придумывай несуществующие инструменты и не используй action вне разрешенного списка.',
     'Если пользователь спрашивает, что ты умеешь, используй explain_feature с feature="capabilities".',
-    'Если пользователь просит создать группу, предпочитай create_group.',
-    'Если спрашивают про VPN, можно мягко упомянуть его как способ проверить маршрут, но не навязывать.',
     'Примеры:',
     'Пользователь: "создай группу для проекта" -> {"action":"create_group","params":{"name":"Проект"}}.',
-    'Пользователь: "создай группу и добавь туда пользователя 507f1f77bcf86cd799439011" -> {"actions":[{"action":"create_group","params":{"name":"Новая группа"}},{"action":"add_user","params":{"userId":"507f1f77bcf86cd799439011"}}]}.',
     'Пользователь: "создай группу и добавь +79991234567" -> {"action":"create_group","params":{"name":"Новая группа","participants":["+79991234567"]}}.',
     'Пользователь: "позвони +79991234567" -> {"action":"start_call","params":{"phone":"+79991234567"}}.',
-    'Пользователь: "что ты умеешь" -> {"action":"explain_feature","params":{"feature":"capabilities"}}.',
-    'Пользователь: "у меня лагает видеосвязь" -> {"actions":[{"action":"get_server_status","params":{}},{"action":"suggest_fix_connection","params":{"usePreviousServerStatus":true}}]}.',
-    'Разрешённые инструменты:',
+    'Пользователь: "почему тормозит сервер" -> {"actions":[{"action":"system_diagnostics","params":{}},{"action":"analyze_slow_requests","params":{}},{"action":"check_realtime_health","params":{}},{"action":"check_calls_health","params":{}},{"action":"explain_issue","params":{"issue":"почему тормозит сервер"}}]}.',
+    'Разрешенные инструменты:',
     getAiToolManifestText()
   ].join(' ');
 }
@@ -113,6 +115,7 @@ function isRetryableError(error) {
   if (code === 'ETIMEDOUT') return true;
   if (code === 'ECONNRESET') return true;
   if (code === 'ERR_NETWORK') return true;
+  if (code === 'ERR_CANCELED') return true;
   if (code === 'OPENROUTER_EMPTY_RESPONSE') return true;
 
   return false;
@@ -128,7 +131,10 @@ function buildModelCandidates() {
 
 function decorateOpenRouterError(error, model) {
   const status = Number(error?.response?.status || 0);
-  const code = String(error?.code || '').trim();
+  const code = String(
+    error?.code
+    || (typeof axios.isCancel === 'function' && axios.isCancel(error) ? 'ERR_CANCELED' : '')
+  ).trim().toUpperCase();
   const upstreamMessage = String(
     error?.response?.data?.error?.message
       || error?.response?.data?.message
@@ -140,12 +146,21 @@ function decorateOpenRouterError(error, model) {
   wrapped.code = code || (status ? `HTTP_${status}` : 'OPENROUTER_REQUEST_FAILED');
   wrapped.status = status || null;
   wrapped.model = model;
-  wrapped.retryable = isRetryableError(error);
+  wrapped.retryable = isRetryableError({ ...error, code: wrapped.code, status });
   wrapped.cause = error;
   return wrapped;
 }
 
-async function requestOpenRouter({ model, text, context, signal, user, systemPrompt }) {
+async function requestOpenRouter({
+  model,
+  text,
+  context,
+  signal,
+  user,
+  systemPrompt,
+  maxTokens = DEFAULT_MAX_TOKENS,
+  temperature = DEFAULT_TEMPERATURE
+}) {
   const response = await axios.post(
     OPENROUTER_URL,
     {
@@ -155,8 +170,8 @@ async function requestOpenRouter({ model, text, context, signal, user, systemPro
         ...context,
         { role: 'user', content: text }
       ],
-      temperature: DEFAULT_TEMPERATURE,
-      max_tokens: DEFAULT_MAX_TOKENS,
+      temperature,
+      max_tokens: Math.min(Math.max(Number(maxTokens || DEFAULT_MAX_TOKENS), 64), 1600),
       provider: {
         allow_fallbacks: true,
         sort: 'throughput'
@@ -198,6 +213,7 @@ async function generateAiResponse(text, context = [], options = {}) {
   const normalizedContext = Array.isArray(context) ? context : [];
   const models = buildModelCandidates();
   let lastError = null;
+  let canceledRetries = 0;
 
   for (const model of models) {
     for (let attempt = 1; attempt <= DEFAULT_MAX_ATTEMPTS; attempt += 1) {
@@ -208,11 +224,23 @@ async function generateAiResponse(text, context = [], options = {}) {
           context: normalizedContext,
           signal: options.signal,
           user: options.user,
-          systemPrompt: options.systemPrompt
+          systemPrompt: options.systemPrompt,
+          maxTokens: options.maxTokens,
+          temperature: options.temperature
         });
       } catch (error) {
         const wrappedError = decorateOpenRouterError(error, model);
         lastError = wrappedError;
+
+        if (wrappedError.code === 'ERR_CANCELED') {
+          if (canceledRetries >= ERR_CANCELED_RETRY_LIMIT) {
+            throw wrappedError;
+          }
+
+          canceledRetries += 1;
+          await sleep(RETRY_BASE_DELAY_MS, options.signal);
+          continue;
+        }
 
         if (!wrappedError.retryable || attempt >= DEFAULT_MAX_ATTEMPTS) {
           break;

@@ -24,6 +24,13 @@ const {
   rememberAiUserMessage
 } = require('../services/aiChatService');
 const { startPrivateCallFlow, syncActiveCallsForUser } = require('../services/callOrchestrator');
+const {
+  recordCallMetric,
+  recordDroppedRealtimeEvent,
+  recordSocketConnect,
+  recordSocketDisconnect,
+  recordSocketLeakWarning
+} = require('../services/runtimeDiagnostics');
 
 const userSockets = new Map();
 const activeCalls = new Map();
@@ -207,9 +214,10 @@ module.exports = function (io) {
 
 io.on('connection', async (socket) => {
     const userId = socket.userId;
-    const appFacade = createAppFacade({ io, userSockets, activeCalls, activeGroupCalls });
+    const appFacade = createAppFacade({ io, userSockets, activeCalls, activeGroupCalls, activeGroupCallStreams });
     startAiQueueWatchdog({ app: appFacade });
     console.log(`User connected: ${userId}, socket: ${socket.id}`);
+    recordSocketConnect(userId);
     socket.join(`user:${userId}`);
 
     // Регистрация сокета
@@ -957,7 +965,19 @@ io.on('connection', async (socket) => {
         if (!call.canJoin(userId) || !call.isInCall(userId)) return;
         if (!call.isInCall(normalizedTargetUserId)) return;
         const targetSockets = userSockets.get(normalizedTargetUserId);
-        if (!targetSockets) return;
+        if (!targetSockets || targetSockets.size === 0) {
+          recordCallMetric('group_signaling_drop', {
+            userId: normalizedTargetUserId,
+            event: 'group-call:signal',
+            reason: 'target_user_offline'
+          });
+          recordDroppedRealtimeEvent('group_call_signal_target_offline', {
+            userId: normalizedTargetUserId,
+            event: 'group-call:signal',
+            reason: 'target_user_offline'
+          });
+          return;
+        }
         targetSockets.forEach(sid => {
           io.to(sid).emit('group-call:signal', {
             callId,
@@ -1219,6 +1239,16 @@ io.on('connection', async (socket) => {
         });
       } else {
         console.log(`[Socket] Target user ${normalizedTargetUserId} not connected`);
+        recordCallMetric('signaling_drop', {
+          userId: normalizedTargetUserId,
+          event: 'call:signal',
+          reason: 'target_user_offline'
+        });
+        recordDroppedRealtimeEvent('call_signal_target_offline', {
+          userId: normalizedTargetUserId,
+          event: 'call:signal',
+          reason: 'target_user_offline'
+        });
       }
     });
 
@@ -1339,8 +1369,9 @@ io.on('connection', async (socket) => {
     });
 
     // Отключение
-    socket.on('disconnect', async () => {
+    socket.on('disconnect', async (reason) => {
       console.log(`User disconnected: ${userId}, socket: ${socket.id}`);
+      recordSocketDisconnect(userId, reason);
 
       const sockets = userSockets.get(userId);
       if (sockets) {
@@ -1383,6 +1414,7 @@ io.on('connection', async (socket) => {
       const activeSocketsCount = userSockets.get(userId)?.size || 0;
       if (activeSocketsCount > 0) {
         console.log(`[Socket] user ${userId} still has ${activeSocketsCount} active socket(s) after disconnect`);
+        recordSocketLeakWarning(userId, activeSocketsCount);
       }
     });
   });

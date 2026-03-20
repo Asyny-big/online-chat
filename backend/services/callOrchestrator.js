@@ -5,6 +5,7 @@ const User = require('../models/User');
 const { maybeRewardCallStart } = require('../economy/rewardsService');
 const { NotificationService } = require('./notificationService');
 const { formatChatForUser, ensureDirectChat } = require('../social/services/chatService');
+const { recordDroppedRealtimeEvent } = require('./runtimeDiagnostics');
 
 function getSocketState(app) {
   const io = app?.get?.('io');
@@ -20,7 +21,14 @@ function getSocketState(app) {
 
 function emitToUserSockets({ io, userSockets, userId, event, payload }) {
   const sockets = userSockets?.get?.(String(userId || ''));
-  if (!io || !sockets || sockets.size === 0) return;
+  if (!io || !sockets || sockets.size === 0) {
+    recordDroppedRealtimeEvent('delivery_gap', {
+      userId: String(userId || '').trim() || null,
+      event,
+      reason: io ? 'no_active_socket' : 'io_unavailable'
+    });
+    return;
+  }
 
   sockets.forEach((socketId) => {
     io.to(socketId).emit(event, payload);
@@ -28,7 +36,13 @@ function emitToUserSockets({ io, userSockets, userId, event, payload }) {
 }
 
 function emitToSingleSocket({ io, socketId, event, payload }) {
-  if (!io || !socketId) return;
+  if (!io || !socketId) {
+    recordDroppedRealtimeEvent('delivery_gap', {
+      event,
+      reason: io ? 'socket_id_missing' : 'io_unavailable'
+    });
+    return;
+  }
   io.to(String(socketId)).emit(event, payload);
 }
 

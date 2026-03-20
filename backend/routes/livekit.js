@@ -6,6 +6,7 @@ const AccessToken = livekit.AccessToken;
 const authMiddleware = require('../middleware/auth');
 const Call = require('../models/Call');
 const Chat = require('../models/Chat');
+const { recordCallMetric } = require('../services/runtimeDiagnostics');
 
 router.use(authMiddleware);
 
@@ -54,6 +55,10 @@ router.get('/token', async (req, res) => {
 
     res.json({ token });
   } catch (err) {
+    recordCallMetric('livekit_token_error', {
+      userId: String(req.userId || ''),
+      room: String(room || '')
+    });
     console.error('[LiveKit token error]', err);
     res.status(500).json({ error: 'failed to generate token' });
   }

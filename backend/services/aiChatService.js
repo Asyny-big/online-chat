@@ -19,6 +19,8 @@ const AI_BOT_NAME = 'Поддержка GovChat';
 const AI_CHAT_TITLE = 'Поддержка';
 const AI_WELCOME_TEXT = 'Привет! Я помощник GovChat. Могу подсказать по сообщениям, звонкам, вложениям и основным функциям приложения.';
 const AI_UNAVAILABLE_TEXT = 'Сейчас поддержка временно недоступна. Попробуйте написать чуть позже.';
+const AI_COMPLETED_TEXT = 'Готово. Действие выполнено.';
+const AI_MIN_FINAL_TEXT_LENGTH = 10;
 const AI_BOT_PHONE = String(process.env.AI_BOT_PHONE || '+79990000001').trim();
 const AI_BOT_AVATAR_URL = String(process.env.AI_BOT_AVATAR_URL || '/uploads/avatar-default.png').trim();
 const AI_MESSAGE_MAX_LENGTH = Math.max(Number(process.env.AI_CHAT_MAX_INPUT_LENGTH || 2000), 1);
@@ -63,12 +65,12 @@ const responseQueueByChat = new Map();
 let activeAiJobs = 0;
 const aiConcurrencyWaiters = [];
 
-function createAppFacade({ io, userSockets, activeCalls, activeGroupCalls }) {
+function createAppFacade({ io, userSockets, activeCalls, activeGroupCalls, activeGroupCallStreams = null }) {
   return {
     get(key) {
       if (key === 'io') return io;
       if (key === 'socketData') {
-        return { userSockets, activeCalls, activeGroupCalls };
+        return { userSockets, activeCalls, activeGroupCalls, activeGroupCallStreams };
       }
       return undefined;
     }
@@ -441,6 +443,63 @@ function normalizeAiReply(text) {
   return normalized.slice(0, 4000) || AI_UNAVAILABLE_TEXT;
 }
 
+function buildAiActionLabel(action) {
+  const labels = {
+    system_diagnostics: 'системная диагностика',
+    analyze_slow_requests: 'проверка медленных запросов',
+    check_realtime_health: 'проверка realtime',
+    check_calls_health: 'проверка звонков',
+    explain_issue: 'сбор вывода',
+    get_server_status: 'проверка сервера',
+    suggest_fix_connection: 'анализ соединения',
+    create_group: 'создание группы',
+    add_user: 'добавление участника',
+    get_user_chats: 'загрузка списка чатов',
+    find_user: 'поиск пользователя',
+    start_call: 'запуск звонка'
+  };
+
+  return labels[String(action || '').trim()] || String(action || 'действие');
+}
+
+function humanizeAiErrorText(error, fallbackText = 'Не удалось выполнить действие.') {
+  const code = String(error?.code || '').trim().toUpperCase();
+
+  if (code === 'USER_NOT_FOUND') {
+    return 'Не удалось найти пользователя по номеру или идентификатору. Проверьте, зарегистрирован ли он в GovChat.';
+  }
+
+  if (code === 'USER_RESOLUTION_AMBIGUOUS') {
+    return 'Нашёл несколько подходящих пользователей. Уточните номер телефона или идентификатор.';
+  }
+
+  if (code === 'AI_USER_IDENTIFIER_REQUIRED') {
+    return 'Не хватает данных для действия. Нужен номер телефона, userId или другой идентификатор пользователя.';
+  }
+
+  if (code === 'AI_GROUP_NAME_REQUIRED') {
+    return 'Не получилось создать группу: не указано название.';
+  }
+
+  if (code === 'AI_RESPONSE_TOO_SHORT') {
+    return AI_UNAVAILABLE_TEXT;
+  }
+
+  return normalizeAiReply(error?.message || fallbackText);
+}
+
+function ensureValidFinalAiText(text) {
+  const normalized = normalizeAiReply(text);
+  if (!normalized || normalized.length < AI_MIN_FINAL_TEXT_LENGTH) {
+    const error = new Error('AI_RESPONSE_TOO_SHORT');
+    error.code = 'AI_RESPONSE_TOO_SHORT';
+    error.responseText = normalized;
+    throw error;
+  }
+
+  return normalized;
+}
+
 function resolveAiMessageStage({ systemType, systemStage, text }) {
   const normalizedStage = String(systemStage || '').trim().toLowerCase();
   if (normalizedStage === 'progress' || normalizedStage === 'final') {
@@ -471,6 +530,104 @@ function buildAiSystemPromptWithMemory(memory) {
   }
 
   return `${getAiSystemPrompt()} Память о пользователе: ${memoryPrompt}`;
+}
+
+function isRetryableCanceledAiError(error) {
+  return String(error?.code || '').trim().toUpperCase() === 'ERR_CANCELED';
+}
+
+async function generateAiResponseWithRetry(text, context = [], options = {}) {
+  try {
+    return ensureValidFinalAiText(await generateAiResponse(text, context, options));
+  } catch (error) {
+    if (isRetryableCanceledAiError(error)) {
+      throw error;
+    }
+    throw error;
+  }
+}
+
+function shouldSynthesizeAiPlan(actions) {
+  const normalizedActions = Array.isArray(actions) ? actions : [];
+  if (normalizedActions.length > 1) return true;
+
+  const diagnosticActions = new Set([
+    'get_server_status',
+    'system_diagnostics',
+    'analyze_slow_requests',
+    'check_realtime_health',
+    'check_calls_health',
+    'explain_issue',
+    'suggest_fix_connection'
+  ]);
+
+  return normalizedActions.some((step) => diagnosticActions.has(String(step?.action || '').trim()));
+}
+
+function buildAiPlanSynthesisPrompt(memory) {
+  const memoryPrompt = buildMemoryPrompt(memory);
+  return [
+    'Ты инженер поддержки GovChat, а не шаблонный бот.',
+    'Собери итог только на основе данных из инструментов.',
+    'Сначала дай краткий вывод, потом причины, потом рекомендации.',
+    'Если есть риск развития проблемы, добавь одну фразу с прогнозом.',
+    'Если уместно, заверши одним безопасным следующим действием в форме вопроса.',
+    'Не пиши про номера шагов, внутренние action-name и коды ошибок.',
+    'Не повторяй одинаковые вступления.',
+    memoryPrompt ? `Память о пользователе: ${memoryPrompt}` : null
+  ].filter(Boolean).join(' ');
+}
+
+async function synthesizeAiPlanResult({
+  chatId,
+  signal,
+  memory,
+  userText,
+  contextEntries,
+  actions,
+  result
+}) {
+  if (!shouldSynthesizeAiPlan(actions)) {
+    return ensureValidFinalAiText(result?.responseText || AI_COMPLETED_TEXT);
+  }
+
+  const toolSummary = JSON.stringify({
+    actions: (Array.isArray(actions) ? actions : []).map((step) => ({
+      action: step?.action || '',
+      params: step?.params || {}
+    })),
+    steps: Array.isArray(result?.data?.steps) ? result.data.steps : []
+  }).slice(0, 6000);
+
+  return generateAiResponseWithRetry(
+    [
+      `Запрос пользователя: ${String(userText || '').trim()}`,
+      `Результаты инструментов: ${toolSummary}`,
+      'Собери один финальный ответ для пользователя.'
+    ].join('\n\n'),
+    (Array.isArray(contextEntries) ? contextEntries : [])
+      .map(({ role, content }) => ({ role, content })),
+    {
+      signal,
+      user: `chat:${String(chatId)}`,
+      systemPrompt: buildAiPlanSynthesisPrompt(memory),
+      maxTokens: 700,
+      temperature: 0.55
+    }
+  );
+}
+
+async function getSafeAiPlanFinalText(options) {
+  try {
+    return await synthesizeAiPlanResult(options);
+  } catch (error) {
+    console.warn('[AI] plan synthesis failed:', {
+      chatId: String(options?.chatId || ''),
+      code: error?.code || null,
+      message: error?.message || error
+    });
+    return ensureValidFinalAiText(options?.result?.responseText || AI_COMPLETED_TEXT);
+  }
 }
 
 async function findExistingAiTerminalMessage({ chatId, aiBotId, sourceMessageId }) {
@@ -556,6 +713,10 @@ async function createAiMessage({
     systemEvent.planId = String(planId).slice(0, 120);
   }
 
+  if (systemEvent.stage === 'final' && String(systemType || '').trim().toLowerCase() === 'ai_response') {
+    text = ensureValidFinalAiText(text);
+  }
+
   const message = await Message.create({
     chat: chatId,
     sender: aiBot._id,
@@ -612,6 +773,27 @@ async function createAndEmitAiMessage({
   return message;
 }
 
+async function createAndEmitValidatedFinalAiMessage({
+  io,
+  chatId,
+  aiBot,
+  text,
+  sourceMessageId = null,
+  planId = null,
+  systemType = 'ai_response'
+}) {
+  return createAndEmitAiMessage({
+    io,
+    chatId,
+    aiBot,
+    text: ensureValidFinalAiText(text),
+    sourceMessageId,
+    planId,
+    systemType,
+    systemStage: 'final'
+  });
+}
+
 function shouldSendFallbackMessage(error) {
   const status = Number(error?.status || error?.response?.status || 0);
   const code = String(error?.code || '').toUpperCase();
@@ -625,12 +807,14 @@ function shouldSendFallbackMessage(error) {
     'ETIMEDOUT',
     'ECONNRESET',
     'ERR_NETWORK',
+    'ERR_CANCELED',
     'OPENROUTER_API_KEY_MISSING',
     'OPENROUTER_EMPTY_RESPONSE',
     'OPENROUTER_REQUEST_FAILED',
     'OPENROUTER_ABORTED',
     'AI_ABORTED',
-    'AI_DELAY_ABORTED'
+    'AI_DELAY_ABORTED',
+    'AI_RESPONSE_TOO_SHORT'
   ].includes(code);
 }
 
@@ -834,7 +1018,7 @@ async function createConfirmationMessage({ io, chatId, aiBot, pendingAction }) {
   });
 }
 
-async function executeAndReportAiPlan({
+async function executeAndReportAiPlanLegacy({
   app,
   io,
   chatId,
@@ -860,6 +1044,8 @@ async function executeAndReportAiPlan({
       chatId,
       aiBot,
       text: getAiToolProgressText(actions[0].action),
+      sourceMessageId: messageId,
+      planId,
       systemStage: 'progress'
     });
   }
@@ -884,7 +1070,7 @@ async function executeAndReportAiPlan({
   });
 }
 
-async function resolveConfirmationReply({ app, io, chat, aiBot, actorUserId, message }) {
+async function resolveConfirmationReplyLegacy({ app, io, chat, aiBot, actorUserId, message }) {
   const pendingAction = await getPendingAction({
     userId: actorUserId,
     chatId: chat._id
@@ -1081,7 +1267,7 @@ async function markProcessingFinished({ chatId, messageId, completed }) {
   );
 }
 
-async function handleAiResponseNow({ app, chatId, messageId, signal }) {
+async function handleAiResponseNowLegacy({ app, chatId, messageId, signal }) {
   const { io } = getSocketHelpers(app);
   const [chat, aiBot] = await Promise.all([
     Chat.findById(chatId).select('_id isAiChat participants aiState'),
@@ -1177,7 +1363,7 @@ async function handleAiResponseNow({ app, chatId, messageId, signal }) {
     let actionPlan = supportShortcut?.actions || null;
 
     if (!actionPlan) {
-      responseText = await generateAiResponse(
+      responseText = await generateAiResponseWithRetry(
         userEntry.content,
         contextEntries
           .filter((entry) => entry.messageId !== String(messageId))
@@ -1315,6 +1501,403 @@ async function handleAiResponseNow({ app, chatId, messageId, signal }) {
         chatId,
         aiBot,
         text: AI_UNAVAILABLE_TEXT
+      });
+      console.warn('[AI] fallback message escalation:', {
+        chatId: String(chatId),
+        messageId: String(messageId),
+        code: fallbackError?.code || null,
+        message: fallbackError?.message || fallbackError
+      });
+    }
+
+    completed = true;
+  } finally {
+    emitAiTyping(io, chatId, aiBot, false);
+    await markProcessingFinished({ chatId, messageId, completed });
+  }
+}
+
+async function executeAndReportAiPlan({
+  app,
+  io,
+  chatId,
+  aiBot,
+  actorUserId,
+  actions,
+  messageId = null,
+  planId = null
+}) {
+  const total = Array.isArray(actions) ? actions.length : 0;
+  if (total === 0) return null;
+
+  await createAndEmitAiMessage({
+    io,
+    chatId,
+    aiBot,
+    text: total > 1 ? 'Выполняю диагностику по шагам...' : getAiToolProgressText(actions[0].action),
+    sourceMessageId: messageId,
+    planId,
+    systemStage: 'progress'
+  });
+
+  return executeAiPlan({
+    app,
+    actorUserId,
+    chatId,
+    actions,
+    messageId,
+    planId,
+    onStepSuccess: async ({ index, total: stepTotal, action }) => {
+      if (stepTotal <= 1) return;
+
+      await createAndEmitAiMessage({
+        io,
+        chatId,
+        aiBot,
+        text: `Шаг ${index + 1}/${stepTotal} завершён: ${buildAiActionLabel(action)}.`,
+        sourceMessageId: messageId,
+        planId,
+        systemStage: 'progress'
+      });
+    }
+  });
+}
+
+async function resolveConfirmationReply({ app, io, chat, aiBot, actorUserId, message }) {
+  const pendingAction = await getPendingAction({
+    userId: actorUserId,
+    chatId: chat._id
+  });
+
+  if (!pendingAction) {
+    return false;
+  }
+
+  if (
+    pendingAction?.messageId
+    && compareMessageIds(message?._id, pendingAction.messageId) <= 0
+  ) {
+    return false;
+  }
+
+  const text = String(message?.text || '').trim();
+  if (isStrictCancellationMessage(text)) {
+    pendingAction.status = 'cancelled';
+    await pendingAction.save();
+    await createAndEmitValidatedFinalAiMessage({
+      io,
+      chatId: chat._id,
+      aiBot,
+      text: 'Ок, отменяю запрошенное действие.',
+      sourceMessageId: pendingAction.messageId || message?._id || null,
+      planId: pendingAction.planId || null
+    });
+    return true;
+  }
+
+  if (!isStrictConfirmationMessage(text)) {
+    return false;
+  }
+
+  pendingAction.status = 'confirmed';
+  await pendingAction.save();
+
+  try {
+    const result = await executeAndReportAiPlan({
+      app,
+      io,
+      chatId: chat._id,
+      aiBot,
+      actorUserId,
+      actions: pendingAction.actions,
+      messageId: pendingAction.messageId,
+      planId: pendingAction.planId
+    });
+
+    pendingAction.status = 'executed';
+    await pendingAction.save();
+
+    await createAndEmitValidatedFinalAiMessage({
+      io,
+      chatId: chat._id,
+      aiBot,
+      text: await getSafeAiPlanFinalText({
+        chatId: chat._id,
+        signal: null,
+        memory: await getMemory(actorUserId),
+        userText: message?.text || '',
+        contextEntries: await buildAiContext({
+          chatId: chat._id,
+          aiBotId: aiBot._id,
+          upToMessageId: message?._id
+        }),
+        actions: pendingAction.actions,
+        result
+      }),
+      sourceMessageId: pendingAction.messageId || null,
+      planId: result?.data?.planId || pendingAction.planId || null
+    });
+  } catch (error) {
+    pendingAction.status = 'cancelled';
+    await pendingAction.save();
+
+    await createAndEmitValidatedFinalAiMessage({
+      io,
+      chatId: chat._id,
+      aiBot,
+      text: humanizeAiErrorText(
+        error,
+        error?.partialResult?.responseText || 'Не удалось выполнить действие.'
+      ),
+      sourceMessageId: pendingAction.messageId || null,
+      planId: error?.planId || pendingAction.planId || null
+    });
+  }
+
+  return true;
+}
+
+async function handleAiResponseNow({ app, chatId, messageId, signal }) {
+  const { io } = getSocketHelpers(app);
+  const [chat, aiBot] = await Promise.all([
+    Chat.findById(chatId).select('_id isAiChat participants aiState'),
+    ensureAiBotUser()
+  ]);
+
+  if (!chat || !chat.isAiChat) {
+    await markProcessingFinished({ chatId, messageId, completed: true });
+    return;
+  }
+
+  const processingLock = await markProcessingStarted({ chatId, messageId });
+  if (!processingLock) {
+    return;
+  }
+
+  emitAiTyping(io, chatId, aiBot, true);
+
+  const responseDelayMs = 500 + Math.floor(Math.random() * 1000);
+  const startedAt = Date.now();
+  let completed = false;
+
+  try {
+    const message = await Message.findOne({
+      _id: messageId,
+      chat: chatId,
+      deleted: { $ne: true }
+    }).lean();
+
+    if (!message) {
+      completed = true;
+      return;
+    }
+
+    if (String(message.sender) === String(aiBot._id)) {
+      completed = true;
+      return;
+    }
+
+    const contextEntries = await buildAiContext({
+      chatId,
+      aiBotId: aiBot._id,
+      upToMessageId: messageId
+    });
+
+    const userEntry = contextEntries.find((entry) => entry.messageId === String(messageId))
+      || toContextEntry(message, aiBot._id);
+
+    if (!userEntry?.content) {
+      completed = true;
+      return;
+    }
+
+    const actorUserId = resolveAiActorUserId(chat, aiBot._id);
+    if (!actorUserId) {
+      throw new Error('AI actor user was not resolved');
+    }
+
+    const existingTerminalMessage = await findExistingAiTerminalMessage({
+      chatId,
+      aiBotId: aiBot._id,
+      sourceMessageId: messageId
+    });
+    if (existingTerminalMessage) {
+      completed = true;
+      return;
+    }
+
+    if (await resolveConfirmationReply({
+      app,
+      io,
+      chat,
+      aiBot,
+      actorUserId,
+      message
+    })) {
+      completed = true;
+      return;
+    }
+
+    const memory = await getMemory(actorUserId);
+    const supportShortcut = resolveSupportShortcut(userEntry.content);
+    let responseText = '';
+    let parsed = null;
+    let actionPlan = supportShortcut?.actions || null;
+
+    if (!actionPlan) {
+      responseText = await generateAiResponseWithRetry(
+        userEntry.content,
+        contextEntries
+          .filter((entry) => entry.messageId !== String(messageId))
+          .map(({ role, content }) => ({ role, content })),
+        {
+          signal,
+          user: `chat:${String(chatId)}`,
+          systemPrompt: buildAiSystemPromptWithMemory(memory)
+        }
+      );
+
+      if (signal?.aborted) {
+        throw createAbortError('AI response timed out', 'AI_ABORTED');
+      }
+
+      parsed = parseAiAction(responseText);
+      actionPlan = toActionPlan(parsed);
+
+      if (!actionPlan) {
+        const fallbackPlan = resolveFallbackAiPlan({
+          text: userEntry.content
+        });
+        actionPlan = toActionPlan(fallbackPlan);
+      }
+    }
+
+    const remainingDelay = responseDelayMs - (Date.now() - startedAt);
+    if (remainingDelay > 0) {
+      await sleep(remainingDelay, signal);
+    }
+
+    if (actionPlan?.length) {
+      if (planRequiresConfirmation(actionPlan)) {
+        try {
+          const pendingAction = await rememberPendingAction({
+            userId: actorUserId,
+            chatId,
+            messageId,
+            actions: actionPlan
+          });
+
+          await createConfirmationMessage({
+            io,
+            chatId,
+            aiBot,
+            pendingAction
+          });
+        } catch (pendingError) {
+          if (pendingError?.code !== 'AI_PENDING_ACTION_EXISTS') {
+            throw pendingError;
+          }
+
+          await createAndEmitValidatedFinalAiMessage({
+            io,
+            chatId,
+            aiBot,
+            text: 'Сначала подтвердите или отмените предыдущий запрос, а потом отправьте новый.',
+            sourceMessageId: messageId
+          });
+        }
+        completed = true;
+        return;
+      }
+
+      try {
+        const result = await executeAndReportAiPlan({
+          app,
+          io,
+          chatId,
+          aiBot,
+          actorUserId,
+          actions: actionPlan,
+          messageId
+        });
+
+        await createAndEmitValidatedFinalAiMessage({
+          io,
+          chatId,
+          aiBot,
+      text: await getSafeAiPlanFinalText({
+        chatId,
+        signal,
+        memory,
+            userText: userEntry.content,
+            contextEntries,
+            actions: actionPlan,
+            result
+          }),
+          sourceMessageId: messageId,
+          planId: result?.data?.planId || null
+        });
+      } catch (actionError) {
+        console.warn('[AI] action execution failed:', {
+          chatId: String(chatId),
+          messageId: String(messageId),
+          actions: actionPlan.map((item) => item.action),
+          code: actionError?.code || null,
+          message: actionError?.message || actionError
+        });
+
+        await createAndEmitValidatedFinalAiMessage({
+          io,
+          chatId,
+          aiBot,
+          text: humanizeAiErrorText(
+            actionError,
+            actionError?.partialResult?.responseText || 'Не удалось выполнить действие.'
+          ),
+          sourceMessageId: messageId,
+          planId: actionError?.planId || null
+        });
+      }
+
+      completed = true;
+      return;
+    }
+
+    await createAndEmitValidatedFinalAiMessage({
+      io,
+      chatId,
+      aiBot,
+      text: parsed?.text || responseText,
+      sourceMessageId: messageId
+    });
+
+    completed = true;
+  } catch (error) {
+    console.warn('[AI] response failed:', {
+      chatId: String(chatId),
+      messageId: String(messageId),
+      code: error?.code || null,
+      status: error?.status || error?.response?.status || null,
+      message: error?.message || error
+    });
+
+    try {
+      await maybeSendFallbackMessage({
+        io,
+        chatId,
+        aiBot,
+        error,
+        sourceMessageId: messageId
+      });
+    } catch (fallbackError) {
+      await createAndEmitAiMessage({
+        io,
+        chatId,
+        aiBot,
+        text: AI_UNAVAILABLE_TEXT,
+        sourceMessageId: messageId,
+        systemType: 'ai_unavailable',
+        systemStage: 'final'
       });
       console.warn('[AI] fallback message escalation:', {
         chatId: String(chatId),
