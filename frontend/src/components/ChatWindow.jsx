@@ -831,6 +831,19 @@ function resolveMessageMediaUrl(url) {
   return `${API_URL.replace(/\/api\/?$/, '')}${normalizedUrl}`;
 }
 
+function resolveAudioMimeType(attachment, sourceUrl) {
+  const attachmentMimeType = String(attachment?.mimeType || '').trim().toLowerCase();
+  if (attachmentMimeType.startsWith('audio/')) return attachmentMimeType;
+
+  const normalizedUrl = String(sourceUrl || attachment?.url || '').trim().toLowerCase();
+  if (normalizedUrl.endsWith('.m4a') || normalizedUrl.endsWith('.mp4')) return 'audio/mp4';
+  if (normalizedUrl.endsWith('.mp3')) return 'audio/mpeg';
+  if (normalizedUrl.endsWith('.ogg') || normalizedUrl.endsWith('.oga')) return 'audio/ogg';
+  if (normalizedUrl.endsWith('.wav')) return 'audio/wav';
+  if (normalizedUrl.endsWith('.webm')) return 'audio/webm';
+  return '';
+}
+
 function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
   const [showMenu, setShowMenu] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -843,6 +856,8 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
   });
   const { type: rawType = 'text', text, attachment, createdAt, sender, deleted, edited } = message;
   const audioSourceUrl = resolveMessageMediaUrl(attachment?.url);
+  const audioMimeType = resolveAudioMimeType(attachment, audioSourceUrl);
+  const audioPreload = audioMimeType === 'audio/webm' ? 'auto' : 'metadata';
   const audioElementKey = `${rawType}:${audioSourceUrl || attachment?.originalName || message?._id || 'empty'}`;
 
   useEffect(() => {
@@ -1093,9 +1108,9 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
             <span className="audio-icon">🎤</span>
             <audio
               key={audioElementKey}
-              src={audioSourceUrl}
               controls
-              preload="metadata"
+              preload={audioPreload}
+              playsInline
               className="audio-player"
               onLoadedMetadata={handleAudioMetadata}
               onLoadStart={handleAudioDebugEvent}
@@ -1115,6 +1130,7 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
               onMouseDownCapture={stopAudioEventPropagation}
               onPointerDownCapture={stopAudioEventPropagation}
             >
+              <source src={audioSourceUrl} type={audioMimeType || undefined} />
               Ваш браузер не поддерживает аудио
             </audio>
             <span className="audio-duration">{formatMediaDuration(audioDurationSec)}</span>
@@ -1131,9 +1147,9 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
             <span className="audio-icon">🎙️</span>
             <audio
               key={audioElementKey}
-              src={audioSourceUrl}
               controls
-              preload="metadata"
+              preload={audioPreload}
+              playsInline
               className="audio-player"
               onLoadedMetadata={handleAudioMetadata}
               onLoadStart={handleAudioDebugEvent}
@@ -1153,6 +1169,7 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
               onMouseDownCapture={stopAudioEventPropagation}
               onPointerDownCapture={stopAudioEventPropagation}
             >
+              <source src={audioSourceUrl} type={audioMimeType || undefined} />
             </audio>
             <span className="audio-duration">{formatMediaDuration(audioDurationSec)}</span>
           </div>
