@@ -862,10 +862,12 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
     const durationMs = Number(message?.attachment?.durationMs || 0);
     return durationMs > 0 ? Math.round(durationMs / 1000) : null;
   });
+  const audioElementRef = useRef(null);
   const audioObjectUrlRef = useRef(null);
   const audioBlobFallbackTriedRef = useRef(false);
   const audioBlobLoadingRef = useRef(false);
   const audioBlobReadyRef = useRef(false);
+  const pendingBlobPlayRef = useRef(false);
   const { type: rawType = 'text', text, attachment, createdAt, sender, deleted, edited } = message;
 
   useEffect(() => {
@@ -880,6 +882,7 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
     audioBlobFallbackTriedRef.current = false;
     audioBlobLoadingRef.current = false;
     audioBlobReadyRef.current = false;
+    pendingBlobPlayRef.current = false;
     if (message?.deleted) {
       setIsEditing(false);
       setShowMenu(false);
@@ -893,6 +896,37 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
       audioObjectUrlRef.current = null;
     }
   }, []);
+
+  useEffect(() => {
+    if (!pendingBlobPlayRef.current || !audioBlobReadyRef.current) {
+      return undefined;
+    }
+
+    const audioElement = audioElementRef.current;
+    if (!audioElement) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    const resumePlayback = () => {
+      if (cancelled) return;
+      pendingBlobPlayRef.current = false;
+      audioElement.play().catch((error) => {
+        console.error('[ChatWindow] Audio replay after blob switch failed:', error);
+      });
+    };
+
+    if (audioElement.readyState >= 2) {
+      resumePlayback();
+      return undefined;
+    }
+
+    audioElement.addEventListener('loadeddata', resumePlayback, { once: true });
+    return () => {
+      cancelled = true;
+      audioElement.removeEventListener('loadeddata', resumePlayback);
+    };
+  }, [audioSourceUrl]);
 
   const type = (() => {
     if (deleted) return 'deleted';
@@ -968,8 +1002,8 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
         URL.revokeObjectURL(audioObjectUrlRef.current);
       }
       audioObjectUrlRef.current = URL.createObjectURL(normalizedBlob);
-      setAudioSourceUrl(audioObjectUrlRef.current);
       audioBlobReadyRef.current = true;
+      setAudioSourceUrl(audioObjectUrlRef.current);
       return audioObjectUrlRef.current;
     } catch (error) {
       console.error('[ChatWindow] Audio fallback failed:', error);
@@ -986,23 +1020,9 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
     }
 
     audioBlobFallbackTriedRef.current = true;
+    pendingBlobPlayRef.current = true;
     audioElement.pause();
-
-    const blobUrl = await ensureAudioBlobSource();
-    if (!blobUrl) {
-      return;
-    }
-
-    if (audioElement.src !== blobUrl) {
-      audioElement.src = blobUrl;
-      audioElement.load();
-    }
-
-    try {
-      await audioElement.play();
-    } catch (error) {
-      console.error('[ChatWindow] Audio replay after blob switch failed:', error);
-    }
+    await ensureAudioBlobSource();
   }, [ensureAudioBlobSource]);
 
   const handleAudioError = useCallback(async () => {
@@ -1133,6 +1153,7 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
           <div className="audio-wrapper">
             <span className="audio-icon">🎤</span>
             <audio
+              ref={audioElementRef}
               src={audioSourceUrl}
               controls
               preload="metadata"
@@ -1151,6 +1172,7 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
           <div className="audio-wrapper">
             <span className="audio-icon">🎙️</span>
             <audio
+              ref={audioElementRef}
               src={audioSourceUrl}
               controls
               preload="metadata"
