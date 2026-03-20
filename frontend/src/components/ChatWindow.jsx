@@ -831,102 +831,29 @@ function resolveMessageMediaUrl(url) {
   return `${API_URL.replace(/\/api\/?$/, '')}${normalizedUrl}`;
 }
 
-function inferAudioPlaybackMimeType({ mimeType, originalName, url } = {}) {
-  const normalizedMime = String(mimeType || '').trim().toLowerCase();
-  if (normalizedMime) {
-    if (normalizedMime === 'audio/m4a' || normalizedMime === 'audio/x-m4a') return 'audio/mp4';
-    if (normalizedMime === 'audio/mp3' || normalizedMime === 'audio/x-mp3') return 'audio/mpeg';
-    if (normalizedMime === 'audio/x-wav') return 'audio/wav';
-    if (normalizedMime === 'audio/oga') return 'audio/ogg';
-    return normalizedMime;
-  }
-
-  const source = String(originalName || url || '').trim().toLowerCase();
-  if (source.endsWith('.m4a')) return 'audio/mp4';
-  if (source.endsWith('.mp3')) return 'audio/mpeg';
-  if (source.endsWith('.ogg') || source.endsWith('.oga')) return 'audio/ogg';
-  if (source.endsWith('.opus')) return 'audio/opus';
-  if (source.endsWith('.wav')) return 'audio/wav';
-  if (source.endsWith('.webm')) return 'audio/webm';
-  return '';
-}
-
 function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
   const [showMenu, setShowMenu] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [draftText, setDraftText] = useState(message?.text || '');
   const [selectedMedia, setSelectedMedia] = useState(null);
-  const [audioSourceUrl, setAudioSourceUrl] = useState(() => resolveMessageMediaUrl(message?.attachment?.url));
   const [audioDurationSec, setAudioDurationSec] = useState(() => {
     const durationMs = Number(message?.attachment?.durationMs || 0);
     return durationMs > 0 ? Math.round(durationMs / 1000) : null;
   });
-  const audioElementRef = useRef(null);
-  const audioObjectUrlRef = useRef(null);
-  const audioBlobFallbackTriedRef = useRef(false);
-  const audioBlobLoadingRef = useRef(false);
-  const audioBlobReadyRef = useRef(false);
-  const pendingBlobPlayRef = useRef(false);
   const { type: rawType = 'text', text, attachment, createdAt, sender, deleted, edited } = message;
+  const audioSourceUrl = resolveMessageMediaUrl(attachment?.url);
 
   useEffect(() => {
     setDraftText(message?.text || '');
     const durationMs = Number(message?.attachment?.durationMs || 0);
     setAudioDurationSec(durationMs > 0 ? Math.round(durationMs / 1000) : null);
-    if (audioObjectUrlRef.current) {
-      URL.revokeObjectURL(audioObjectUrlRef.current);
-      audioObjectUrlRef.current = null;
-    }
-    setAudioSourceUrl(resolveMessageMediaUrl(message?.attachment?.url));
-    audioBlobFallbackTriedRef.current = false;
-    audioBlobLoadingRef.current = false;
-    audioBlobReadyRef.current = false;
-    pendingBlobPlayRef.current = false;
     if (message?.deleted) {
       setIsEditing(false);
       setShowMenu(false);
       setShowDeleteConfirm(false);
     }
   }, [message]);
-
-  useEffect(() => () => {
-    if (audioObjectUrlRef.current) {
-      URL.revokeObjectURL(audioObjectUrlRef.current);
-      audioObjectUrlRef.current = null;
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!pendingBlobPlayRef.current || !audioBlobReadyRef.current) {
-      return undefined;
-    }
-
-    const audioElement = audioElementRef.current;
-    if (!audioElement) {
-      return undefined;
-    }
-
-    let cancelled = false;
-    const resumePlayback = () => {
-      if (cancelled) return;
-      pendingBlobPlayRef.current = false;
-      audioElement.play().catch((error) => {
-        console.error('[ChatWindow] Audio replay after blob switch failed:', error);
-      });
-    };
-
-    if (audioElement.readyState >= 2) {
-      resumePlayback();
-      return undefined;
-    }
-
-    audioElement.addEventListener('loadeddata', resumePlayback, { once: true });
-    return () => {
-      cancelled = true;
-      audioElement.removeEventListener('loadeddata', resumePlayback);
-    };
-  }, [audioSourceUrl]);
 
   const type = (() => {
     if (deleted) return 'deleted';
@@ -969,67 +896,6 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
       setAudioDurationSec(Math.round(duration));
     }
   }, []);
-
-  const ensureAudioBlobSource = useCallback(async () => {
-    const directAudioUrl = resolveMessageMediaUrl(attachment?.url);
-    if (!directAudioUrl) return null;
-    if (audioObjectUrlRef.current && audioBlobReadyRef.current) {
-      return audioObjectUrlRef.current;
-    }
-    if (audioBlobLoadingRef.current) {
-      return null;
-    }
-
-    audioBlobLoadingRef.current = true;
-    try {
-      const response = await axios.get(directAudioUrl, { responseType: 'blob' });
-      const blob = response?.data;
-      if (!(blob instanceof Blob) || blob.size <= 0) {
-        return null;
-      }
-
-      const responseMimeType = String(response.headers?.['content-type'] || '').trim();
-      const playbackMimeType = inferAudioPlaybackMimeType({
-        mimeType: attachment?.mimeType || responseMimeType,
-        originalName: attachment?.originalName,
-        url: attachment?.url
-      });
-      const normalizedBlob = playbackMimeType && blob.type !== playbackMimeType
-        ? new Blob([blob], { type: playbackMimeType })
-        : blob;
-
-      if (audioObjectUrlRef.current) {
-        URL.revokeObjectURL(audioObjectUrlRef.current);
-      }
-      audioObjectUrlRef.current = URL.createObjectURL(normalizedBlob);
-      audioBlobReadyRef.current = true;
-      setAudioSourceUrl(audioObjectUrlRef.current);
-      return audioObjectUrlRef.current;
-    } catch (error) {
-      console.error('[ChatWindow] Audio fallback failed:', error);
-      return null;
-    } finally {
-      audioBlobLoadingRef.current = false;
-    }
-  }, [attachment?.mimeType, attachment?.originalName, attachment?.url]);
-
-  const handleAudioPlay = useCallback(async (event) => {
-    const audioElement = event.currentTarget;
-    if (!audioElement || audioBlobReadyRef.current) {
-      return;
-    }
-
-    audioBlobFallbackTriedRef.current = true;
-    pendingBlobPlayRef.current = true;
-    audioElement.pause();
-    await ensureAudioBlobSource();
-  }, [ensureAudioBlobSource]);
-
-  const handleAudioError = useCallback(async () => {
-    if (audioBlobFallbackTriedRef.current) return;
-    audioBlobFallbackTriedRef.current = true;
-    await ensureAudioBlobSource();
-  }, [ensureAudioBlobSource]);
 
   const openMedia = useCallback((media) => {
     if (!media?.url) return;
@@ -1153,14 +1019,11 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
           <div className="audio-wrapper">
             <span className="audio-icon">🎤</span>
             <audio
-              ref={audioElementRef}
               src={audioSourceUrl}
               controls
               preload="metadata"
               className="audio-player"
               onLoadedMetadata={handleAudioMetadata}
-              onPlay={handleAudioPlay}
-              onError={handleAudioError}
             >
               Ваш браузер не поддерживает аудио
             </audio>
@@ -1172,14 +1035,11 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
           <div className="audio-wrapper">
             <span className="audio-icon">🎙️</span>
             <audio
-              ref={audioElementRef}
               src={audioSourceUrl}
               controls
               preload="metadata"
               className="audio-player"
               onLoadedMetadata={handleAudioMetadata}
-              onPlay={handleAudioPlay}
-              onError={handleAudioError}
             >
             </audio>
             <span className="audio-duration">{formatMediaDuration(audioDurationSec)}</span>

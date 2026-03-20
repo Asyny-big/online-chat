@@ -117,6 +117,11 @@ class VoiceRecorder(
 
     private fun buildPreferredFormats(): List<RecordingFormat> {
         val formats = mutableListOf<RecordingFormat>()
+        formats += RecordingFormat(
+            extension = "m4a",
+            outputFormat = MediaRecorder.OutputFormat.MPEG_4,
+            audioEncoder = MediaRecorder.AudioEncoder.AAC
+        )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             formats += RecordingFormat(
                 extension = "webm",
@@ -124,11 +129,6 @@ class VoiceRecorder(
                 audioEncoder = MediaRecorder.AudioEncoder.OPUS
             )
         }
-        formats += RecordingFormat(
-            extension = "m4a",
-            outputFormat = MediaRecorder.OutputFormat.MPEG_4,
-            audioEncoder = MediaRecorder.AudioEncoder.AAC
-        )
         return formats
     }
 
