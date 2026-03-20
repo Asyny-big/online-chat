@@ -294,6 +294,7 @@ function MessageInput({ chat, chatId, socket, token, onTyping }) {
         size: res.data.size
       };
       voiceAttachment.originalName = 'Голосовое сообщение';
+      voiceAttachment.originalName = '\u0413\u043e\u043b\u043e\u0441\u043e\u0432\u043e\u0435 \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u0435';
       if (durationMs && durationMs > 0) {
         voiceAttachment.durationMs = durationMs;
       }
@@ -302,9 +303,9 @@ function MessageInput({ chat, chatId, socket, token, onTyping }) {
         chatId,
         type: 'voice',
         text: '',
-        attachment: voiceAttachment,
+        attachment: voiceAttachment, /*
           originalName: 'Голосовое сообщение',
-        }
+        */
       });
     } catch (err) {
       console.error('Voice upload error:', err);
