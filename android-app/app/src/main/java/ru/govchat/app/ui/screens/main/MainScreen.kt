@@ -2168,7 +2168,9 @@ private fun ChatContent(
     var expandedVideoNoteState by remember(chat.id) { mutableStateOf<ExpandedVideoNoteUiState?>(null) }
     val videoNoteBounds = remember(chat.id) { mutableStateMapOf<String, Rect>() }
     val listState = rememberLazyListState()
-    val playbackCoordinator = remember(chat.id) { PlaybackCoordinator() }
+    val playbackCoordinator = remember(chat.id) {
+        PlaybackCoordinator(context.applicationContext)
+    }
     val videoNotePlayerManager = remember(chat.id) {
         SharedVideoNotePlayerManager(context.applicationContext)
     }
@@ -4467,10 +4469,12 @@ private fun MessageBody(
         }
 
         MessageType.Audio -> {
-            AttachmentLink(
-                title = message.attachment?.originalName?.ifBlank { "Голосовое сообщение" } ?: "Голосовое сообщение",
-                subtitle = "Скачать аудио",
-                onClick = onAttachmentClick
+            VoiceMessageBody(
+                message = message,
+                playbackCoordinator = playbackCoordinator,
+                isActive = activePlaybackMessageId == message.id,
+                onActivePlaybackChanged = onActivePlaybackChanged,
+                onFallbackClick = onAttachmentClick
             )
         }
 

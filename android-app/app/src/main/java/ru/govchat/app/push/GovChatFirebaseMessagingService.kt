@@ -98,8 +98,17 @@ class GovChatFirebaseMessagingService : FirebaseMessagingService() {
             }
 
             isIncomingCallEvent -> {
+                val isAppInForeground = ProcessLifecycleOwner.get().lifecycle.currentState
+                    .isAtLeast(Lifecycle.State.STARTED)
                 val callId = payload.read("callId", "call_id", "roomId", "room_id").ifBlank {
                     "call-${System.currentTimeMillis()}"
+                }
+                if (isAppInForeground) {
+                    Log.i(
+                        TAG,
+                        "Incoming call push ignored in foreground; realtime channel should present call UI, callId=$callId"
+                    )
+                    return
                 }
                 if (CallNotificationManager.isIncomingCallStillPending(this, callId)) {
                     Log.i(TAG, "Skipping duplicate incoming call push for already pending callId=$callId")
@@ -128,12 +137,10 @@ class GovChatFirebaseMessagingService : FirebaseMessagingService() {
                     initiatorAvatarUrl = payload.read("initiatorAvatarUrl", "initiator_avatar_url", "avatarUrl", "avatar_url"),
                     participantCount = payload.read("participantCount", "participant_count").toIntOrNull() ?: 0
                 )
-                val showNotification = !ProcessLifecycleOwner.get().lifecycle.currentState
-                    .isAtLeast(Lifecycle.State.STARTED)
                 IncomingCallService.showIncomingCall(
                     context = this,
                     command = command,
-                    showNotification = showNotification
+                    showNotification = true
                 )
                 Log.i(TAG, "Incoming call notification shown traceId=${pushTraceId.ifBlank { "n/a" }} callId=$callId")
             }

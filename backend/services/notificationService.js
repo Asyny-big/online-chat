@@ -117,7 +117,10 @@ class NotificationService {
         messageId: ''
       },
       forceWakeup: true,
-      sendToOnlineUsers: false
+      // Calls must reach backgrounded and multi-device users even when one session
+      // is still online via Socket.IO. Suppressing push at user level drops ringing
+      // notifications for minimized apps and secondary devices.
+      sendToOnlineUsers: true
     });
   }
 
@@ -155,7 +158,7 @@ class NotificationService {
         messageId: ''
       },
       forceWakeup: true,
-      sendToOnlineUsers: false
+      sendToOnlineUsers: true
     });
   }
 

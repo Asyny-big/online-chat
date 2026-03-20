@@ -4,6 +4,35 @@ import { API_URL } from '@/config';
 import { getTransactions } from '@/domains/hrum/api/economyApi';
 import { useHrumToast } from './HrumToast';
 
+function getBlobDurationMs(blob) {
+  return new Promise((resolve) => {
+    if (!blob || typeof window === 'undefined') {
+      resolve(null);
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(blob);
+    const audio = document.createElement('audio');
+
+    const cleanup = () => {
+      audio.src = '';
+      URL.revokeObjectURL(objectUrl);
+    };
+
+    audio.preload = 'metadata';
+    audio.onloadedmetadata = () => {
+      const duration = Number(audio.duration);
+      cleanup();
+      resolve(Number.isFinite(duration) && duration > 0 ? Math.round(duration * 1000) : null);
+    };
+    audio.onerror = () => {
+      cleanup();
+      resolve(null);
+    };
+    audio.src = objectUrl;
+  });
+}
+
 function MessageInput({ chat, chatId, socket, token, onTyping }) {
   const { showEarn } = useHrumToast();
   const [input, setInput] = useState('');
@@ -121,10 +150,8 @@ function MessageInput({ chat, chatId, socket, token, onTyping }) {
         type,
         text: '',
         attachment: {
-          url: res.data.url,
           originalName: res.data.originalName,
           mimeType: res.data.mimeType,
-          size: res.data.size
         }
       });
     } catch (err) {
@@ -192,11 +219,12 @@ function MessageInput({ chat, chatId, socket, token, onTyping }) {
 
         const actualMimeType = mediaRecorder.mimeType || mimeType || 'audio/webm';
         const audioBlob = new Blob(audioChunksRef.current, { type: actualMimeType });
+        const durationMs = await getBlobDurationMs(audioBlob);
 
         console.log('[MessageInput] Recording stopped, blob size:', audioBlob.size, 'type:', actualMimeType);
 
         if (audioBlob.size > 0) {
-          await uploadVoiceMessage(audioBlob, actualMimeType);
+          await uploadVoiceMessage(audioBlob, actualMimeType, durationMs);
         }
       };
 
@@ -240,7 +268,7 @@ function MessageInput({ chat, chatId, socket, token, onTyping }) {
     }
   };
 
-  const uploadVoiceMessage = async (blob, mimeType) => {
+  const uploadVoiceMessage = async (blob, mimeType, durationMs) => {
     setUploading(true);
     try {
       // Определяем расширение файла на основе MIME-типа
@@ -260,16 +288,22 @@ function MessageInput({ chat, chatId, socket, token, onTyping }) {
       });
 
       console.log('[MessageInput] Voice uploaded:', res.data);
+      const voiceAttachment = {
+        url: res.data.url,
+        mimeType: mimeType || 'audio/webm',
+        size: res.data.size
+      };
+      voiceAttachment.originalName = 'Голосовое сообщение';
+      if (durationMs && durationMs > 0) {
+        voiceAttachment.durationMs = durationMs;
+      }
 
       socket.emit('message:send', {
         chatId,
-        type: 'audio',
+        type: 'voice',
         text: '',
-        attachment: {
-          url: res.data.url,
+        attachment: voiceAttachment,
           originalName: 'Голосовое сообщение',
-          mimeType: mimeType || 'audio/webm',
-          size: res.data.size
         }
       });
     } catch (err) {

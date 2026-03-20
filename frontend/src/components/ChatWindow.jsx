@@ -828,11 +828,16 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
   const [isEditing, setIsEditing] = useState(false);
   const [draftText, setDraftText] = useState(message?.text || '');
   const [selectedMedia, setSelectedMedia] = useState(null);
-  const [audioDurationSec, setAudioDurationSec] = useState(null);
+  const [audioDurationSec, setAudioDurationSec] = useState(() => {
+    const durationMs = Number(message?.attachment?.durationMs || 0);
+    return durationMs > 0 ? Math.round(durationMs / 1000) : null;
+  });
   const { type: rawType = 'text', text, attachment, createdAt, sender, deleted, edited } = message;
 
   useEffect(() => {
     setDraftText(message?.text || '');
+    const durationMs = Number(message?.attachment?.durationMs || 0);
+    setAudioDurationSec(durationMs > 0 ? Math.round(durationMs / 1000) : null);
     if (message?.deleted) {
       setIsEditing(false);
       setShowMenu(false);
@@ -883,6 +888,13 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
   };
 
   const displayOriginalName = normalizeFilename(attachment?.originalName) || 'Файл';
+
+  const handleAudioMetadata = useCallback((event) => {
+    const duration = Number(event.currentTarget?.duration);
+    if (Number.isFinite(duration) && duration > 0) {
+      setAudioDurationSec(Math.round(duration));
+    }
+  }, []);
 
   const openMedia = useCallback((media) => {
     if (!media?.url) return;
@@ -1002,22 +1014,16 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
         );
       case 'audio':
         const audioUrl = getMediaUrl(attachment?.url);
-        const audioMimeType = attachment?.mimeType || 'audio/webm';
         return (
           <div className="audio-wrapper">
             <span className="audio-icon">🎤</span>
             <audio
+              src={audioUrl}
               controls
               preload="metadata"
               className="audio-player"
-              onLoadedMetadata={(event) => {
-                const duration = Number(event.currentTarget?.duration);
-                if (Number.isFinite(duration) && duration > 0) {
-                  setAudioDurationSec(Math.round(duration));
-                }
-              }}
+              onLoadedMetadata={handleAudioMetadata}
             >
-              <source src={audioUrl} type={audioMimeType} />
               Ваш браузер не поддерживает аудио
             </audio>
             <span className="audio-duration">{formatMediaDuration(audioDurationSec)}</span>
@@ -1028,17 +1034,12 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
           <div className="audio-wrapper">
             <span className="audio-icon">🎙️</span>
             <audio
+              src={getMediaUrl(attachment?.url)}
               controls
               preload="metadata"
               className="audio-player"
-              onLoadedMetadata={(event) => {
-                const duration = Number(event.currentTarget?.duration);
-                if (Number.isFinite(duration) && duration > 0) {
-                  setAudioDurationSec(Math.round(duration));
-                }
-              }}
+              onLoadedMetadata={handleAudioMetadata}
             >
-              <source src={getMediaUrl(attachment?.url)} type={attachment?.mimeType || 'audio/mp4'} />
             </audio>
             <span className="audio-duration">{formatMediaDuration(audioDurationSec)}</span>
           </div>
