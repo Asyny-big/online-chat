@@ -898,6 +898,37 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
     }
   }, []);
 
+  const logAudioDebug = useCallback((label, element) => {
+    if (!element) return;
+
+    const mediaError = element.error
+      ? {
+          code: element.error.code,
+          message: element.error.message || ''
+        }
+      : null;
+
+    console.debug('[GovChat audio]', {
+      label,
+      browser: navigator.userAgent,
+      messageId: message?._id || null,
+      type,
+      src: audioSourceUrl,
+      currentSrc: element.currentSrc || '',
+      readyState: element.readyState,
+      networkState: element.networkState,
+      paused: element.paused,
+      ended: element.ended,
+      currentTime: element.currentTime,
+      duration: element.duration,
+      error: mediaError
+    });
+  }, [audioSourceUrl, message?._id, type]);
+
+  const handleAudioDebugEvent = useCallback((event) => {
+    logAudioDebug(event.type, event.currentTarget);
+  }, [logAudioDebug]);
+
   const stopAudioEventPropagation = useCallback((event) => {
     event.stopPropagation();
   }, []);
@@ -917,6 +948,30 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
   const closeMedia = useCallback(() => {
     setSelectedMedia(null);
   }, []);
+
+  useEffect(() => {
+    if (type !== 'audio' && type !== 'voice') return undefined;
+
+    console.debug('[GovChat audio]', {
+      label: 'mount',
+      browser: navigator.userAgent,
+      messageId: message?._id || null,
+      type,
+      src: audioSourceUrl,
+      key: audioElementKey
+    });
+
+    return () => {
+      console.debug('[GovChat audio]', {
+        label: 'unmount',
+        browser: navigator.userAgent,
+        messageId: message?._id || null,
+        type,
+        src: audioSourceUrl,
+        key: audioElementKey
+      });
+    };
+  }, [audioElementKey, audioSourceUrl, message?._id, type]);
 
   const handleSaveEdit = async () => {
     const nextText = draftText.trim();
@@ -1043,6 +1098,19 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
               preload="metadata"
               className="audio-player"
               onLoadedMetadata={handleAudioMetadata}
+              onLoadStart={handleAudioDebugEvent}
+              onLoadedData={handleAudioDebugEvent}
+              onCanPlay={handleAudioDebugEvent}
+              onPlay={handleAudioDebugEvent}
+              onPlaying={handleAudioDebugEvent}
+              onPause={handleAudioDebugEvent}
+              onWaiting={handleAudioDebugEvent}
+              onSuspend={handleAudioDebugEvent}
+              onStalled={handleAudioDebugEvent}
+              onAbort={handleAudioDebugEvent}
+              onEmptied={handleAudioDebugEvent}
+              onEnded={handleAudioDebugEvent}
+              onError={handleAudioDebugEvent}
               onClick={stopAudioEventPropagation}
               onMouseDownCapture={stopAudioEventPropagation}
               onPointerDownCapture={stopAudioEventPropagation}
@@ -1068,6 +1136,19 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
               preload="metadata"
               className="audio-player"
               onLoadedMetadata={handleAudioMetadata}
+              onLoadStart={handleAudioDebugEvent}
+              onLoadedData={handleAudioDebugEvent}
+              onCanPlay={handleAudioDebugEvent}
+              onPlay={handleAudioDebugEvent}
+              onPlaying={handleAudioDebugEvent}
+              onPause={handleAudioDebugEvent}
+              onWaiting={handleAudioDebugEvent}
+              onSuspend={handleAudioDebugEvent}
+              onStalled={handleAudioDebugEvent}
+              onAbort={handleAudioDebugEvent}
+              onEmptied={handleAudioDebugEvent}
+              onEnded={handleAudioDebugEvent}
+              onError={handleAudioDebugEvent}
               onClick={stopAudioEventPropagation}
               onMouseDownCapture={stopAudioEventPropagation}
               onPointerDownCapture={stopAudioEventPropagation}
