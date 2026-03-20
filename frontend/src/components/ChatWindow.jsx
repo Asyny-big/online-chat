@@ -864,6 +864,8 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
   });
   const audioObjectUrlRef = useRef(null);
   const audioBlobFallbackTriedRef = useRef(false);
+  const audioBlobLoadingRef = useRef(false);
+  const audioBlobReadyRef = useRef(false);
   const { type: rawType = 'text', text, attachment, createdAt, sender, deleted, edited } = message;
 
   useEffect(() => {
@@ -876,6 +878,8 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
     }
     setAudioSourceUrl(resolveMessageMediaUrl(message?.attachment?.url));
     audioBlobFallbackTriedRef.current = false;
+    audioBlobLoadingRef.current = false;
+    audioBlobReadyRef.current = false;
     if (message?.deleted) {
       setIsEditing(false);
       setShowMenu(false);
@@ -932,16 +936,22 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
     }
   }, []);
 
-  const handleAudioError = useCallback(async () => {
+  const ensureAudioBlobSource = useCallback(async () => {
     const directAudioUrl = resolveMessageMediaUrl(attachment?.url);
-    if (!directAudioUrl || audioBlobFallbackTriedRef.current) return;
+    if (!directAudioUrl) return null;
+    if (audioObjectUrlRef.current && audioBlobReadyRef.current) {
+      return audioObjectUrlRef.current;
+    }
+    if (audioBlobLoadingRef.current) {
+      return null;
+    }
 
-    audioBlobFallbackTriedRef.current = true;
+    audioBlobLoadingRef.current = true;
     try {
       const response = await axios.get(directAudioUrl, { responseType: 'blob' });
       const blob = response?.data;
       if (!(blob instanceof Blob) || blob.size <= 0) {
-        return;
+        return null;
       }
 
       const responseMimeType = String(response.headers?.['content-type'] || '').trim();
@@ -959,10 +969,47 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
       }
       audioObjectUrlRef.current = URL.createObjectURL(normalizedBlob);
       setAudioSourceUrl(audioObjectUrlRef.current);
+      audioBlobReadyRef.current = true;
+      return audioObjectUrlRef.current;
     } catch (error) {
       console.error('[ChatWindow] Audio fallback failed:', error);
+      return null;
+    } finally {
+      audioBlobLoadingRef.current = false;
     }
   }, [attachment?.mimeType, attachment?.originalName, attachment?.url]);
+
+  const handleAudioPlay = useCallback(async (event) => {
+    const audioElement = event.currentTarget;
+    if (!audioElement || audioBlobReadyRef.current) {
+      return;
+    }
+
+    audioBlobFallbackTriedRef.current = true;
+    audioElement.pause();
+
+    const blobUrl = await ensureAudioBlobSource();
+    if (!blobUrl) {
+      return;
+    }
+
+    if (audioElement.src !== blobUrl) {
+      audioElement.src = blobUrl;
+      audioElement.load();
+    }
+
+    try {
+      await audioElement.play();
+    } catch (error) {
+      console.error('[ChatWindow] Audio replay after blob switch failed:', error);
+    }
+  }, [ensureAudioBlobSource]);
+
+  const handleAudioError = useCallback(async () => {
+    if (audioBlobFallbackTriedRef.current) return;
+    audioBlobFallbackTriedRef.current = true;
+    await ensureAudioBlobSource();
+  }, [ensureAudioBlobSource]);
 
   const openMedia = useCallback((media) => {
     if (!media?.url) return;
@@ -1091,6 +1138,7 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
               preload="metadata"
               className="audio-player"
               onLoadedMetadata={handleAudioMetadata}
+              onPlay={handleAudioPlay}
               onError={handleAudioError}
             >
               Ваш браузер не поддерживает аудио
@@ -1108,6 +1156,7 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
               preload="metadata"
               className="audio-player"
               onLoadedMetadata={handleAudioMetadata}
+              onPlay={handleAudioPlay}
               onError={handleAudioError}
             >
             </audio>
