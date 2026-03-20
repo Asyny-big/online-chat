@@ -1,12 +1,12 @@
 const AI_TOOLS = Object.freeze({
   create_group: {
-    description: 'Create a new group chat for the current user.',
+    description: 'Create a new group chat for the current user. Optional participants may be passed as userIds or phone numbers.',
     progressText: 'Создаю группу...',
     risk: 'safe',
     requiresConfirmation: false
   },
   add_user: {
-    description: 'Add a user to a group chat. If it follows create_group, chatId may be omitted.',
+    description: 'Add a user to a group chat by userId, phone number or identifier. If it follows create_group, chatId may be omitted.',
     progressText: 'Добавляю участника в группу...',
     risk: 'dangerous',
     requiresConfirmation: true
@@ -35,8 +35,14 @@ const AI_TOOLS = Object.freeze({
     risk: 'safe',
     requiresConfirmation: false
   },
+  find_user: {
+    description: 'Find a user by userId, phone number or identifier and return compact profile data.',
+    progressText: 'Ищу пользователя...',
+    risk: 'safe',
+    requiresConfirmation: false
+  },
   start_call: {
-    description: 'Start a real private call by userId or private chatId.',
+    description: 'Start a real private call by userId, phone number or private chatId.',
     progressText: 'Запускаю звонок...',
     risk: 'dangerous',
     requiresConfirmation: true
@@ -50,6 +56,7 @@ const AI_TOOL_PROGRESS_TEXT = Object.freeze({
   explain_feature: 'Подбираю нужную подсказку...',
   suggest_fix_connection: 'Проверяю соединение и ищу причину...',
   get_user_chats: 'Смотрю ваши чаты...',
+  find_user: 'Ищу пользователя...',
   start_call: 'Запускаю звонок...'
 });
 

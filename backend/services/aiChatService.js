@@ -12,6 +12,7 @@ const { executeAiPlan } = require('./aiActionExecutor');
 const { AI_TOOLS, getAiToolProgressText, planRequiresConfirmation } = require('./aiTools');
 const { getMemory, buildMemoryPrompt, rememberUserMessage } = require('./aiMemoryService');
 const { resolveFallbackAiPlan, resolveSupportShortcut } = require('./aiIntentService');
+const { normalizePhone } = require('../utils/userLookup');
 
 const AI_BOT_SYSTEM_KEY = 'ai-bot';
 const AI_BOT_NAME = 'Поддержка GovChat';
@@ -61,10 +62,6 @@ const responseQueueByChat = new Map();
 
 let activeAiJobs = 0;
 const aiConcurrencyWaiters = [];
-
-function normalizePhone(phone) {
-  return String(phone || '').replace(/[\s\-()]/g, '');
-}
 
 function createAppFacade({ io, userSockets, activeCalls, activeGroupCalls }) {
   return {
@@ -884,16 +881,6 @@ async function executeAndReportAiPlan({
         text: `Шаг ${index + 1}/${stepTotal} выполнен: ${action}.`
       });
     },
-    onStepError: async ({ index, total: stepTotal, error }) => {
-      if (stepTotal <= 1) return;
-
-      await createAndEmitAiMessage({
-        io,
-        chatId,
-        aiBot,
-        text: normalizeAiReply(`Ошибка на шаге ${index + 1}: ${error?.message || 'неизвестная ошибка'}.`)
-      });
-    }
   });
 }
 

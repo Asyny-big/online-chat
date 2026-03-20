@@ -1,5 +1,6 @@
 ﻿const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
+const { normalizePhone } = require('../utils/phone');
 
 const userSchema = new mongoose.Schema({
   phone: {
@@ -97,7 +98,7 @@ const userSchema = new mongoose.Schema({
 
 userSchema.pre('save', function(next) {
   if (this.isModified('phone')) {
-    this.phoneNormalized = this.phone.replace(/[\s\-()]/g, '');
+    this.phoneNormalized = normalizePhone(this.phone);
   }
   next();
 });

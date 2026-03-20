@@ -4,11 +4,7 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const config = require('../config.local');
 const { ensureSupportChatForUser } = require('../services/aiChatService');
-
-// Нормализация номера телефона
-function normalizePhone(phone) {
-  return phone.replace(/[\s\-()]/g, '');
-}
+const { buildPhoneLookupCandidates, normalizePhone } = require('../utils/userLookup');
 
 // Регистрация
 router.post('/register', async (req, res) => {
@@ -31,7 +27,13 @@ router.post('/register', async (req, res) => {
     const phoneNormalized = normalizePhone(phone.trim());
 
     // Проверка существующего пользователя
-    const existing = await User.findOne({ phoneNormalized });
+    const lookupCandidates = buildPhoneLookupCandidates(phone.trim());
+    const existing = await User.findOne({
+      $or: [
+        { phoneNormalized: { $in: lookupCandidates } },
+        { phone: { $in: lookupCandidates } }
+      ]
+    });
     if (existing) {
       return res.status(400).json({ error: 'Пользователь с таким номером уже существует' });
     }
@@ -78,7 +80,13 @@ router.post('/login', async (req, res) => {
     }
 
     const phoneNormalized = normalizePhone(phone.trim());
-    const user = await User.findOne({ phoneNormalized });
+    const lookupCandidates = buildPhoneLookupCandidates(phone.trim());
+    const user = await User.findOne({
+      $or: [
+        { phoneNormalized: { $in: lookupCandidates } },
+        { phone: { $in: lookupCandidates } }
+      ]
+    });
 
     if (!user) {
       return res.status(401).json({ error: 'Неверный номер телефона или пароль' });

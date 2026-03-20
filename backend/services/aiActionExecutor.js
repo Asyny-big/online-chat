@@ -9,6 +9,7 @@ const { logAiAction, loadLatestSuccessfulAiAction } = require('./aiLogService');
 const { rememberAction } = require('./aiMemoryService');
 const { startPrivateCallFlow } = require('./callOrchestrator');
 const { getOpenRouterApiKey } = require('./aiService');
+const { resolveUser } = require('../utils/userLookup');
 
 const FEATURE_HELP = {
   capabilities: [
@@ -184,6 +185,123 @@ function buildParamsFingerprint(params) {
   }
 }
 
+function createAiActionError(message, code, extra = null) {
+  const error = new Error(message);
+  error.code = code;
+  if (extra && typeof extra === 'object') {
+    Object.assign(error, extra);
+  }
+  return error;
+}
+
+function buildUserLookupInput(params) {
+  if (!params || typeof params !== 'object') {
+    return null;
+  }
+
+  const userId = String(params.userId || params.id || '').trim();
+  const phone = String(params.phone || '').trim();
+  const identifier = String(params.identifier || '').trim();
+  const username = String(params.username || '').trim();
+  const name = String(params.name || '').trim();
+
+  if (!userId && !phone && !identifier && !username && !name) {
+    return null;
+  }
+
+  return {
+    userId,
+    phone,
+    identifier,
+    username,
+    name
+  };
+}
+
+function describeLookupTarget(input) {
+  if (!input || typeof input !== 'object') {
+    return 'указанному идентификатору';
+  }
+
+  if (input.phone) return `номеру ${input.phone}`;
+  if (input.identifier) return `идентификатору ${input.identifier}`;
+  if (input.username) return `имени ${input.username}`;
+  if (input.name) return `имени ${input.name}`;
+  if (input.userId) return `id ${input.userId}`;
+  return 'указанному идентификатору';
+}
+
+async function resolveUserOrThrow({ params, actorUserId = null, purpose = 'general' }) {
+  const lookupInput = buildUserLookupInput(params);
+  if (!lookupInput) {
+    throw createAiActionError(
+      'Не указан пользователь. Передайте userId, phone или identifier.',
+      'AI_USER_IDENTIFIER_REQUIRED'
+    );
+  }
+
+  const resolved = await resolveUser(lookupInput, {
+    excludeUserId: purpose === 'find_user' ? actorUserId : null
+  });
+
+  if (resolved?.ambiguous) {
+    throw createAiActionError(
+      `Найдено несколько пользователей по ${describeLookupTarget(lookupInput)}. Уточните номер телефона.`,
+      'USER_RESOLUTION_AMBIGUOUS',
+      { stopExecution: true }
+    );
+  }
+
+  if (!resolved?.userId || !resolved?.user) {
+    throw createAiActionError(
+      `Не удалось найти пользователя по ${describeLookupTarget(lookupInput)}. Убедитесь, что он зарегистрирован в GovChat.`,
+      'USER_NOT_FOUND',
+      { stopExecution: true }
+    );
+  }
+
+  if (purpose === 'start_call' && actorUserId && String(resolved.userId) === String(actorUserId)) {
+    throw createAiActionError('Нельзя позвонить самому себе.', 'AI_SELF_CALL_NOT_ALLOWED', {
+      stopExecution: true
+    });
+  }
+
+  return resolved;
+}
+
+function collectParticipantLookupInputs(params) {
+  const items = [];
+  const participants = Array.isArray(params?.participants) ? params.participants : [];
+  const participantPhones = Array.isArray(params?.participantPhones) ? params.participantPhones : [];
+  const participantIds = Array.isArray(params?.participantIds) ? params.participantIds : [];
+
+  participants.forEach((item) => {
+    if (!item) return;
+    if (typeof item === 'string') {
+      items.push({ identifier: item });
+      return;
+    }
+    if (typeof item === 'object') {
+      const normalized = buildUserLookupInput(item);
+      if (normalized) items.push(normalized);
+    }
+  });
+
+  participantPhones.forEach((phone) => {
+    if (String(phone || '').trim()) {
+      items.push({ phone: String(phone).trim() });
+    }
+  });
+
+  participantIds.forEach((userId) => {
+    if (String(userId || '').trim()) {
+      items.push({ userId: String(userId).trim() });
+    }
+  });
+
+  return items;
+}
+
 async function createGroupTool({ app, actorUserId, params }) {
   const name = String(params?.name || '').trim();
   if (!name) {
@@ -198,10 +316,34 @@ async function createGroupTool({ app, actorUserId, params }) {
     throw error;
   }
 
+  const participantInputs = collectParticipantLookupInputs(params);
+  const participantMap = new Map();
+
+  for (const participantInput of participantInputs) {
+    const resolved = await resolveUserOrThrow({
+      params: participantInput,
+      actorUserId,
+      purpose: 'create_group'
+    });
+
+    if (String(resolved.userId) === String(actorUserId)) {
+      continue;
+    }
+
+    if (!participantMap.has(String(resolved.userId))) {
+      participantMap.set(String(resolved.userId), resolved.user);
+    }
+  }
+
+  const participants = [{ user: actorUserId, role: 'admin' }];
+  participantMap.forEach((user) => {
+    participants.push({ user: user._id, role: 'member' });
+  });
+
   const chat = await Chat.create({
     type: 'group',
     name,
-    participants: [{ user: actorUserId, role: 'admin' }]
+    participants
   });
 
   await Message.create({
@@ -219,23 +361,33 @@ async function createGroupTool({ app, actorUserId, params }) {
     error.code = 'AI_GROUP_CHAT_NOT_FOUND';
     throw error;
   }
-  emitChatToUserSockets({ app, userId: actorUserId, chat: refreshedChat });
+
+  (refreshedChat.participants || []).forEach((participant) => {
+    const participantId = participant?.user?._id?.toString?.() || participant?.user?.toString?.();
+    if (participantId) {
+      emitChatToUserSockets({ app, userId: participantId, chat: refreshedChat });
+    }
+  });
+
+  const addedCount = participantMap.size;
+  const responseText = addedCount > 0
+    ? `Готово. Создал группу «${name}» и добавил ${addedCount} ${addedCount === 1 ? 'участника' : addedCount < 5 ? 'участников' : 'участников'}.`
+    : `Готово. Создал группу «${name}».`;
 
   return {
     ok: true,
     action: 'create_group',
-    responseText: `Готово. Создал группу «${name}».`,
+    responseText,
     data: {
       chatId: String(chat._id),
-      name
+      name,
+      participantUserIds: Array.from(participantMap.keys())
     }
   };
 }
 
 async function addUserTool({ app, actorUserId, params }) {
   const chatId = String(params?.chatId || '').trim();
-  const userId = String(params?.userId || '').trim();
-  const phone = String(params?.phone || '').trim();
 
   if (!mongoose.Types.ObjectId.isValid(chatId)) {
     const error = new Error('Для add_user нужен корректный chatId.');
@@ -263,18 +415,11 @@ async function addUserTool({ app, actorUserId, params }) {
     throw error;
   }
 
-  let targetUser = null;
-  if (mongoose.Types.ObjectId.isValid(userId)) {
-    targetUser = await User.findById(userId).select('_id name phone avatarUrl');
-  } else if (phone) {
-    targetUser = await User.findOne({ phone }).select('_id name phone avatarUrl');
-  }
-
-  if (!targetUser) {
-    const error = new Error('Пользователь для добавления не найден.');
-    error.code = 'AI_ADD_USER_TARGET_NOT_FOUND';
-    throw error;
-  }
+  const { user: targetUser } = await resolveUserOrThrow({
+    params,
+    actorUserId,
+    purpose: 'add_user'
+  });
 
   if (chat.isParticipant(targetUser._id)) {
     const error = new Error('Пользователь уже состоит в группе.');
@@ -353,6 +498,27 @@ async function addUserTool({ app, actorUserId, params }) {
       chatId: String(chat._id),
       userId: String(targetUser._id),
       userName: targetUser.name
+    }
+  };
+}
+
+async function findUserTool({ actorUserId, params }) {
+  const resolved = await resolveUserOrThrow({
+    params,
+    actorUserId,
+    purpose: 'find_user'
+  });
+
+  return {
+    ok: true,
+    action: 'find_user',
+    responseText: `Нашёл пользователя ${resolved.user.name}.`,
+    data: {
+      userId: String(resolved.user._id),
+      name: resolved.user.name,
+      phone: resolved.user.phone || null,
+      avatarUrl: resolved.user.avatarUrl || null,
+      resolvedBy: resolved.resolvedBy
     }
   };
 }
@@ -493,10 +659,18 @@ async function getUserChatsTool({ app, actorUserId }) {
 }
 
 async function startCallTool({ app, actor, params }) {
+  const target = params?.chatId
+    ? null
+    : await resolveUserOrThrow({
+      params,
+      actorUserId: actor._id,
+      purpose: 'start_call'
+    });
+
   const result = await startPrivateCallFlow({
     app,
     fromUserId: actor._id,
-    toUserId: params?.userId || null,
+    toUserId: target?.userId || params?.userId || null,
     chatId: params?.chatId || null,
     type: params?.type || 'video',
     notifyInitiator: true,
@@ -520,6 +694,7 @@ async function startCallTool({ app, actor, params }) {
 const EXECUTORS = {
   create_group: createGroupTool,
   add_user: addUserTool,
+  find_user: findUserTool,
   get_server_status: getServerStatusTool,
   explain_feature: explainFeatureTool,
   suggest_fix_connection: suggestFixConnectionTool,
@@ -669,17 +844,18 @@ async function executeAiAction({ app, actorUserId, chatId, action, params, messa
 
 function buildPlanResponse({ normalizedActions, sequenceState, planId = null, failedStep = null }) {
   const lastStep = sequenceState.steps[sequenceState.steps.length - 1] || null;
-  const failureText = failedStep
-    ? `Step ${Number(failedStep.index) + 1} (${failedStep.action || 'unknown'}) failed: ${failedStep.error?.message || 'Unknown AI action error'}.`
-    : null;
+  const failureCode = failedStep?.error?.code || 'AI_MULTI_STEP_FAILED';
+  const failureMessage = failedStep?.error?.message || 'Действие остановлено.';
   return {
     ok: !failedStep,
     partial: Boolean(failedStep),
+    stopExecution: Boolean(failedStep),
+    error: failedStep ? failureCode : null,
     action: normalizedActions.length === 1
       ? (lastStep?.action || failedStep?.action || 'unknown')
       : 'multi_step',
     responseText: failedStep
-      ? (lastStep?.result?.responseText || failedStep.error?.message || 'Действие остановлено.')
+      ? failureMessage
       : (lastStep?.result?.responseText || 'Готово.'),
     data: {
       steps: sequenceState.steps.map((step, index) => ({
@@ -689,12 +865,13 @@ function buildPlanResponse({ normalizedActions, sequenceState, planId = null, fa
         data: step.result?.data || null
       })),
       planId: planId ? String(planId) : null,
+      stopExecution: Boolean(failedStep),
       failedStep: failedStep ? {
         stepIndex: failedStep.index,
         action: failedStep.action,
         params: failedStep.params,
-        error: failedStep.error?.message || 'Unknown AI action error',
-        code: failedStep.error?.code || 'AI_MULTI_STEP_FAILED'
+        error: failureMessage,
+        code: failureCode
       } : null
     }
   };
@@ -763,6 +940,7 @@ async function executeAiPlan({
       });
     } catch (error) {
       error.code = error.code || 'AI_MULTI_STEP_FAILED';
+      error.stopExecution = true;
       error.stepIndex = index;
       error.totalSteps = normalizedActions.length;
       error.aiSteps = sequenceState.steps;

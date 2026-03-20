@@ -1,4 +1,9 @@
+const mongoose = require('mongoose');
 const User = require('../models/User');
+
+function normalizePhone(phone) {
+  return String(phone || '').replace(/\D/g, '');
+}
 
 function compactPhone(phone) {
   if (typeof phone !== 'string') return '';
@@ -6,7 +11,7 @@ function compactPhone(phone) {
 }
 
 function extractDigits(phone) {
-  return String(phone || '').replace(/\D/g, '');
+  return normalizePhone(phone);
 }
 
 function normalizeRuDigits(digits) {
@@ -28,8 +33,9 @@ function normalizeRuDigits(digits) {
 }
 
 function buildPhoneLookupCandidates(phone) {
-  const compact = compactPhone(phone);
-  const digits = extractDigits(compact);
+  const raw = String(phone || '').trim();
+  const compact = compactPhone(raw);
+  const digits = extractDigits(raw);
   const normalizedRu = normalizeRuDigits(digits);
 
   const variants = new Set();
@@ -67,6 +73,10 @@ function buildPhoneLookupCandidates(phone) {
   return Array.from(variants);
 }
 
+function escapeRegExp(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function isValidPhoneExact(phone) {
   if (typeof phone !== 'string') return false;
   const trimmed = phone.trim();
@@ -80,21 +90,32 @@ function isValidPhoneExact(phone) {
   return /^[1-9]\d{8,14}$/.test(digits);
 }
 
-async function findUserByExactPhone({ phone, excludeUserId }) {
+async function findUserDocumentByPhone({ phone, excludeUserId, includeSystem = false, select = '_id name phone phoneNormalized avatarUrl isSystem systemKey' }) {
   const candidates = buildPhoneLookupCandidates(phone);
   if (!candidates.length) return null;
 
   const query = {
-    isSystem: { $ne: true },
     $or: [
       { phone: { $in: candidates } },
       { phoneNormalized: { $in: candidates } }
     ]
   };
 
+  if (!includeSystem) {
+    query.isSystem = { $ne: true };
+  }
+
   if (excludeUserId) query._id = { $ne: excludeUserId };
 
-  const user = await User.findOne(query).select('_id name phone avatarUrl').lean();
+  return User.findOne(query).select(select);
+}
+
+async function findUserByExactPhone({ phone, excludeUserId }) {
+  const user = await findUserDocumentByPhone({
+    phone,
+    excludeUserId,
+    select: '_id name phone avatarUrl'
+  }).lean();
   if (!user) return null;
 
   return {
@@ -106,4 +127,101 @@ async function findUserByExactPhone({ phone, excludeUserId }) {
   };
 }
 
-module.exports = { isValidPhoneExact, findUserByExactPhone };
+async function resolveUser(input, options = {}) {
+  const source = input && typeof input === 'object' && !Array.isArray(input)
+    ? input
+    : { identifier: input };
+  const select = options.select || '_id name phone phoneNormalized avatarUrl isSystem systemKey';
+  const userId = String(source.userId || source.id || '').trim();
+  const phone = String(source.phone || '').trim();
+  const identifier = String(source.identifier || '').trim();
+  const username = String(source.username || source.name || '').trim();
+  const objectIdCandidate = userId || (mongoose.Types.ObjectId.isValid(identifier) ? identifier : '');
+
+  if (objectIdCandidate && mongoose.Types.ObjectId.isValid(objectIdCandidate)) {
+    if (options.excludeUserId && String(options.excludeUserId) === objectIdCandidate) {
+      return null;
+    }
+
+    const user = await User.findOne({
+      _id: objectIdCandidate,
+      ...(options.includeSystem ? {} : { isSystem: { $ne: true } })
+    }).select(select);
+
+    if (!user) {
+      return null;
+    }
+
+    return {
+      userId: String(user._id),
+      user,
+      resolvedBy: 'id'
+    };
+  }
+
+  const phoneCandidates = [phone, identifier]
+    .filter((value, index, values) => value && values.indexOf(value) === index)
+    .filter((value) => isValidPhoneExact(value));
+
+  for (const candidate of phoneCandidates) {
+    const phoneUser = await findUserDocumentByPhone({
+      phone: candidate,
+      excludeUserId: options.excludeUserId,
+      includeSystem: options.includeSystem,
+      select
+    });
+
+    if (phoneUser) {
+      return {
+        userId: String(phoneUser._id),
+        user: phoneUser,
+        resolvedBy: 'phone'
+      };
+    }
+  }
+
+  if (options.allowUsername === false) {
+    return null;
+  }
+
+  const usernameCandidate = username || identifier;
+  if (!usernameCandidate) {
+    return null;
+  }
+
+  const escapedIdentifier = escapeRegExp(usernameCandidate);
+  const usernameMatches = await User.find({
+    name: { $regex: `^${escapedIdentifier}$`, $options: 'i' },
+    ...(options.includeSystem ? {} : { isSystem: { $ne: true } }),
+    ...(options.excludeUserId ? { _id: { $ne: options.excludeUserId } } : {})
+  })
+    .select(select)
+    .limit(2);
+
+  if (usernameMatches.length === 1) {
+    return {
+      userId: String(usernameMatches[0]._id),
+      user: usernameMatches[0],
+      resolvedBy: 'username'
+    };
+  }
+
+  if (usernameMatches.length > 1) {
+    return {
+      userId: null,
+      user: null,
+      resolvedBy: 'username',
+      ambiguous: true
+    };
+  }
+
+  return null;
+}
+
+module.exports = {
+  normalizePhone,
+  buildPhoneLookupCandidates,
+  isValidPhoneExact,
+  findUserByExactPhone,
+  resolveUser
+};

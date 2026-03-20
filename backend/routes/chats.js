@@ -2,11 +2,11 @@ const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
 const Chat = require('../models/Chat');
-const User = require('../models/User');
 const Message = require('../models/Message');
 const authMiddleware = require('../middleware/auth');
 const { checkChatAccess, checkChatAdmin } = require('../middleware/checkChatAccess');
 const { formatChatForUser } = require('../social/services/chatService');
+const { resolveUser } = require('../utils/userLookup');
 const fs = require('fs');
 const path = require('path');
 
@@ -31,6 +31,51 @@ const deleteAttachmentFile = (attachmentUrl) => {
     console.error('[Chats] Error deleting file:', err);
   }
 };
+
+function buildUserLookupInput({ userId = '', phone = '', identifier = '' } = {}) {
+  const normalized = {
+    userId: String(userId || '').trim(),
+    phone: String(phone || '').trim(),
+    identifier: String(identifier || '').trim()
+  };
+
+  if (!normalized.userId && !normalized.phone && !normalized.identifier) {
+    return null;
+  }
+
+  return normalized;
+}
+
+function describeLookupValue(input) {
+  if (input?.phone) return `номеру ${input.phone}`;
+  if (input?.identifier) return `идентификатору ${input.identifier}`;
+  if (input?.userId) return `id ${input.userId}`;
+  return 'указанным данным';
+}
+
+async function resolveRouteUserOrThrow({ userId = '', phone = '', identifier = '', excludeUserId = null }) {
+  const lookupInput = buildUserLookupInput({ userId, phone, identifier });
+  if (!lookupInput) {
+    const error = new Error('Укажите userId, phone или identifier');
+    error.status = 400;
+    throw error;
+  }
+
+  const resolved = await resolveUser(lookupInput, { excludeUserId });
+  if (resolved?.ambiguous) {
+    const error = new Error(`Найдено несколько пользователей по ${describeLookupValue(lookupInput)}. Уточните номер телефона.`);
+    error.status = 409;
+    throw error;
+  }
+
+  if (!resolved?.user?._id) {
+    const error = new Error(`Не удалось найти пользователя по ${describeLookupValue(lookupInput)}.`);
+    error.status = 404;
+    throw error;
+  }
+
+  return resolved.user;
+}
 
 // Получение списка чатов пользователя
 router.get('/', async (req, res) => {
@@ -153,19 +198,13 @@ router.post('/private', async (req, res) => {
       }
       return alive > 0;
     };
-    const { userId: targetUserId, phone } = req.body;
+    const { userId: targetUserId, phone, identifier } = req.body;
 
-    let targetUser;
-
-    // Поддерживаем оба варианта: userId или phone
-    if (targetUserId) {
-      targetUser = await User.findById(targetUserId);
-    } else if (phone) {
-      // Без нормализации: ожидаем единый формат номера, поиск по точному совпадению.
-      targetUser = await User.findOne({ phone });
-    } else {
-      return res.status(400).json({ error: 'Укажите userId или phone' });
-    }
+    const targetUser = await resolveRouteUserOrThrow({
+      userId: targetUserId,
+      phone,
+      identifier
+    });
 
     if (!targetUser) {
       return res.status(404).json({ error: 'Пользователь не найден' });
@@ -217,7 +256,7 @@ router.post('/private', async (req, res) => {
     res.status(created ? 201 : 200).json(formatted);
   } catch (error) {
     console.error('Create private chat error:', error);
-    res.status(500).json({ error: 'Ошибка создания чата' });
+    res.status(error.status || 500).json({ error: error.message || 'Ошибка создания чата' });
   }
 });
 
@@ -225,39 +264,62 @@ router.post('/private', async (req, res) => {
 router.post('/group', async (req, res) => {
   try {
     const userId = req.userId;
-    const { name, participantPhones = [], participantIds = [] } = req.body;
+    const { name, participantPhones = [], participantIds = [], participants = [] } = req.body;
 
     if (!name || !name.trim()) {
       return res.status(400).json({ error: 'Укажите название группы' });
     }
 
-    const participants = [{ user: userId, role: 'admin' }];
+    const chatParticipants = [{ user: userId, role: 'admin' }];
+    const participantMap = new Map();
+    const lookupItems = [];
 
-    // Добавляем участников по phone
-    for (const phone of participantPhones) {
-      // Без нормализации: ожидаем единый формат номера, поиск по точному совпадению.
-      const user = await User.findOne({ phone });
-      if (user && user._id.toString() !== userId) {
-        if (!participants.find(p => p.user.toString() === user._id.toString())) {
-          participants.push({ user: user._id, role: 'member' });
-        }
+    participantPhones.forEach((rawPhone) => {
+      if (String(rawPhone || '').trim()) {
+        lookupItems.push({ phone: String(rawPhone).trim() });
+      }
+    });
+
+    participantIds.forEach((rawUserId) => {
+      if (String(rawUserId || '').trim()) {
+        lookupItems.push({ userId: String(rawUserId).trim() });
+      }
+    });
+
+    participants.forEach((item) => {
+      if (!item) return;
+      if (typeof item === 'string') {
+        lookupItems.push({ identifier: item });
+        return;
+      }
+      if (typeof item === 'object') {
+        lookupItems.push(item);
+      }
+    });
+
+    for (const lookupItem of lookupItems) {
+      const user = await resolveRouteUserOrThrow({
+        userId: lookupItem.userId,
+        phone: lookupItem.phone,
+        identifier: lookupItem.identifier
+      });
+      const resolvedUserId = String(user._id);
+      if (resolvedUserId === String(userId)) {
+        continue;
+      }
+      if (!participantMap.has(resolvedUserId)) {
+        participantMap.set(resolvedUserId, user);
       }
     }
 
-    // Добавляем участников по userId
-    for (const pid of participantIds) {
-      if (!pid) continue;
-      const uid = pid.toString();
-      if (uid === userId) continue;
-      if (!participants.find(p => p.user.toString() === uid)) {
-        participants.push({ user: uid, role: 'member' });
-      }
-    }
+    participantMap.forEach((participantUser) => {
+      chatParticipants.push({ user: participantUser._id, role: 'member' });
+    });
 
     const chat = await Chat.create({
       type: 'group',
       name: name.trim(),
-      participants
+      participants: chatParticipants
     });
 
     await Message.create({
@@ -282,7 +344,7 @@ router.post('/group', async (req, res) => {
       unreadCount: 0
     };
 
-    participants.forEach(p => {
+    chatParticipants.forEach(p => {
       const participantId = p.user.toString();
       if (socketData?.userSockets.has(participantId)) {
         socketData.userSockets.get(participantId).forEach(socketId => {
@@ -296,7 +358,7 @@ router.post('/group', async (req, res) => {
     res.status(201).json(chatPayload);
   } catch (error) {
     console.error('Create group chat error:', error);
-    res.status(500).json({ error: 'Ошибка создания группы' });
+    res.status(error.status || 500).json({ error: error.message || 'Ошибка создания группы' });
   }
 });
 
@@ -316,11 +378,13 @@ router.post('/:chatId/participants', checkChatAdmin, async (req, res) => {
   try {
     const userId = req.userId;
     const { chatId } = req.params;
-    const { phone } = req.body;
+    const { userId: targetUserId, phone, identifier } = req.body;
     const chat = req.chat;
-
-    // Без нормализации: ожидаем единый формат номера, поиск по точному совпадению.
-    const newUser = await User.findOne({ phone });
+    const newUser = await resolveRouteUserOrThrow({
+      userId: targetUserId,
+      phone,
+      identifier
+    });
 
     if (!newUser) {
       return res.status(404).json({ error: 'Пользователь не найден' });
@@ -365,7 +429,7 @@ router.post('/:chatId/participants', checkChatAdmin, async (req, res) => {
     res.json(chat);
   } catch (error) {
     console.error('Add participant error:', error);
-    res.status(500).json({ error: 'Ошибка добавления участника' });
+    res.status(error.status || 500).json({ error: error.message || 'Ошибка добавления участника' });
   }
 });
 
