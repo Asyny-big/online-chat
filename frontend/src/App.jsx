@@ -105,7 +105,16 @@ function App() {
           messages: unreadMessages
         };
 
-        setNavBadgeCounts(nextCounts);
+        setNavBadgeCounts((current) => {
+          if (
+            current.notifications === nextCounts.notifications
+            && current.messages === nextCounts.messages
+          ) {
+            return current;
+          }
+
+          return nextCounts;
+        });
 
         if (unreadInitializedRef.current) {
           const hasNewNotifications = nextCounts.notifications > prevUnreadRef.current.notifications;
@@ -164,7 +173,7 @@ function App() {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = useCallback(() => {
     localStorage.removeItem('token');
     setToken(null);
     setPhone('');
@@ -173,16 +182,16 @@ function App() {
     setNavBadgeCounts({ notifications: 0, messages: 0 });
     prevUnreadRef.current = { notifications: 0, messages: 0 };
     unreadInitializedRef.current = false;
-  };
+  }, []);
 
-  const navigateTo = (hash) => {
+  const navigateTo = useCallback((hash) => {
     const nextHash = normalizeRoute(hash);
     if (window.location.hash !== nextHash) {
       window.location.hash = nextHash;
     } else {
       setRoute(nextHash);
     }
-  };
+  }, []);
 
   const handlePendingPrivateChatHandled = useCallback((requestId) => {
     setPendingPrivateChatTarget((prev) => {

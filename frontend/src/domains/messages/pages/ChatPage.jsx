@@ -1561,4 +1561,4 @@ function ChatPageInner({
   );
 }
 
-export default ChatPageInner;
+export default React.memo(ChatPageInner);
