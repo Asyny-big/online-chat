@@ -22,6 +22,15 @@ function getPrimaryVideoTrack(stream) {
   return tracks.length > 0 ? tracks[0] : null;
 }
 
+function buildGroupCameraConstraints() {
+  return {
+    width: { ideal: 1920, max: 1920 },
+    height: { ideal: 1080, max: 1080 },
+    frameRate: { ideal: 30, max: 30 },
+    facingMode: 'user'
+  };
+}
+
 /**
  * GroupCallModal - Компонент для групповых видео/аудио звонков (Discord-like UX)
  * SFU-only: ion-sfu (json-rpc over WebSocket), 1 RTCPeerConnection → SFU
@@ -252,15 +261,15 @@ function GroupCallModal({
     try {
       if (tier === 'hd') {
         await vt.applyConstraints({
-          width: { ideal: 1280, max: 1920 },
-          height: { ideal: 720, max: 1080 },
-          frameRate: { ideal: 24, max: 30 }
+          width: { ideal: 1920, max: 1920 },
+          height: { ideal: 1080, max: 1080 },
+          frameRate: { ideal: 30, max: 30 }
         });
       } else {
         await vt.applyConstraints({
-          width: { ideal: 640, max: 1280 },
-          height: { ideal: 480, max: 720 },
-          frameRate: { ideal: 18, max: 24 }
+          width: { ideal: 1280, max: 1920 },
+          height: { ideal: 720, max: 1080 },
+          frameRate: { ideal: 24, max: 30 }
         });
       }
       captureTierRef.current = tier;
@@ -280,10 +289,10 @@ function GroupCallModal({
       if (sender.track?.kind === 'video') {
         if (isMainVideo) {
           // Главное видео: высокое качество
-          await setBitrate(sender, 650, 18); // 0.65 Mbps, 18 fps
+          await setBitrate(sender, 3000, 30); // 3 Mbps, 30 fps
         } else {
           // Preview: низкое качество
-          await setBitrate(sender, 250, 15); // 250 kbps, 15 fps
+          await setBitrate(sender, 900, 24); // 0.9 Mbps, 24 fps
         }
       }
     }
@@ -516,19 +525,14 @@ function GroupCallModal({
           autoGainControl: true
         },
         video: callType === 'video' ? { 
-          // Требование: дефолт 640x480 + сниженная частота кадров для меньшей задержки.
-          // Почему так: даже в SFU лишние пиксели/FPS повышают нагрузку и задержку.
-          width: { ideal: 640, max: 1280 },
-          height: { ideal: 480, max: 720 },
-          frameRate: { ideal: 20, max: 24 },
-          facingMode: 'user'
+          ...buildGroupCameraConstraints()
         } : false
       };
       
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
 
-      // Мы стартуем в SD по умолчанию (видео захват уже SD, но пусть UI тоже это отражает).
-      setCaptureTierUi('SD');
+      // Стартуем сразу в HD, чтобы UI соответствовал реальному capture-профилю.
+      setCaptureTierUi('HD');
 
       // Подсказка кодеку/браузеру: для чата обычно важнее плавность движения,
       // чем идеальная детализация. Не везде поддерживается.

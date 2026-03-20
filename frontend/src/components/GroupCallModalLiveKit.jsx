@@ -1,6 +1,87 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { API_URL, LIVEKIT_URL } from '@/config';
-import { createLocalTracks, Room, RoomEvent, Track, VideoQuality } from 'livekit-client';
+import { createLocalTracks, Room, RoomEvent, Track, VideoQuality, supportsVP9 } from 'livekit-client';
+import { buildVideoConstraintsForTier, createAutoQualityManager, QUALITY_PROFILES } from '@/utils/autoQualityManager';
+
+const LIVEKIT_CAMERA_RESOLUTION = {
+  width: 1920,
+  height: 1080,
+  frameRate: 30,
+  aspectRatio: 16 / 9,
+};
+
+const LIVEKIT_CAMERA_ENCODING = {
+  maxBitrate: 3_000_000,
+  maxFramerate: 30,
+};
+
+const LIVEKIT_SCREEN_ENCODING = {
+  maxBitrate: 5_000_000,
+  maxFramerate: 30,
+};
+
+function resolveVideoQualityEnum(publishQuality) {
+  if (publishQuality === 'low') return VideoQuality?.LOW;
+  if (publishQuality === 'medium') return VideoQuality?.MEDIUM;
+  return VideoQuality?.HIGH;
+}
+
+function flattenStatsRows(stats) {
+  const out = [];
+  if (!stats) return out;
+  if (typeof stats.forEach === 'function') {
+    stats.forEach((value) => out.push(value));
+    return out;
+  }
+  if (Array.isArray(stats)) {
+    stats.forEach((value) => {
+      if (value && typeof value.forEach === 'function') {
+        value.forEach((nested) => out.push(nested));
+      } else {
+        out.push(value);
+      }
+    });
+    return out;
+  }
+  try {
+    Object.keys(stats).forEach((key) => out.push(stats[key]));
+  } catch (_) { }
+  return out;
+}
+
+function findSelectedCandidatePair(rows) {
+  return rows.find((row) => row?.type === 'candidate-pair' && (row?.selected || row?.nominated || row?.state === 'succeeded')) || null;
+}
+
+function findDominantOutboundVideo(rows) {
+  return rows
+    .filter((row) => row?.type === 'outbound-rtp' && (row?.kind === 'video' || row?.mediaType === 'video'))
+    .sort((left, right) => Number(right?.bytesSent || 0) - Number(left?.bytesSent || 0))[0] || null;
+}
+
+async function tuneLiveKitTrackSender(track, config) {
+  const sender = track?.sender;
+  if (!sender?.getParameters || !sender?.setParameters || !config) return;
+
+  const parameters = sender.getParameters() || {};
+  const baseEncoding = parameters.encodings?.[0] || {};
+  parameters.encodings = [{
+    ...baseEncoding,
+    maxBitrate: config.maxBitrate,
+    maxFramerate: config.frameRate,
+    scaleResolutionDownBy: 1
+  }];
+
+  try {
+    parameters.degradationPreference = 'maintain-resolution';
+  } catch (_) { }
+
+  try {
+    await sender.setParameters(parameters);
+  } catch (err) {
+    console.warn('[LiveKit] Failed to tune sender parameters:', err);
+  }
+}
 
 function isAndroidWebViewRuntime() {
   if (typeof navigator === 'undefined') return false;
@@ -581,13 +662,24 @@ function GroupCallModalLiveKit({
   const [actualVideoInRes, setActualVideoInRes] = useState(null);
   const [actualVideoOutRes, setActualVideoOutRes] = useState(null);
   const [statsNote, setStatsNote] = useState('');
+  const [adaptiveCameraTier, setAdaptiveCameraTier] = useState('ultra');
+  const [adaptiveCameraReason, setAdaptiveCameraReason] = useState('startup');
+  const [adaptiveNetworkInfo, setAdaptiveNetworkInfo] = useState({ availableOutgoingBitrate: null, packetLoss: null, qualityLimitationReason: 'none' });
   const isAndroidWebView = useMemo(() => isAndroidWebViewRuntime(), []);
+  const preferredVideoCodec = useMemo(() => {
+    if (isAndroidWebView) return 'vp8';
+    try {
+      return supportsVP9() ? 'vp9' : 'vp8';
+    } catch (_) {
+      return 'vp8';
+    }
+  }, [isAndroidWebView]);
 
   // Для responsive: ширина stage и примерная ширина превью
   const stageWrapRef = useRef(null);
   const thumbsWrapRef = useRef(null);
   const [thumbWidth, setThumbWidth] = useState(0);
-  const [stageSize, setStageSize] = useState(() => ({ width: 0, height: 0 }));
+  const [, setStageSize] = useState(() => ({ width: 0, height: 0 }));
 
   // Guard, чтобы не спамить setSubscribedQuality на каждом рендере
   const lastQualityByPubIdRef = useRef(new Map());
@@ -602,6 +694,18 @@ function GroupCallModalLiveKit({
     inBytes: 0,
     outBytes: 0
   });
+  const liveKitQualityManagersRef = useRef({
+    camera: createAutoQualityManager({ profile: QUALITY_PROFILES.livekitCamera, initialTier: 'ultra' }),
+    screen: createAutoQualityManager({ profile: QUALITY_PROFILES.livekitScreen, initialTier: 'ultra' })
+  });
+  const lastOutboundLossRef = useRef({
+    camera: { packetsSent: 0, packetsLost: 0 },
+    screen: { packetsSent: 0, packetsLost: 0 }
+  });
+  const appliedLocalTierRef = useRef({
+    camera: '',
+    screen: ''
+  });
 
   const wakeupMediaElements = useCallback(() => {
     try {
@@ -610,14 +714,76 @@ function GroupCallModalLiveKit({
     } catch (_) { }
   }, []);
 
+  const getLocalTrackQualityKey = useCallback((track) => {
+    if (!track) return 'camera';
+    const source = track?.source;
+    if (source === Track?.Source?.ScreenShare || String(source || '').toLowerCase() === 'screen_share') {
+      return 'screen';
+    }
+    return isScreenLikeTrack(track?.mediaStreamTrack) ? 'screen' : 'camera';
+  }, []);
+
+  const applyLiveKitLocalTrackQuality = useCallback(async (track, decision, force = false) => {
+    if (!track || !decision?.config) return;
+
+    const sourceKey = getLocalTrackQualityKey(track);
+    if (!force && appliedLocalTierRef.current[sourceKey] === decision.tier) return;
+
+    try {
+      const constraints = buildVideoConstraintsForTier(
+        decision.config,
+        sourceKey === 'camera' ? { facingMode: 'user' } : {}
+      );
+
+      if (sourceKey === 'camera' && typeof track.restartTrack === 'function') {
+        await track.restartTrack({
+          resolution: {
+            width: decision.config.width,
+            height: decision.config.height,
+            frameRate: decision.config.frameRate,
+            aspectRatio: 16 / 9,
+          },
+          facingMode: 'user'
+        });
+      } else if (track?.mediaStreamTrack?.applyConstraints) {
+        await track.mediaStreamTrack.applyConstraints(constraints);
+      }
+    } catch (err) {
+      console.warn('[LiveKit] Failed to retune local capture:', err);
+    }
+
+    try {
+      track.setDegradationPreference?.('maintain-resolution');
+    } catch (_) { }
+
+    try {
+      track.setPublishingQuality?.(resolveVideoQualityEnum(decision.config.publishQuality));
+    } catch (_) { }
+
+    await tuneLiveKitTrackSender(track, decision.config);
+
+    try {
+      if (track?.mediaStreamTrack && 'contentHint' in track.mediaStreamTrack) {
+        track.mediaStreamTrack.contentHint = sourceKey === 'screen' ? 'detail' : 'motion';
+      }
+    } catch (_) { }
+
+    appliedLocalTierRef.current[sourceKey] = decision.tier;
+    if (sourceKey === 'camera') {
+      setAdaptiveCameraTier(decision.tier);
+      setAdaptiveCameraReason(decision.reason);
+    }
+  }, [getLocalTrackQualityKey]);
+
   useEffect(() => {
     if (process.env.NODE_ENV === 'production') return;
     console.info('[LiveKit] runtime', {
       isAndroidWebView,
+      preferredVideoCodec,
       isSecureContext: typeof window !== 'undefined' ? window.isSecureContext : null,
       userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : ''
     });
-  }, [isAndroidWebView]);
+  }, [isAndroidWebView, preferredVideoCodec]);
 
   const clearHideTimer = useCallback(() => {
     const t = hideControlsTimerRef.current;
@@ -869,6 +1035,104 @@ function GroupCallModalLiveKit({
     };
   }, [callStatus, showConnStatus]);
 
+  useEffect(() => {
+    if (callStatus !== 'active') return undefined;
+
+    let cancelled = false;
+    let timer = null;
+
+    const collectAdaptiveSample = async (track, sourceKey, publisherRows) => {
+      const trackStats = await track?.sender?.getStats?.();
+      const trackRows = flattenStatsRows(trackStats);
+      const allRows = [...publisherRows, ...trackRows];
+      const byId = new Map();
+      allRows.forEach((row) => {
+        if (row?.id) byId.set(row.id, row);
+      });
+
+      const outbound = findDominantOutboundVideo(trackRows.length ? trackRows : publisherRows);
+      if (!outbound) return null;
+
+      const selectedPair = findSelectedCandidatePair(publisherRows.length ? publisherRows : allRows);
+      const remoteInbound = outbound?.remoteId ? byId.get(outbound.remoteId) : null;
+
+      const packetsSent = Number(outbound?.packetsSent || 0);
+      const packetsLost = Number(remoteInbound?.packetsLost || 0);
+      const previous = lastOutboundLossRef.current[sourceKey];
+      const deltaSent = Math.max(0, packetsSent - Number(previous?.packetsSent || 0));
+      const deltaLost = Math.max(0, packetsLost - Number(previous?.packetsLost || 0));
+      const packetLoss = deltaSent > 0 ? deltaLost / Math.max(1, deltaSent + deltaLost) : 0;
+
+      lastOutboundLossRef.current[sourceKey] = { packetsSent, packetsLost };
+
+      return {
+        timestamp: Date.now(),
+        availableOutgoingBitrate: Number(selectedPair?.availableOutgoingBitrate || 0),
+        qualityLimitationReason: String(outbound?.qualityLimitationReason || 'none'),
+        packetLoss,
+        frameRate: Number(outbound?.framesPerSecond || 0),
+        frameWidth: Number(outbound?.frameWidth || 0),
+        frameHeight: Number(outbound?.frameHeight || 0),
+        roundTripTime: Number(remoteInbound?.roundTripTime || selectedPair?.currentRoundTripTime || 0),
+      };
+    };
+
+    const tick = async () => {
+      const room = roomRef.current;
+      if (!room) return;
+
+      let publisherRows = [];
+      try {
+        const publisherStats = await room.engine?.pcManager?.publisher?.getStats?.();
+        publisherRows = flattenStatsRows(publisherStats);
+      } catch (_) { }
+
+      const localParticipant = room.localParticipant;
+      const videoPubs = localParticipant?.videoTrackPublications && typeof localParticipant.videoTrackPublications.values === 'function'
+        ? Array.from(localParticipant.videoTrackPublications.values())
+        : [];
+      const cameraTrack = videoPubs.find((pub) => isCameraPublication(pub) && pub?.track)?.track || localVideoTrack || null;
+      if (cameraTrack) {
+        const cameraSample = await collectAdaptiveSample(cameraTrack, 'camera', publisherRows);
+        if (cameraSample) {
+          const decision = liveKitQualityManagersRef.current.camera.update(cameraSample);
+          if (decision.changed || appliedLocalTierRef.current.camera !== decision.tier) {
+            await applyLiveKitLocalTrackQuality(cameraTrack, decision, decision.changed);
+          }
+
+          if (!cancelled) {
+            setAdaptiveCameraTier(decision.tier);
+            setAdaptiveCameraReason(decision.reason);
+            setAdaptiveNetworkInfo({
+              availableOutgoingBitrate: cameraSample.availableOutgoingBitrate || null,
+              packetLoss: cameraSample.packetLoss,
+              qualityLimitationReason: cameraSample.qualityLimitationReason || 'none'
+            });
+          }
+        }
+      }
+
+      const screenTrack = videoPubs.find((pub) => isScreenSharePublication(pub) && pub?.track)?.track || null;
+      if (screenTrack) {
+        const screenSample = await collectAdaptiveSample(screenTrack, 'screen', publisherRows);
+        if (screenSample) {
+          const decision = liveKitQualityManagersRef.current.screen.update(screenSample);
+          if (decision.changed || appliedLocalTierRef.current.screen !== decision.tier) {
+            await applyLiveKitLocalTrackQuality(screenTrack, decision, decision.changed);
+          }
+        }
+      }
+    };
+
+    tick();
+    timer = setInterval(tick, 2000);
+
+    return () => {
+      cancelled = true;
+      try { if (timer) clearInterval(timer); } catch (_) { }
+    };
+  }, [applyLiveKitLocalTrackQuality, callStatus, localVideoTrack]);
+
   const updateRemoteParticipants = useCallback(() => {
     const room = roomRef.current;
     if (!room || !mountedRef.current) return;
@@ -992,7 +1256,21 @@ function GroupCallModalLiveKit({
 
       const rtcConfig = iceData?.iceServers ? { iceServers: iceData.iceServers } : undefined;
 
-      const room = new Room({ adaptiveStream: !isAndroidWebView, dynacast: !isAndroidWebView });
+      const room = new Room({
+        adaptiveStream: true,
+        dynacast: true,
+        videoCaptureDefaults: {
+          resolution: LIVEKIT_CAMERA_RESOLUTION,
+        },
+        publishDefaults: {
+          videoCodec: preferredVideoCodec,
+          backupCodec: true,
+          simulcast: true,
+          videoEncoding: { ...LIVEKIT_CAMERA_ENCODING },
+          screenShareEncoding: { ...LIVEKIT_SCREEN_ENCODING },
+          degradationPreference: 'maintain-resolution',
+        }
+      });
       roomRef.current = room;
 
       // Обновляем connectionState (помогает UI статуса даже без stats).
@@ -1068,22 +1346,35 @@ function GroupCallModalLiveKit({
         audio: true,
         video: callType === 'video'
           ? {
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-            // FPS smoothing:
-            // Ограничиваем FPS на capture-уровне (getUserMedia constraints), без SDP/setParameters.
-            // Это снижает нагрузку на энкодер/девайс и уменьшает микрофризы, особенно на мобилках.
-            frameRate: { ideal: 24, max: 24 }
+            resolution: LIVEKIT_CAMERA_RESOLUTION,
+            facingMode: 'user'
           }
           : false
       });
 
       localTracksRef.current = tracks;
 
-      await Promise.all(tracks.map((track) => room.localParticipant.publishTrack(track)));
+      await Promise.all(tracks.map((track) => {
+        if (track.kind !== 'video') {
+          return room.localParticipant.publishTrack(track);
+        }
+
+        return room.localParticipant.publishTrack(track, {
+          videoCodec: preferredVideoCodec,
+          backupCodec: true,
+          simulcast: true,
+          videoEncoding: { ...LIVEKIT_CAMERA_ENCODING },
+          degradationPreference: 'maintain-resolution',
+        });
+      }));
 
       const localVideo = tracks.find((t) => t.kind === 'video') || null;
       if (localVideo?.mediaStreamTrack) {
+        try {
+          if ('contentHint' in localVideo.mediaStreamTrack) {
+            localVideo.mediaStreamTrack.contentHint = 'motion';
+          }
+        } catch (_) { }
         try {
           console.info('[LiveKit] local video track', {
             id: localVideo.mediaStreamTrack.id,
@@ -1092,6 +1383,12 @@ function GroupCallModalLiveKit({
             settings: localVideo.mediaStreamTrack.getSettings?.()
           });
         } catch (_) { }
+      }
+      liveKitQualityManagersRef.current.camera.reset('ultra');
+      appliedLocalTierRef.current.camera = '';
+      lastOutboundLossRef.current.camera = { packetsSent: 0, packetsLost: 0 };
+      if (localVideo) {
+        await applyLiveKitLocalTrackQuality(localVideo, liveKitQualityManagersRef.current.camera.getSnapshot(), true);
       }
       if (mountedRef.current) {
         setLocalVideoTrack(localVideo);
@@ -1116,7 +1413,7 @@ function GroupCallModalLiveKit({
     } finally {
       isConnectingRef.current = false;
     }
-  }, [callId, chatId, callType, fetchIceServers, fetchLiveKitToken, isAndroidWebView, socket, updateRemoteParticipants, wakeupMediaElements]);
+  }, [applyLiveKitLocalTrackQuality, callId, chatId, callType, fetchIceServers, fetchLiveKitToken, isAndroidWebView, preferredVideoCodec, socket, updateRemoteParticipants, wakeupMediaElements]);
 
   const disconnectLiveKit = useCallback(async () => {
     const room = roomRef.current;
@@ -1138,9 +1435,18 @@ function GroupCallModalLiveKit({
       }
     });
     localTracksRef.current = [];
+    liveKitQualityManagersRef.current.camera.reset('ultra');
+    liveKitQualityManagersRef.current.screen.reset('ultra');
+    appliedLocalTierRef.current.camera = '';
+    appliedLocalTierRef.current.screen = '';
+    lastOutboundLossRef.current.camera = { packetsSent: 0, packetsLost: 0 };
+    lastOutboundLossRef.current.screen = { packetsSent: 0, packetsLost: 0 };
     if (mountedRef.current) {
       setLocalVideoTrack(null);
       setRemoteParticipants([]);
+      setAdaptiveCameraTier('ultra');
+      setAdaptiveCameraReason('reset');
+      setAdaptiveNetworkInfo({ availableOutgoingBitrate: null, packetLoss: null, qualityLimitationReason: 'none' });
     }
   }, []);
 
@@ -1175,6 +1481,11 @@ function GroupCallModalLiveKit({
     if (!room) return;
     const next = !isVideoOff;
     await room.localParticipant.setCameraEnabled(!next);
+    const pubs = room.localParticipant?.videoTrackPublications && typeof room.localParticipant.videoTrackPublications.values === 'function'
+      ? Array.from(room.localParticipant.videoTrackPublications.values())
+      : [];
+    const cameraTrack = pubs.find((pub) => isCameraPublication(pub) && pub?.track)?.track || null;
+    setLocalVideoTrack(cameraTrack);
     setIsVideoOff(next);
   }, [isVideoOff]);
 
@@ -1188,9 +1499,32 @@ function GroupCallModalLiveKit({
       : [];
 
     const hasScreen = pubs.some((p) => isScreenSharePublication(p) && p?.track);
-    await lp.setScreenShareEnabled(!hasScreen);
+    await lp.setScreenShareEnabled(
+      !hasScreen,
+      !hasScreen ? {
+        video: { displaySurface: 'monitor' },
+        resolution: LIVEKIT_CAMERA_RESOLUTION,
+        contentHint: 'detail',
+        selfBrowserSurface: 'exclude',
+        surfaceSwitching: 'include',
+      } : undefined,
+      !hasScreen ? {
+        videoCodec: preferredVideoCodec,
+        backupCodec: true,
+        simulcast: true,
+        screenShareEncoding: { ...LIVEKIT_SCREEN_ENCODING },
+        degradationPreference: 'maintain-resolution',
+      } : undefined
+    );
+    if (!hasScreen) {
+      liveKitQualityManagersRef.current.screen.reset('ultra');
+      appliedLocalTierRef.current.screen = '';
+      lastOutboundLossRef.current.screen = { packetsSent: 0, packetsLost: 0 };
+    } else {
+      appliedLocalTierRef.current.screen = '';
+    }
     syncUiFromTracks();
-  }, [syncUiFromTracks]);
+  }, [preferredVideoCodec, syncUiFromTracks]);
 
   useEffect(() => {
     if (autoJoin) {
@@ -1503,20 +1837,9 @@ function GroupCallModalLiveKit({
     const stagePub = focusTarget?.isLocal ? null : focusTarget?.videoPublication;
     const stagePubKey = stagePub ? publicationId(stagePub) : null;
 
-    // Учитываем плотность пикселей экрана (devicePixelRatio), чтобы на смартфонах
-    // (где css-ширина 390px, но реальная больше 1000px) запрашивалось HIGH качество.
-    const pixelRatio = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1;
-    const physicalWidth = Number(stageSize?.width || 0) * pixelRatio;
-
-    // Stage качество (смягчённая policy против дрожания):
-    // - HIGH только если физическая ширина stage >= 800px
-    // - <800px: MEDIUM
-    // Цель: реже переключаться между слоями и снизить jitter/микрофризы, но давать
-    // чёткую картинку на смартфонах.
-    const STAGE_HIGH_MIN_WIDTH_PX = 800;
-    const desiredStageQuality = physicalWidth >= STAGE_HIGH_MIN_WIDTH_PX
-      ? VideoQuality?.HIGH
-      : VideoQuality?.MEDIUM;
+    // Для выбранного stage всегда просим HIGH слой, чтобы не терять детализацию
+    // на большом видео из-за policy по ширине контейнера.
+    const desiredStageQuality = VideoQuality?.HIGH;
 
     // Превью тайлы обычно 128x96. LOW достаточно и экономит трафик.
     // Если тайл большой (например, tablet/desktop с увеличенными плитками), просим MEDIUM.
@@ -1561,7 +1884,7 @@ function GroupCallModalLiveKit({
       if (stagePubKey && id === stagePubKey) return;
       apply(pub, desiredTilesQuality);
     });
-  }, [callStatus, focusTarget, stageSize, thumbWidth, thumbnailItems]);
+  }, [callStatus, focusTarget, thumbWidth, thumbnailItems]);
 
   // Auto-hide UX: слушаем активность на overlay.
   const handleOverlayMouseMove = useCallback(() => {
@@ -1772,6 +2095,11 @@ function GroupCallModalLiveKit({
           </div>
           <div className="gvc-conn-row"><span>Requested (stage)</span><b>{stageQualityRequested || 'auto'}</b></div>
           <div className="gvc-conn-row"><span>Requested (tiles)</span><b>{tilesQualityRequested || 'auto'}</b></div>
+          <div className="gvc-conn-row"><span>Adaptive tier</span><b>{adaptiveCameraTier}</b></div>
+          <div className="gvc-conn-row"><span>Adaptive reason</span><b>{adaptiveCameraReason}</b></div>
+          <div className="gvc-conn-row"><span>Avail. uplink</span><b>{typeof adaptiveNetworkInfo.availableOutgoingBitrate === 'number' ? `${Math.round(adaptiveNetworkInfo.availableOutgoingBitrate / 1000)} kbps` : 'N/A'}</b></div>
+          <div className="gvc-conn-row"><span>Packet loss</span><b>{typeof adaptiveNetworkInfo.packetLoss === 'number' ? `${(adaptiveNetworkInfo.packetLoss * 100).toFixed(1)}%` : 'N/A'}</b></div>
+          <div className="gvc-conn-row"><span>Limiter</span><b>{adaptiveNetworkInfo.qualityLimitationReason || 'none'}</b></div>
           <div className="gvc-conn-row">
             <span>Actual (video)</span>
             <b>

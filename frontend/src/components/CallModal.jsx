@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { API_URL } from '@/config';
+import { buildVideoConstraintsForTier, createAutoQualityManager, QUALITY_PROFILES } from '@/utils/autoQualityManager';
 
 const Icons = {
   Mic: ({ off }) => (
@@ -123,6 +124,98 @@ function isScreenLikeTrack(track) {
   return hint === 'detail' || label.includes('screen');
 }
 
+function buildCameraVideoConstraints(facingMode = 'user', tierConfig = QUALITY_PROFILES.p2pCamera.tiers.ultra) {
+  return buildVideoConstraintsForTier(tierConfig, { facingMode });
+}
+
+function buildScreenShareConstraints(tierConfig = QUALITY_PROFILES.p2pScreen.tiers.ultra) {
+  return {
+    video: {
+      displaySurface: 'monitor',
+      ...buildVideoConstraintsForTier(tierConfig),
+      selfBrowserSurface: 'exclude',
+      surfaceSwitching: 'include'
+    },
+    audio: false
+  };
+}
+
+function getOrderedVideoCodecs(codecs) {
+  if (!Array.isArray(codecs) || codecs.length === 0) return [];
+
+  const preferredMimeTypes = ['video/VP9', 'video/VP8', 'video/H264'];
+  const filtered = codecs.filter((codec) => {
+    const mimeType = String(codec?.mimeType || '');
+    return mimeType && !/rtx|red|ulpfec/i.test(mimeType);
+  });
+
+  const ordered = [];
+  preferredMimeTypes.forEach((mimeType) => {
+    filtered.forEach((codec) => {
+      if (codec.mimeType === mimeType && !ordered.includes(codec)) {
+        ordered.push(codec);
+      }
+    });
+  });
+  filtered.forEach((codec) => {
+    if (!ordered.includes(codec)) {
+      ordered.push(codec);
+    }
+  });
+
+  return ordered;
+}
+
+async function preferPeerConnectionVideoCodec(pc) {
+  if (!pc?.getTransceivers || typeof RTCRtpSender === 'undefined') return;
+
+  const capabilities = RTCRtpSender.getCapabilities?.('video');
+  const orderedCodecs = getOrderedVideoCodecs(capabilities?.codecs);
+  if (orderedCodecs.length === 0) return;
+
+  pc.getTransceivers().forEach((transceiver) => {
+    if (transceiver?.sender?.track?.kind !== 'video') return;
+    if (typeof transceiver.setCodecPreferences !== 'function') return;
+
+    try {
+      transceiver.setCodecPreferences(orderedCodecs);
+    } catch (err) {
+      console.warn('[CallModal] Failed to set codec preferences:', err);
+    }
+  });
+}
+
+async function tunePeerConnectionVideoSender(pc, options = {}) {
+  const sender = pc?.getSenders?.().find((s) => s.track?.kind === 'video') || null;
+  if (!sender?.getParameters || !sender?.setParameters) return;
+
+  const {
+    maxBitrate = QUALITY_PROFILES.p2pCamera.tiers.ultra.maxBitrate,
+    maxFramerate = QUALITY_PROFILES.p2pCamera.tiers.ultra.frameRate,
+    scaleResolutionDownBy = 1,
+    degradationPreference = 'maintain-resolution'
+  } = options;
+
+  const parameters = sender.getParameters() || {};
+  const baseEncoding = parameters.encodings?.[0] || {};
+  parameters.encodings = [{
+    ...baseEncoding,
+    maxBitrate,
+    maxFramerate,
+    scaleResolutionDownBy
+  }];
+
+  try {
+    parameters.degradationPreference = degradationPreference;
+  } catch (e) {}
+
+  try {
+    await sender.setParameters(parameters);
+  } catch (err) {
+    console.warn('[CallModal] Failed to tune video sender:', err);
+  }
+}
+
 function CallModal({
   socket,
   callState,      // 'idle' | 'outgoing' | 'incoming' | 'active'
@@ -216,6 +309,12 @@ function CallModal({
   const isInitiatorRef = useRef(false);
   const remoteUserIdRef = useRef(null); // ID собеседника для отправки сигналов
   const localVideoModeRef = useRef('camera');
+  const autoQualityManagersRef = useRef({
+    camera: createAutoQualityManager({ profile: QUALITY_PROFILES.p2pCamera, initialTier: 'ultra' }),
+    screen: createAutoQualityManager({ profile: QUALITY_PROFILES.p2pScreen, initialTier: 'ultra' })
+  });
+  const lastP2PStatsRef = useRef({ packetsSent: 0, packetsLost: 0 });
+  const appliedP2PQualityRef = useRef({ mode: '', tier: '' });
 
   useEffect(() => {
     localVideoModeRef.current = localVideoMode;
@@ -228,6 +327,111 @@ function CallModal({
   const syncRemoteScreenHint = useCallback((track) => {
     setRemoteTrackLooksScreen(isScreenLikeTrack(track));
   }, []);
+
+  const getActiveP2PQualityTarget = useCallback((track = null) => {
+    const mode = isScreenLikeTrack(track) || localVideoModeRef.current === 'screen' ? 'screen' : 'camera';
+    return {
+      mode,
+      manager: mode === 'screen' ? autoQualityManagersRef.current.screen : autoQualityManagersRef.current.camera,
+      profile: mode === 'screen' ? QUALITY_PROFILES.p2pScreen : QUALITY_PROFILES.p2pCamera,
+    };
+  }, []);
+
+  const applyP2PQualityDecision = useCallback(async (track, decision, force = false) => {
+    if (!track || !decision?.config) return;
+
+    const pc = peerConnectionRef.current;
+    if (!pc) return;
+
+    const { mode } = getActiveP2PQualityTarget(track);
+    const alreadyApplied = appliedP2PQualityRef.current.mode === mode && appliedP2PQualityRef.current.tier === decision.tier;
+    if (!force && alreadyApplied) return;
+
+    try {
+      if (typeof track.applyConstraints === 'function') {
+        if (mode === 'screen') {
+          await track.applyConstraints(buildVideoConstraintsForTier(decision.config));
+        } else {
+          await track.applyConstraints(buildCameraVideoConstraints(facingMode, decision.config));
+        }
+      }
+    } catch (err) {
+      console.warn('[CallModal] Failed to apply local track constraints:', err);
+    }
+
+    await tunePeerConnectionVideoSender(pc, {
+      maxBitrate: decision.config.maxBitrate,
+      maxFramerate: decision.config.frameRate,
+      degradationPreference: 'maintain-resolution'
+    });
+
+    appliedP2PQualityRef.current = { mode, tier: decision.tier };
+    console.info('[CallModal] Applied outgoing quality tier', {
+      mode,
+      tier: decision.tier,
+      reason: decision.reason,
+      width: decision.config.width,
+      height: decision.config.height,
+      frameRate: decision.config.frameRate,
+      maxBitrate: decision.config.maxBitrate
+    });
+  }, [facingMode, getActiveP2PQualityTarget]);
+
+  const evaluateP2PQuality = useCallback(async (force = false) => {
+    const pc = peerConnectionRef.current;
+    if (!pc?.getStats) return;
+
+    const sender = getVideoSender(pc);
+    const track = sender?.track || localStreamRef.current?.getVideoTracks?.()[0] || null;
+    if (!track) return;
+
+    try {
+      const stats = await pc.getStats();
+      const rows = [];
+      stats?.forEach?.((entry) => rows.push(entry));
+      if (!rows.length) return;
+
+      const byId = new Map();
+      rows.forEach((row) => {
+        if (row?.id) byId.set(row.id, row);
+      });
+
+      const outbound = rows
+        .filter((row) => row?.type === 'outbound-rtp' && (row?.kind === 'video' || row?.mediaType === 'video'))
+        .sort((left, right) => Number(right?.bytesSent || 0) - Number(left?.bytesSent || 0))[0] || null;
+      if (!outbound) return;
+
+      const remoteInbound = outbound?.remoteId ? byId.get(outbound.remoteId) : null;
+      const selectedPair = rows.find((row) => row?.type === 'candidate-pair' && (row?.selected || row?.nominated || row?.state === 'succeeded')) || null;
+
+      const packetsSent = Number(outbound?.packetsSent || 0);
+      const packetsLost = Number(remoteInbound?.packetsLost || 0);
+      const prev = lastP2PStatsRef.current;
+      const deltaSent = Math.max(0, packetsSent - Number(prev.packetsSent || 0));
+      const deltaLost = Math.max(0, packetsLost - Number(prev.packetsLost || 0));
+      const packetLoss = deltaSent > 0 ? deltaLost / Math.max(1, deltaSent + deltaLost) : 0;
+
+      lastP2PStatsRef.current = { packetsSent, packetsLost };
+
+      const { manager } = getActiveP2PQualityTarget(track);
+      const decision = manager.update({
+        timestamp: Date.now(),
+        availableOutgoingBitrate: Number(selectedPair?.availableOutgoingBitrate || 0),
+        qualityLimitationReason: String(outbound?.qualityLimitationReason || 'none'),
+        packetLoss,
+        frameRate: Number(outbound?.framesPerSecond || 0),
+        frameWidth: Number(outbound?.frameWidth || 0),
+        frameHeight: Number(outbound?.frameHeight || 0),
+        roundTripTime: Number(remoteInbound?.roundTripTime || selectedPair?.currentRoundTripTime || 0),
+      });
+
+      if (force || decision.changed || appliedP2PQualityRef.current.tier !== decision.tier) {
+        await applyP2PQualityDecision(track, decision, force);
+      }
+    } catch (err) {
+      console.warn('[CallModal] Failed to evaluate P2P quality:', err);
+    }
+  }, [applyP2PQualityDecision, getActiveP2PQualityTarget]);
 
   const isLocalScreen = localVideoMode === 'screen' || localTrackLooksScreen;
   const isRemoteScreen = remoteVideoMode === 'screen' || remoteTrackLooksScreen;
@@ -277,6 +481,15 @@ function CallModal({
     const oldVideoTrack = localStreamRef.current?.getVideoTracks?.()?.[0] || null;
 
     await videoSender.replaceTrack(newVideoTrack);
+    const { mode, manager } = getActiveP2PQualityTarget(newVideoTrack);
+    const baseDecision = manager.reset('ultra');
+    lastP2PStatsRef.current = { packetsSent: 0, packetsLost: 0 };
+    appliedP2PQualityRef.current = { mode: '', tier: '' };
+    await tunePeerConnectionVideoSender(pc, {
+      maxBitrate: baseDecision.config?.maxBitrate,
+      maxFramerate: baseDecision.config?.frameRate,
+      degradationPreference: 'maintain-resolution'
+    });
     console.log('[CallModal] Outgoing video track replaced via replaceTrack()');
 
     // Обновляем локальный stream (чтобы local preview показывал актуальный источник)
@@ -296,7 +509,8 @@ function CallModal({
       localVideoRef.current.srcObject = localStreamRef.current;
     }
     syncLocalScreenHint(newVideoTrack);
-  }, [syncLocalScreenHint]);
+    await applyP2PQualityDecision(newVideoTrack, baseDecision, true);
+  }, [applyP2PQualityDecision, getActiveP2PQualityTarget, syncLocalScreenHint]);
 
   // Отправляем текущее состояние видеорежима собеседнику через существующий signaling-канал.
   // Сервер прозрачно форвардит любые типы signal.
@@ -399,6 +613,10 @@ function CallModal({
     }
     
     pendingCandidatesRef.current = [];
+    autoQualityManagersRef.current.camera.reset('ultra');
+    autoQualityManagersRef.current.screen.reset('ultra');
+    lastP2PStatsRef.current = { packetsSent: 0, packetsLost: 0 };
+    appliedP2PQualityRef.current = { mode: '', tier: '' };
     setHasLocalStream(false);
     setHasRemoteStream(false);
     setLocalVideoMode('camera');
@@ -421,11 +639,7 @@ function CallModal({
           noiseSuppression: true,
           autoGainControl: true
         },
-        video: callType === 'video' ? {
-          width: { ideal: 640 },
-          height: { ideal: 480 },
-          facingMode: 'user'
-        } : false
+        video: callType === 'video' ? buildCameraVideoConstraints('user') : false
       };
       
       console.log('[CallModal] Requesting getUserMedia with:', constraints);
@@ -440,7 +654,16 @@ function CallModal({
         localVideoRef.current.srcObject = stream;
         console.log('[CallModal] Local video srcObject set');
       }
-      syncLocalScreenHint(stream.getVideoTracks?.()[0] || null);
+      const localVideoTrack = stream.getVideoTracks?.()[0] || null;
+      if (localVideoTrack && 'contentHint' in localVideoTrack) {
+        try {
+          localVideoTrack.contentHint = 'motion';
+        } catch (e) {}
+      }
+      autoQualityManagersRef.current.camera.reset('ultra');
+      appliedP2PQualityRef.current = { mode: '', tier: '' };
+      lastP2PStatsRef.current = { packetsSent: 0, packetsLost: 0 };
+      syncLocalScreenHint(localVideoTrack);
       
       return stream;
     } catch (err) {
@@ -467,6 +690,13 @@ function CallModal({
         console.log('[CallModal] Adding track to PC:', track.kind);
         pc.addTrack(track, stream);
       });
+      void preferPeerConnectionVideoCodec(pc);
+      void tunePeerConnectionVideoSender(pc);
+      const localVideoTrack = stream.getVideoTracks?.()[0] || null;
+      if (localVideoTrack) {
+        const { manager } = getActiveP2PQualityTarget(localVideoTrack);
+        void applyP2PQualityDecision(localVideoTrack, manager.getSnapshot(), true);
+      }
     }
     
     // Handle remote tracks
@@ -578,7 +808,7 @@ function CallModal({
     };
     
     return pc;
-  }, [socket, callId, remoteUser, syncRemoteScreenHint]);
+  }, [applyP2PQualityDecision, getActiveP2PQualityTarget, socket, callId, remoteUser, syncRemoteScreenHint]);
 
   // Start call timer
   const startTimer = () => {
@@ -765,41 +995,18 @@ function CallModal({
       
       // Получаем новый видеопоток
       const newStream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 640 },
-          height: { ideal: 480 },
-          facingMode: newFacingMode
-        },
+        video: buildCameraVideoConstraints(newFacingMode),
         audio: false // аудио оставляем старое
       });
       
       const newVideoTrack = newStream.getVideoTracks()[0];
-      const oldVideoTrack = localStreamRef.current.getVideoTracks()[0];
-      
-      // Заменяем трек в PeerConnection
-      if (peerConnectionRef.current) {
-        const senders = peerConnectionRef.current.getSenders();
-        const videoSender = senders.find(s => s.track?.kind === 'video');
-        if (videoSender) {
-          await videoSender.replaceTrack(newVideoTrack);
-          console.log('[CallModal] Replaced video track in PeerConnection');
-        }
+      if (newVideoTrack && 'contentHint' in newVideoTrack) {
+        try {
+          newVideoTrack.contentHint = 'motion';
+        } catch (e) {}
       }
-      
-      // Останавливаем старый трек
-      if (oldVideoTrack) {
-        oldVideoTrack.stop();
-      }
-      
-      // Заменяем трек в локальном стриме
-      localStreamRef.current.removeTrack(oldVideoTrack);
-      localStreamRef.current.addTrack(newVideoTrack);
-      
-      // Обновляем видео элемент
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = localStreamRef.current;
-      }
-      syncLocalScreenHint(newVideoTrack);
+
+      await replaceOutgoingVideoTrack(newVideoTrack);
       
       setFacingMode(newFacingMode);
       console.log('[CallModal] Camera switched to:', newFacingMode);
@@ -809,7 +1016,7 @@ function CallModal({
       // Возможно устройство не поддерживает вторую камеру
       alert('Не удалось переключить камеру. Возможно, устройство не поддерживает вторую камеру.');
     }
-  }, [callType, facingMode, syncLocalScreenHint]);
+  }, [callType, facingMode, replaceOutgoingVideoTrack]);
 
   // Выключить демонстрацию экрана и вернуть камеру.
   const stopScreenShare = useCallback(async () => {
@@ -825,16 +1032,17 @@ function CallModal({
 
       // Забираем новый camera video track (аудио остаётся прежним)
       const camStream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 640 },
-          height: { ideal: 480 },
-          facingMode
-        },
+        video: buildCameraVideoConstraints(facingMode),
         audio: false
       });
       const camTrack = camStream.getVideoTracks()[0];
       if (!camTrack) {
         throw new Error('Не удалось получить video track камеры');
+      }
+      if ('contentHint' in camTrack) {
+        try {
+          camTrack.contentHint = 'motion';
+        } catch (e) {}
       }
 
       await replaceOutgoingVideoTrack(camTrack);
@@ -879,14 +1087,16 @@ function CallModal({
 
     try {
       console.log('[CallModal] Starting screen share via getDisplayMedia()');
-      const screenStream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: false
-      });
+      const screenStream = await navigator.mediaDevices.getDisplayMedia(buildScreenShareConstraints());
 
       const screenTrack = screenStream.getVideoTracks()[0];
       if (!screenTrack) {
         throw new Error('Не удалось получить video track для экрана');
+      }
+      if ('contentHint' in screenTrack) {
+        try {
+          screenTrack.contentHint = 'detail';
+        } catch (e) {}
       }
 
       // На случай повторного запуска — остановим предыдущий screen stream
@@ -1087,6 +1297,30 @@ function CallModal({
       syncLocalScreenHint(localStreamRef.current.getVideoTracks?.()[0] || null);
     }
   }, [hasLocalStream, syncLocalScreenHint]);
+
+  useEffect(() => {
+    if (callType !== 'video') return undefined;
+    if (connectionState !== 'connected') return undefined;
+    if (!peerConnectionRef.current?.getStats) return undefined;
+
+    let cancelled = false;
+    let timer = null;
+
+    const tick = async () => {
+      if (cancelled) return;
+      await evaluateP2PQuality();
+    };
+
+    tick();
+    timer = setInterval(tick, 2000);
+
+    return () => {
+      cancelled = true;
+      try {
+        if (timer) clearInterval(timer);
+      } catch (e) {}
+    };
+  }, [callType, connectionState, evaluateP2PQuality]);
 
   // Cleanup on unmount
   useEffect(() => {
