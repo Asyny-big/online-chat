@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import ru.govchat.app.BuildConfig
+import ru.govchat.app.core.call.CallAudioRoute
 import ru.govchat.app.core.call.CallManager
 import ru.govchat.app.core.call.CallUiPhase
 import ru.govchat.app.core.call.CallUiState
@@ -1338,6 +1339,18 @@ class MainViewModel(
             callManager.toggleSpeakerphone().onFailure { error ->
                 mutableState.update {
                     it.copy(callErrorMessage = error.message ?: "Не удалось переключить громкую связь")
+                }
+            }
+            showCallControlsTemporarily()
+        }
+    }
+
+    fun selectAudioRoute(route: CallAudioRoute) {
+        if (mutableState.value.activeCall == null) return
+        viewModelScope.launch {
+            callManager.selectAudioRoute(route).onFailure { error ->
+                mutableState.update {
+                    it.copy(callErrorMessage = error.message ?: "Не удалось переключить аудиоустройство")
                 }
             }
             showCallControlsTemporarily()

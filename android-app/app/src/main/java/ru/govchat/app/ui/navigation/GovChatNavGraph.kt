@@ -186,6 +186,7 @@ fun GovChatNavGraph(
                 onCallSurfaceInteraction = viewModel::onCallSurfaceInteraction,
                 onToggleMicrophone = viewModel::toggleMicrophone,
                 onToggleSpeakerphone = viewModel::toggleSpeakerphone,
+                onSelectAudioRoute = viewModel::selectAudioRoute,
                 onToggleCamera = viewModel::toggleCamera,
                 onSwitchCamera = viewModel::switchCamera,
                 onStartScreenShare = viewModel::startScreenShare,

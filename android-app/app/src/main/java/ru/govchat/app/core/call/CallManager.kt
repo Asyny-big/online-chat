@@ -37,6 +37,9 @@ class CallManager(
         appContext = appContext.applicationContext
     )
 ) {
+    private val audioRouteController = CallAudioRouteController(
+        appContext = appContext.applicationContext
+    )
     private val liveKitController: InternalLiveKitController = InternalLiveKitController(
         appContext = appContext.applicationContext
     )
@@ -69,6 +72,10 @@ class CallManager(
                 if (mediaEngine != MediaEngine.LiveKit) return@onEach
                 applyMediaState(media)
             }
+            .launchIn(scope)
+
+        audioRouteController.state
+            .onEach(::applyAudioRoutingState)
             .launchIn(scope)
     }
 
@@ -106,6 +113,7 @@ class CallManager(
                 )
             )
         }
+        audioRouteController.startSession(isVideoCall = isVideo)
         webRtcController.startSession(
             callId = callId,
             isInitiator = isInitiator,
@@ -152,6 +160,7 @@ class CallManager(
             )
         }
 
+        audioRouteController.startSession(isVideoCall = isVideo)
         liveKitController.startSession(
             liveKitUrl = liveKitUrl,
             token = token,
@@ -160,6 +169,7 @@ class CallManager(
     }
 
     fun markGroupCallActive(type: String) {
+        audioRouteController.startSession(isVideoCall = type == "video")
         mutableState.update {
             it.copy(
                 inCall = true,
@@ -253,22 +263,24 @@ class CallManager(
     }
 
     suspend fun toggleSpeakerphone(): Result<Unit> {
-        val currentEnabled = mutableState.value.controls.isSpeakerphoneEnabled
-        val nextEnabled = !currentEnabled
-        val applied = when (mediaEngine) {
-            MediaEngine.WebRtc -> webRtcController.setSpeakerphoneEnabled(nextEnabled)
-            MediaEngine.LiveKit -> false
-            MediaEngine.None -> false
-        }
+        val applied = audioRouteController.toggleSpeakerphone()
         if (!applied) {
             return Result.failure(IllegalStateException("Speakerphone is unavailable"))
         }
         mutableState.update {
             it.copy(
-                controls = it.controls.copy(isSpeakerphoneEnabled = nextEnabled),
                 statusMessage = null
             )
         }
+        return Result.success(Unit)
+    }
+
+    fun selectAudioRoute(route: CallAudioRoute): Result<Unit> {
+        val applied = audioRouteController.selectRoute(route)
+        if (!applied) {
+            return Result.failure(IllegalStateException("Audio route is unavailable"))
+        }
+        mutableState.update { it.copy(statusMessage = null) }
         return Result.success(Unit)
     }
 
@@ -362,6 +374,7 @@ class CallManager(
 
     fun forceReset() {
         pendingWebRtcParticipantJoins.clear()
+        audioRouteController.stopSession()
         mutableState.value = CallUiState()
     }
 
@@ -371,6 +384,7 @@ class CallManager(
             MediaEngine.LiveKit -> liveKitController.close()
             MediaEngine.None -> Unit
         }
+        audioRouteController.stopSession()
         mediaEngine = MediaEngine.None
         pendingWebRtcParticipantJoins.clear()
         mutableState.value = CallUiState()
@@ -391,8 +405,6 @@ class CallManager(
             val controls = current.controls.copy(
                 isMicrophoneEnabled = media.isMicrophoneEnabled,
                 isCameraEnabled = media.isCameraEnabled,
-                isSpeakerphoneEnabled = media.isSpeakerphoneEnabled,
-                canToggleSpeakerphone = media.canToggleSpeakerphone,
                 isUsingFrontCamera = media.isUsingFrontCamera,
                 canSwitchCamera = media.canSwitchCamera,
                 isScreenShareSupported = media.isScreenShareSupported,
@@ -410,6 +422,20 @@ class CallManager(
                     inCall = current.inCall,
                     currentPhase = current.phase,
                     connectionState = media.connectionState
+                )
+            )
+        }
+    }
+
+    private fun applyAudioRoutingState(audio: CallAudioRoutingState) {
+        mutableState.update { current ->
+            current.copy(
+                controls = current.controls.copy(
+                    isSpeakerphoneEnabled = audio.isSpeakerphoneEnabled,
+                    canToggleSpeakerphone = audio.canToggleSpeakerphone,
+                    currentAudioRoute = audio.currentRoute,
+                    availableAudioRoutes = audio.availableRoutes,
+                    canSelectAudioRoute = audio.canSelectAudioRoute
                 )
             )
         }

@@ -85,12 +85,17 @@ import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.BluetoothAudio
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Headset
+import androidx.compose.material.icons.filled.PhoneInTalk
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -185,6 +190,7 @@ import org.webrtc.EglBase
 import org.webrtc.RendererCommon as WebRtcRendererCommon
 import org.webrtc.SurfaceViewRenderer as WebRtcSurfaceViewRenderer
 import ru.govchat.app.BuildConfig
+import ru.govchat.app.core.call.CallAudioRoute
 import ru.govchat.app.core.call.CallControlsState
 import ru.govchat.app.core.call.CallUiPhase
 import ru.govchat.app.core.call.CallUiState
@@ -251,6 +257,7 @@ fun MainScreen(
     onCallSurfaceInteraction: () -> Unit,
     onToggleMicrophone: () -> Unit,
     onToggleSpeakerphone: () -> Unit,
+    onSelectAudioRoute: (CallAudioRoute) -> Unit,
     onToggleCamera: () -> Unit,
     onSwitchCamera: () -> Unit,
     onStartScreenShare: (Int, Intent?) -> Unit,
@@ -576,6 +583,7 @@ fun MainScreen(
                     onInteraction = onCallSurfaceInteraction,
                     onToggleMicrophone = onToggleMicrophone,
                     onToggleSpeakerphone = onToggleSpeakerphone,
+                    onSelectAudioRoute = onSelectAudioRoute,
                     onToggleCamera = onToggleCamera,
                     onSwitchCamera = onSwitchCamera,
                     onToggleScreenShare = toggleScreenShare
@@ -3327,6 +3335,7 @@ private fun ActiveCallOverlay(
     onInteraction: () -> Unit,
     onToggleMicrophone: () -> Unit,
     onToggleSpeakerphone: () -> Unit,
+    onSelectAudioRoute: (CallAudioRoute) -> Unit,
     onToggleCamera: () -> Unit,
     onSwitchCamera: () -> Unit,
     onToggleScreenShare: () -> Unit
@@ -3646,6 +3655,7 @@ private fun ActiveCallOverlay(
                     onInteraction = onInteraction,
                     onToggleMicrophone = onToggleMicrophone,
                     onToggleSpeakerphone = onToggleSpeakerphone,
+                    onSelectAudioRoute = onSelectAudioRoute,
                     onToggleCamera = onToggleCamera,
                     onSwitchCamera = onSwitchCamera,
                     onToggleScreenShare = onToggleScreenShare,
@@ -3922,6 +3932,7 @@ private fun CallControlsBar(
     onInteraction: () -> Unit,
     onToggleMicrophone: () -> Unit,
     onToggleSpeakerphone: () -> Unit,
+    onSelectAudioRoute: (CallAudioRoute) -> Unit,
     onToggleCamera: () -> Unit,
     onSwitchCamera: () -> Unit,
     onToggleScreenShare: () -> Unit,
@@ -3972,22 +3983,14 @@ private fun CallControlsBar(
                 }
             )
 
-            if (!call.isGroup && call.type != "video") {
-                CallControlButton(
-                    icon = Icons.Filled.VolumeUp,
-                    contentDescription = if (controls.isSpeakerphoneEnabled) {
-                        "Выключить громкую связь"
-                    } else {
-                        "Включить громкую связь"
-                    },
-                    selected = controls.isSpeakerphoneEnabled,
-                    enabled = controls.canToggleSpeakerphone,
+            if (controls.canSelectAudioRoute || controls.canToggleSpeakerphone) {
+                AudioRouteControlButton(
+                    controls = controls,
                     buttonSize = regularButtonSize,
                     iconSize = regularIconSize,
-                    onClick = {
-                        onInteraction()
-                        onToggleSpeakerphone()
-                    }
+                    onInteraction = onInteraction,
+                    onToggleSpeakerphone = onToggleSpeakerphone,
+                    onSelectAudioRoute = onSelectAudioRoute
                 )
             }
 
@@ -4046,6 +4049,76 @@ private fun CallControlsBar(
                 }
             )
         }
+    }
+}
+
+@Composable
+private fun AudioRouteControlButton(
+    controls: CallControlsState,
+    buttonSize: Dp,
+    iconSize: Dp,
+    onInteraction: () -> Unit,
+    onToggleSpeakerphone: () -> Unit,
+    onSelectAudioRoute: (CallAudioRoute) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        CallControlButton(
+            icon = audioRouteIcon(controls.currentAudioRoute),
+            contentDescription = "Выбор аудиоустройства",
+            selected = controls.currentAudioRoute != null,
+            enabled = controls.canSelectAudioRoute || controls.canToggleSpeakerphone,
+            buttonSize = buttonSize,
+            iconSize = iconSize,
+            onClick = {
+                onInteraction()
+                if (controls.canSelectAudioRoute) {
+                    expanded = true
+                } else {
+                    onToggleSpeakerphone()
+                }
+            }
+        )
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            controls.availableAudioRoutes.forEach { route ->
+                DropdownMenuItem(
+                    text = { Text(audioRouteLabel(route)) },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = audioRouteIcon(route),
+                            contentDescription = null
+                        )
+                    },
+                    onClick = {
+                        expanded = false
+                        onInteraction()
+                        onSelectAudioRoute(route)
+                    }
+                )
+            }
+        }
+    }
+}
+
+private fun audioRouteIcon(route: CallAudioRoute?): ImageVector {
+    return when (route) {
+        CallAudioRoute.Bluetooth -> Icons.Filled.BluetoothAudio
+        CallAudioRoute.WiredHeadset -> Icons.Filled.Headset
+        CallAudioRoute.Earpiece -> Icons.Filled.PhoneInTalk
+        else -> Icons.Filled.VolumeUp
+    }
+}
+
+private fun audioRouteLabel(route: CallAudioRoute): String {
+    return when (route) {
+        CallAudioRoute.Bluetooth -> "Bluetooth"
+        CallAudioRoute.WiredHeadset -> "Гарнитура"
+        CallAudioRoute.Speaker -> "Динамик"
+        CallAudioRoute.Earpiece -> "Телефон"
     }
 }
 
