@@ -321,7 +321,7 @@ class ChatRepositoryImpl(
     }
 
     override suspend fun searchUserByPhone(phone: String): Result<UserProfile?> {
-        return runCatching {
+        return runAuthorized {
             val dto = api.searchByPhone(phone)
             dto?.toDomain()
         }.recoverCatching { error ->

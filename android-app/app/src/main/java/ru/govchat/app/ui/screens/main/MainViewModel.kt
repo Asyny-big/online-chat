@@ -1955,7 +1955,7 @@ class MainViewModel(
 
     fun searchUserByPhone(phone: String) {
         searchJob?.cancel()
-        val cleaned = phone.replace("[^\\d+]".toRegex(), "")
+        val cleaned = sanitizePhoneSearchInput(phone)
         val digitCount = cleaned.count { it.isDigit() }
         if (digitCount < 4) {
             mutableState.update {
@@ -2056,6 +2056,20 @@ class MainViewModel(
                         }
                     }
             }
+        }
+    }
+
+    private fun sanitizePhoneSearchInput(phone: String): String {
+        val raw = phone.trim()
+        if (raw.isEmpty()) return ""
+
+        val filtered = raw.filter { it.isDigit() || it == '+' }
+        if (filtered.isEmpty()) return ""
+
+        return if (filtered.startsWith("+")) {
+            "+${filtered.drop(1).replace("+", "")}"
+        } else {
+            filtered.replace("+", "")
         }
     }
 

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import { API_URL } from '@/config';
+import { countPhoneDigits, PHONE_LOOKUP_MIN_DIGITS, sanitizeLookupPhoneInput } from '@/shared/hooks/usePhoneUserLookup';
 
 export default function SearchPage({ token, onOpenMessages }) {
   const [phone, setPhone] = useState('');
@@ -10,8 +11,14 @@ export default function SearchPage({ token, onOpenMessages }) {
 
   const onSubmit = async (e) => {
     e.preventDefault();
-    const q = phone.trim();
+    const q = sanitizeLookupPhoneInput(phone);
     if (!q || loading) return;
+
+    if (countPhoneDigits(q) < PHONE_LOOKUP_MIN_DIGITS) {
+      setError('Введите номер телефона полностью');
+      setResult(null);
+      return;
+    }
 
     setLoading(true);
     setError('');
@@ -21,7 +28,11 @@ export default function SearchPage({ token, onOpenMessages }) {
         headers: { Authorization: `Bearer ${token}` },
         params: { phone: q }
       });
-      setResult(res.data || null);
+      if (res.data && typeof res.data === 'object' && (res.data._id || res.data.id)) {
+        setResult(res.data);
+      } else {
+        setError('Пользователь не найден');
+      }
     } catch (err) {
       setError(err.response?.data?.error || 'Ошибка поиска');
     } finally {
@@ -35,7 +46,10 @@ export default function SearchPage({ token, onOpenMessages }) {
       <form onSubmit={onSubmit} style={styles.form}>
         <input
           value={phone}
-          onChange={(e) => setPhone(e.target.value)}
+          onChange={(e) => {
+            setPhone(e.target.value);
+            if (error) setError('');
+          }}
           style={styles.input}
           placeholder="+79990000000"
         />

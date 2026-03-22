@@ -90,7 +90,7 @@ function isValidPhoneExact(phone) {
   return /^[1-9]\d{8,14}$/.test(digits);
 }
 
-async function findUserDocumentByPhone({ phone, excludeUserId, includeSystem = false, select = '_id name phone phoneNormalized avatarUrl isSystem systemKey' }) {
+function findUserDocumentByPhone({ phone, excludeUserId, includeSystem = false, select = '_id name phone phoneNormalized avatarUrl isSystem systemKey' }) {
   const candidates = buildPhoneLookupCandidates(phone);
   if (!candidates.length) return null;
 
@@ -111,11 +111,14 @@ async function findUserDocumentByPhone({ phone, excludeUserId, includeSystem = f
 }
 
 async function findUserByExactPhone({ phone, excludeUserId }) {
-  const user = await findUserDocumentByPhone({
+  const query = findUserDocumentByPhone({
     phone,
     excludeUserId,
     select: '_id name phone avatarUrl'
-  }).lean();
+  });
+  if (!query) return null;
+
+  const user = await query.lean().exec();
   if (!user) return null;
 
   return {

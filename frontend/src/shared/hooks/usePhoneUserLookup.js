@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { API_URL } from '@/config';
 
-const DEFAULT_MIN_LEN = 9;
+export const PHONE_LOOKUP_MIN_DIGITS = 9;
 const DEFAULT_DEBOUNCE_MS = 400;
 
-function sanitizeLookupPhoneInput(value) {
+export function sanitizeLookupPhoneInput(value) {
   const raw = String(value || '').trim();
   if (!raw) return '';
 
@@ -18,11 +18,11 @@ function sanitizeLookupPhoneInput(value) {
   return allowed.replace(/\+/g, '');
 }
 
-function countDigits(value) {
+export function countPhoneDigits(value) {
   return String(value || '').replace(/\D/g, '').length;
 }
 
-export function usePhoneUserLookup({ token, minLen = DEFAULT_MIN_LEN, debounceMs = DEFAULT_DEBOUNCE_MS }) {
+export function usePhoneUserLookup({ token, minLen = PHONE_LOOKUP_MIN_DIGITS, debounceMs = DEFAULT_DEBOUNCE_MS }) {
   const [phone, setPhone] = useState('');
   const [status, setStatus] = useState('idle'); // idle | too_short | loading | found | not_found | error | rate_limited
   const [user, setUser] = useState(null); // { id, name, avatar } | null
@@ -42,7 +42,7 @@ export function usePhoneUserLookup({ token, minLen = DEFAULT_MIN_LEN, debounceMs
       return undefined;
     }
 
-    if (countDigits(queryPhone) < minLen) {
+    if (countPhoneDigits(queryPhone) < minLen) {
       if (abortRef.current) abortRef.current.abort();
       setStatus('too_short');
       setUser(null);
