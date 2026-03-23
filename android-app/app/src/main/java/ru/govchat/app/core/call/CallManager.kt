@@ -80,6 +80,10 @@ class CallManager(
             .launchIn(scope)
     }
 
+    fun updateUiContext(context: Context?) {
+        webRtcController.updateVisualContext(context)
+    }
+
     suspend fun startWebRtcSession(
         callId: String,
         isInitiator: Boolean,

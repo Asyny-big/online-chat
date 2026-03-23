@@ -42,6 +42,7 @@ import org.webrtc.VideoTrack
 import ru.govchat.app.domain.model.CallControlSessionSummary
 import ru.govchat.app.domain.model.CallSignalPayload
 import ru.govchat.app.domain.model.WebRtcConfig
+import java.lang.ref.WeakReference
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.math.min
@@ -74,6 +75,7 @@ class GovChatWebRtcController(
     private var isStoppingScreenShare = false
     private var controlDataChannel: DataChannel? = null
     private var allowRemoteControlRequests: Boolean = false
+    private var visualContextRef: WeakReference<Context>? = null
 
     private var callId: String? = null
     private var remoteUserId: String? = null
@@ -188,6 +190,10 @@ class GovChatWebRtcController(
         hasSentInitialOffer = true
         logStep("onParticipantJoined:send offer")
         onSignal?.invoke(userId, CallSignalPayload.Offer(offer.description))
+    }
+
+    fun updateVisualContext(context: Context?) {
+        visualContextRef = context?.let(::WeakReference)
     }
 
     suspend fun onSignal(fromUserId: String, signal: CallSignalPayload) = withContext(Dispatchers.Main.immediate) {
@@ -410,7 +416,7 @@ class GovChatWebRtcController(
                 ?: throw IllegalStateException("Screen capturer observer unavailable")
 
             logStep("startScreenShare:before capturer.initialize(screen)")
-            screenCapturer?.initialize(screenSurfaceTextureHelper, appContext, observer)
+            screenCapturer?.initialize(screenSurfaceTextureHelper, resolveCallContext(), observer)
             logStep("startScreenShare:before capturer.startCapture(screen)")
             screenCapturer?.startCapture(width, height, fps)
 
@@ -535,9 +541,10 @@ class GovChatWebRtcController(
     private fun ensureFactory() {
         ensureMainThread("ensureFactory")
         if (peerConnectionFactory != null) return
+        val context = resolveCallContext()
         logStep("ensureFactory:before PeerConnectionFactory.initialize")
         PeerConnectionFactory.initialize(
-            PeerConnectionFactory.InitializationOptions.builder(appContext)
+            PeerConnectionFactory.InitializationOptions.builder(context)
                 .createInitializationOptions()
         )
         logStep("ensureFactory:before createPeerConnectionFactory")
@@ -599,7 +606,7 @@ class GovChatWebRtcController(
         val observer: CapturerObserver = videoSource!!.capturerObserver
         val captureStarted = runCatching {
             logStep("createLocalMedia:before capturer.initialize(camera)")
-            capturer.initialize(surfaceTextureHelper, appContext, observer)
+            capturer.initialize(surfaceTextureHelper, resolveCallContext(), observer)
             logStep("createLocalMedia:before capturer.startCapture(camera)")
             capturer.startCapture(720, 1280, 30)
         }.isSuccess
@@ -775,8 +782,9 @@ class GovChatWebRtcController(
 
     private fun createVideoCapturer(): CameraCapturerSetup? {
         ensureMainThread("createVideoCapturer")
-        val camera2 = Camera2Enumerator.isSupported(appContext)
-        val enumerator = if (camera2) Camera2Enumerator(appContext) else Camera1Enumerator(false)
+        val context = resolveCallContext()
+        val camera2 = Camera2Enumerator.isSupported(context)
+        val enumerator = if (camera2) Camera2Enumerator(context) else Camera1Enumerator(false)
         val deviceNames = enumerator.deviceNames.toList()
         val frontCandidates = deviceNames.filter { enumerator.isFrontFacing(it) }
         val backCandidates = deviceNames.filter { enumerator.isBackFacing(it) }
@@ -963,7 +971,7 @@ class GovChatWebRtcController(
     }
 
     private fun resolveScreenShareCaptureProfile(): ScreenShareCaptureProfile {
-        val metrics = appContext.resources.displayMetrics
+        val metrics = resolveCallContext().resources.displayMetrics
         val rawWidth = metrics.widthPixels.coerceAtLeast(1)
         val rawHeight = metrics.heightPixels.coerceAtLeast(1)
         val isLandscape = rawWidth >= rawHeight
@@ -1051,6 +1059,10 @@ class GovChatWebRtcController(
     private fun publishRemoteControlState() {
         ensureMainThread("publishRemoteControlState")
         mutableState.value = mutableState.value.copy(remoteControl = remoteControlManager.state.value)
+    }
+
+    private fun resolveCallContext(): Context {
+        return visualContextRef?.get() ?: appContext
     }
 
     private fun closeInternal() {

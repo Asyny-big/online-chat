@@ -194,6 +194,7 @@ fun GovChatNavGraph(
                 onGrantRemoteControl = viewModel::grantRemoteControl,
                 onDenyRemoteControl = viewModel::denyRemoteControl,
                 onStopRemoteControlSession = viewModel::stopRemoteControlSession,
+                onBindCallUiContext = viewModel::updateCallUiContext,
                 onClearCallError = viewModel::clearCallError,
                 onLogout = viewModel::logout,
                 onSearchUserByPhone = viewModel::searchUserByPhone,

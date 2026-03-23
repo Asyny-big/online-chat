@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.SystemClock
+import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ProcessLifecycleOwner
@@ -1443,6 +1444,10 @@ class MainViewModel(
         showCallControlsTemporarily()
     }
 
+    fun updateCallUiContext(context: Context?) {
+        callManager.updateUiContext(context)
+    }
+
     private suspend fun observeRealtime() {
         chatRepository.observeRealtimeEvents().collect { event ->
             when (event) {
@@ -1872,18 +1877,27 @@ class MainViewModel(
                 loadWebRtcConfigUseCase().getOrThrow()
             }
         }.getOrElse { fallbackWebRtcConfig() }
-        callManager.startWebRtcSession(
-            callId = callId,
-            isInitiator = isInitiator,
-            isVideo = callType == "video",
-            config = config,
-            remoteUserId = remoteUserId
-        ) { targetUserId, signal ->
-            sendCallSignalUseCase(
+        try {
+            callManager.startWebRtcSession(
                 callId = callId,
-                targetUserId = targetUserId,
-                signal = signal
+                isInitiator = isInitiator,
+                isVideo = callType == "video",
+                config = config,
+                remoteUserId = remoteUserId
+            ) { targetUserId, signal ->
+                sendCallSignalUseCase(
+                    callId = callId,
+                    targetUserId = targetUserId,
+                    signal = signal
+                )
+            }
+        } catch (error: Throwable) {
+            Log.e(
+                TAG,
+                "initializeWebRtc failed: callId=$callId type=$callType initiator=$isInitiator remoteUserId=$remoteUserId",
+                error
             )
+            throw error
         }
     }
 
@@ -2842,6 +2856,7 @@ class MainViewModel(
     }
 
     companion object {
+        private const val TAG = "MainViewModel"
         private const val TYPING_STOP_DELAY_MS = 2_000L
         private const val CALL_CONTROLS_AUTO_HIDE_MS = 3_500L
         private const val ICE_CONFIG_TIMEOUT_MS = 3_000L

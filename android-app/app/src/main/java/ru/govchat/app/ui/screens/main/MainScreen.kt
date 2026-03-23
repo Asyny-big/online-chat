@@ -266,6 +266,7 @@ fun MainScreen(
     onGrantRemoteControl: () -> Unit,
     onDenyRemoteControl: () -> Unit,
     onStopRemoteControlSession: () -> Unit,
+    onBindCallUiContext: (Context?) -> Unit,
     onClearCallError: () -> Unit,
     onLogout: () -> Unit,
     onSearchUserByPhone: (String) -> Unit,
@@ -279,6 +280,9 @@ fun MainScreen(
 ) {
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
+    LaunchedEffect(activity, context) {
+        onBindCallUiContext(activity ?: context)
+    }
     val permissionFlow = rememberGovChatPermissionFlow()
     val downloader = remember(context.applicationContext) {
         GovChatAttachmentDownloader(context.applicationContext)
