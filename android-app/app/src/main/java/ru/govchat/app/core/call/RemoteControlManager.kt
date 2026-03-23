@@ -3,9 +3,11 @@ package ru.govchat.app.core.call
 import android.accessibilityservice.AccessibilityService
 import android.content.ComponentName
 import android.content.Context
+import android.hardware.display.DisplayManager
 import android.os.Build
 import android.provider.Settings
 import android.util.DisplayMetrics
+import android.view.Display
 import android.view.Surface
 import android.view.WindowManager
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -321,24 +323,27 @@ class RemoteControlManager(
     private fun readScreenMetrics(): ScreenMetrics {
         val metrics = DisplayMetrics()
         val windowManager = appContext.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
-        val rotation = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            appContext.display?.rotation ?: Surface.ROTATION_0
+        val displayManager = appContext.getSystemService(DisplayManager::class.java)
+        val display = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            displayManager?.getDisplay(Display.DEFAULT_DISPLAY)
         } else {
             @Suppress("DEPRECATION")
-            windowManager?.defaultDisplay?.rotation ?: Surface.ROTATION_0
+            windowManager?.defaultDisplay
         }
+        val rotation = display?.rotation ?: Surface.ROTATION_0
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val bounds = windowManager?.currentWindowMetrics?.bounds
+            val resourceMetrics = appContext.resources.displayMetrics
             return ScreenMetrics(
-                width = bounds?.width() ?: appContext.resources.displayMetrics.widthPixels,
-                height = bounds?.height() ?: appContext.resources.displayMetrics.heightPixels,
+                width = resourceMetrics.widthPixels,
+                height = resourceMetrics.heightPixels,
                 rotation = rotation
             )
         }
 
         @Suppress("DEPRECATION")
-        windowManager?.defaultDisplay?.getRealMetrics(metrics)
+        display?.getRealMetrics(metrics)
+        @Suppress("DEPRECATION")
         return ScreenMetrics(
             width = metrics.widthPixels.takeIf { it > 0 } ?: appContext.resources.displayMetrics.widthPixels,
             height = metrics.heightPixels.takeIf { it > 0 } ?: appContext.resources.displayMetrics.heightPixels,
