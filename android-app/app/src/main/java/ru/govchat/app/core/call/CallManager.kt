@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import ru.govchat.app.domain.model.CallControlSessionSummary
 import ru.govchat.app.domain.model.CallSignalPayload
 import ru.govchat.app.domain.model.WebRtcConfig
 
@@ -205,6 +206,31 @@ class CallManager(
         webRtcController.onSignal(fromUserId = fromUserId, signal = signal)
     }
 
+    fun syncRemoteControlSession(summary: CallControlSessionSummary?, currentUserId: String?) {
+        if (mediaEngine != MediaEngine.WebRtc) return
+        webRtcController.syncRemoteControlSession(summary = summary, currentUserId = currentUserId)
+    }
+
+    fun sendRemoteControlState(): Boolean {
+        if (mediaEngine != MediaEngine.WebRtc) return false
+        return webRtcController.sendControlState()
+    }
+
+    fun grantRemoteControl(): Boolean {
+        if (mediaEngine != MediaEngine.WebRtc) return false
+        return webRtcController.grantRemoteControl()
+    }
+
+    fun denyRemoteControl(reason: String = "denied"): Boolean {
+        if (mediaEngine != MediaEngine.WebRtc) return false
+        return webRtcController.denyRemoteControl(reason = reason)
+    }
+
+    fun stopRemoteControl(reason: String = "stopped"): Boolean {
+        if (mediaEngine != MediaEngine.WebRtc) return false
+        return webRtcController.stopRemoteControl(reason = reason)
+    }
+
     fun setControlsVisible(visible: Boolean) {
         mutableState.update { it.copy(isControlsVisible = visible) }
     }
@@ -306,7 +332,7 @@ class CallManager(
         )
     }
 
-    suspend fun startScreenShare(resultCode: Int, permissionData: Intent?): Result<Unit> {
+    suspend fun startScreenShare(resultCode: Int, permissionData: Intent?, allowRemoteControlRequests: Boolean): Result<Unit> {
         if (resultCode != Activity.RESULT_OK || permissionData == null) {
             val error = IllegalStateException("Screen sharing permission was not granted")
             mutableState.update { it.copy(statusMessage = error.message) }
@@ -315,7 +341,8 @@ class CallManager(
         val result = when (mediaEngine) {
             MediaEngine.WebRtc -> webRtcController.startScreenShare(
                 resultCode = resultCode,
-                permissionData = permissionData
+                permissionData = permissionData,
+                allowControlRequests = allowRemoteControlRequests
             )
             MediaEngine.LiveKit -> {
                 if (liveKitController.setScreenShareEnabled(enabled = true, permissionData = permissionData)) {
@@ -418,6 +445,7 @@ class CallManager(
                 liveKitRoom = media.liveKitRoom,
                 connectionState = media.connectionState,
                 controls = controls,
+                remoteControl = media.remoteControl,
                 phase = resolvePhase(
                     inCall = current.inCall,
                     currentPhase = current.phase,

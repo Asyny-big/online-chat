@@ -43,6 +43,7 @@ import ru.govchat.app.domain.model.CallHistoryDraft
 import ru.govchat.app.domain.model.CallHistoryDirection
 import ru.govchat.app.domain.model.CallHistoryStatus
 import ru.govchat.app.domain.model.CallHistoryType
+import ru.govchat.app.domain.model.CallSignalPayload
 import ru.govchat.app.domain.model.ChatMessage
 import ru.govchat.app.domain.model.ChatType
 import ru.govchat.app.domain.model.MessageDeliveryStatus
@@ -993,6 +994,10 @@ class MainViewModel(
                     isInitiator = isInitiator,
                     remoteUserId = peerUserId.ifBlank { null }
                 )
+                callManager.syncRemoteControlSession(
+                    summary = event.controlSession,
+                    currentUserId = mutableState.value.currentUserId
+                )
                 mutableState.update {
                     it.copy(
                         isCallActionInProgress = false,
@@ -1379,11 +1384,15 @@ class MainViewModel(
         }
     }
 
-    fun startScreenShare(resultCode: Int, permissionData: Intent?) {
+    fun startScreenShare(resultCode: Int, permissionData: Intent?, allowRemoteControlRequests: Boolean) {
         val activeCall = mutableState.value.activeCall ?: return
         if (activeCall.type != "video") return
         viewModelScope.launch {
-            callManager.startScreenShare(resultCode = resultCode, permissionData = permissionData)
+            callManager.startScreenShare(
+                resultCode = resultCode,
+                permissionData = permissionData,
+                allowRemoteControlRequests = allowRemoteControlRequests
+            )
                 .onFailure { error ->
                     mutableState.update { it.copy(callErrorMessage = error.message ?: "Screen share unavailable") }
                 }
@@ -1402,6 +1411,36 @@ class MainViewModel(
             }
             showCallControlsTemporarily()
         }
+    }
+
+    fun grantRemoteControl() {
+        if (mutableState.value.activeCall == null) return
+        if (!callManager.grantRemoteControl()) {
+            mutableState.update {
+                it.copy(callErrorMessage = "Не удалось разрешить удалённое управление")
+            }
+        }
+        showCallControlsTemporarily()
+    }
+
+    fun denyRemoteControl() {
+        if (mutableState.value.activeCall == null) return
+        if (!callManager.denyRemoteControl()) {
+            mutableState.update {
+                it.copy(callErrorMessage = "Не удалось отклонить запрос управления")
+            }
+        }
+        showCallControlsTemporarily()
+    }
+
+    fun stopRemoteControlSession() {
+        if (mutableState.value.activeCall == null) return
+        if (!callManager.stopRemoteControl(reason = "user_revoked")) {
+            mutableState.update {
+                it.copy(callErrorMessage = "Не удалось отключить удалённое управление")
+            }
+        }
+        showCallControlsTemporarily()
     }
 
     private suspend fun observeRealtime() {
@@ -1809,6 +1848,13 @@ class MainViewModel(
                         callManager.onSignal(event.fromUserId, event.signal)
                     }.onFailure { error ->
                         mutableState.update { it.copy(callErrorMessage = error.message ?: "Signal handling failed") }
+                    }
+                    when (event.signal) {
+                        is CallSignalPayload.ControlRequest,
+                        is CallSignalPayload.ControlGrant,
+                        is CallSignalPayload.ControlDeny,
+                        is CallSignalPayload.ControlStop -> showCallControlsTemporarily()
+                        else -> Unit
                     }
                 }
             }

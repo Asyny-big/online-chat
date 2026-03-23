@@ -39,6 +39,7 @@ import org.webrtc.SurfaceTextureHelper
 import org.webrtc.VideoCapturer
 import org.webrtc.VideoSource
 import org.webrtc.VideoTrack
+import ru.govchat.app.domain.model.CallControlSessionSummary
 import ru.govchat.app.domain.model.CallSignalPayload
 import ru.govchat.app.domain.model.WebRtcConfig
 import kotlin.coroutines.resume
@@ -52,6 +53,7 @@ class GovChatWebRtcController(
     private val eglBase: EglBase = EglBase.create()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val mutableState = MutableStateFlow(CallMediaState(eglContext = eglBase.eglBaseContext))
+    private val remoteControlManager = RemoteControlManager(appContext)
     val state: StateFlow<CallMediaState> = mutableState.asStateFlow()
 
     private var peerConnectionFactory: PeerConnectionFactory? = null
@@ -70,6 +72,8 @@ class GovChatWebRtcController(
     private var screenVideoTrack: VideoTrack? = null
     private var screenSurfaceTextureHelper: SurfaceTextureHelper? = null
     private var isStoppingScreenShare = false
+    private var controlDataChannel: DataChannel? = null
+    private var allowRemoteControlRequests: Boolean = false
 
     private var callId: String? = null
     private var remoteUserId: String? = null
@@ -121,6 +125,9 @@ class GovChatWebRtcController(
             isVideo && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP
         this@GovChatWebRtcController.isScreenSharing = false
         this@GovChatWebRtcController.isRemoteVideoDisabledBySignal = false
+        this@GovChatWebRtcController.allowRemoteControlRequests = false
+        remoteControlManager.clearSession()
+        remoteControlManager.refreshAvailability(isScreenSharing = false, allowRequests = false)
 
         val rtcConfig = PeerConnection.RTCConfiguration(config.toIceServerList()).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
@@ -131,6 +138,12 @@ class GovChatWebRtcController(
         val pc = peerConnectionFactory?.createPeerConnection(rtcConfig, peerObserver)
             ?: throw IllegalStateException("PeerConnectionFactory unavailable")
         peerConnection = pc
+        if (isInitiator) {
+            val init = DataChannel.Init().apply {
+                ordered = true
+            }
+            bindControlDataChannel(pc.createDataChannel(CONTROL_CHANNEL_LABEL, init))
+        }
 
         logStep("startSession:before createLocalMedia")
         createLocalMedia(isVideo = isVideo)
@@ -151,7 +164,8 @@ class GovChatWebRtcController(
             isUsingFrontCamera = usingFrontCamera,
             canSwitchCamera = canSwitchCamera,
             isScreenShareSupported = isScreenShareSupported,
-            isScreenSharing = false
+            isScreenSharing = false,
+            remoteControl = remoteControlManager.state.value
         )
         logStep("startSession:ready")
     }
@@ -259,8 +273,57 @@ class GovChatWebRtcController(
                     }
                 }
             }
+            is CallSignalPayload.ControlState,
+            is CallSignalPayload.ControlRequest,
+            is CallSignalPayload.ControlGrant,
+            is CallSignalPayload.ControlDeny,
+            is CallSignalPayload.ControlStop,
+            is CallSignalPayload.ControlHeartbeat -> {
+                remoteControlManager.handleIncomingSignal(fromUserId = fromUserId, signal = signal)
+                publishRemoteControlState()
+            }
             is CallSignalPayload.Unknown -> Unit
         }
+    }
+
+    fun syncRemoteControlSession(summary: CallControlSessionSummary?, currentUserId: String?) {
+        ensureMainThread("syncRemoteControlSession")
+        remoteControlManager.syncSession(summary = summary, currentUserId = currentUserId)
+        publishRemoteControlState()
+    }
+
+    fun sendControlState(): Boolean {
+        ensureMainThread("sendControlState")
+        val targetUserId = remoteUserId ?: return false
+        onSignal?.invoke(targetUserId, remoteControlManager.buildControlStateSignal())
+        return true
+    }
+
+    fun grantRemoteControl(): Boolean {
+        ensureMainThread("grantRemoteControl")
+        val targetUserId = remoteUserId ?: return false
+        val signal = remoteControlManager.buildGrantSignal() ?: return false
+        onSignal?.invoke(targetUserId, signal)
+        publishRemoteControlState()
+        return true
+    }
+
+    fun denyRemoteControl(reason: String = "denied"): Boolean {
+        ensureMainThread("denyRemoteControl")
+        val targetUserId = remoteUserId ?: return false
+        val signal = remoteControlManager.buildDenySignal(reason = reason) ?: return false
+        onSignal?.invoke(targetUserId, signal)
+        publishRemoteControlState()
+        return true
+    }
+
+    fun stopRemoteControl(reason: String = "stopped"): Boolean {
+        ensureMainThread("stopRemoteControl")
+        val targetUserId = remoteUserId ?: return false
+        val signal = remoteControlManager.buildStopSignal(reason = reason) ?: return false
+        onSignal?.invoke(targetUserId, signal)
+        publishRemoteControlState()
+        return true
     }
 
     fun setMicrophoneEnabled(enabled: Boolean): Boolean {
@@ -289,7 +352,7 @@ class GovChatWebRtcController(
         return true
     }
 
-    fun startScreenShare(resultCode: Int, permissionData: Intent?): Result<Unit> {
+    fun startScreenShare(resultCode: Int, permissionData: Intent?, allowControlRequests: Boolean): Result<Unit> {
         if (!isOnMainThread()) {
             logStep("startScreenShare:wrong thread")
             return Result.failure(IllegalStateException("startScreenShare must run on main thread"))
@@ -360,14 +423,21 @@ class GovChatWebRtcController(
             sender.setTrack(screenVideoTrack, false)
             applyVideoSenderParameters(sender = sender, mode = VideoSenderMode.ScreenShare)
             isScreenSharing = true
+            allowRemoteControlRequests = allowControlRequests
+            remoteControlManager.refreshAvailability(
+                isScreenSharing = true,
+                allowRequests = allowRemoteControlRequests
+            )
             mutableState.value = mutableState.value.copy(
                 localVideoTrack = screenVideoTrack?.let(CallVideoTrack::WebRtc),
                 isScreenSharing = true,
-                isScreenShareSupported = isScreenShareSupported
+                isScreenShareSupported = isScreenShareSupported,
+                remoteControl = remoteControlManager.state.value
             )
             val targetUserId = remoteUserId
             if (!targetUserId.isNullOrBlank()) {
                 onSignal?.invoke(targetUserId, CallSignalPayload.VideoMode("screen"))
+                onSignal?.invoke(targetUserId, remoteControlManager.buildControlStateSignal())
             }
         }.onFailure {
             logStep("startScreenShare:failed ${it.message}")
@@ -393,15 +463,21 @@ class GovChatWebRtcController(
             applyVideoSenderParameters(sender = sender, mode = VideoSenderMode.Camera)
             disposeScreenCapture()
             isScreenSharing = false
+            val stopSignal = remoteControlManager.buildStopSignal(reason = "screen_share_stopped")
+            allowRemoteControlRequests = false
+            remoteControlManager.refreshAvailability(isScreenSharing = false, allowRequests = false)
             mutableState.value = mutableState.value.copy(
                 localVideoTrack = restoreCameraTrack?.let(CallVideoTrack::WebRtc),
                 isCameraEnabled = cameraEnabled,
                 isScreenSharing = false,
-                isScreenShareSupported = isScreenShareSupported
+                isScreenShareSupported = isScreenShareSupported,
+                remoteControl = remoteControlManager.state.value
             )
             val targetUserId = remoteUserId
             if (!targetUserId.isNullOrBlank()) {
+                stopSignal?.let { onSignal?.invoke(targetUserId, it) }
                 onSignal?.invoke(targetUserId, CallSignalPayload.VideoMode("camera"))
+                onSignal?.invoke(targetUserId, remoteControlManager.buildControlStateSignal())
             }
         }.onFailure {
             logStep("stopScreenShare:failed ${it.message}")
@@ -659,7 +735,11 @@ class GovChatWebRtcController(
             }
         }
 
-        override fun onDataChannel(dataChannel: DataChannel?) = Unit
+        override fun onDataChannel(dataChannel: DataChannel?) {
+            mainHandler.post {
+                bindControlDataChannel(dataChannel)
+            }
+        }
         override fun onRenegotiationNeeded() = Unit
 
         override fun onAddTrack(receiver: RtpReceiver?, mediaStreams: Array<out MediaStream>?) {
@@ -830,6 +910,7 @@ class GovChatWebRtcController(
         if (current.isNullOrBlank()) {
             remoteUserId = userId
             flushPendingOutgoingCandidates()
+            sendControlState()
             logStep("bindRemoteUserIfNeeded:bound remote=$userId")
             return true
         }
@@ -937,6 +1018,41 @@ class GovChatWebRtcController(
         }
     }
 
+    private fun bindControlDataChannel(channel: DataChannel?) {
+        ensureMainThread("bindControlDataChannel")
+        val nextChannel = channel ?: return
+        if (nextChannel.label() != CONTROL_CHANNEL_LABEL) return
+
+        runCatching { controlDataChannel?.unregisterObserver() }
+        controlDataChannel = nextChannel
+        nextChannel.registerObserver(object : DataChannel.Observer {
+            override fun onBufferedAmountChange(previousAmount: Long) = Unit
+
+            override fun onStateChange() {
+                mainHandler.post {
+                    logStep("controlDataChannel:state=${nextChannel.state()}")
+                    if (nextChannel.state() == DataChannel.State.OPEN) {
+                        sendControlState()
+                    }
+                }
+            }
+
+            override fun onMessage(buffer: DataChannel.Buffer) {
+                val duplicate = runCatching { buffer.data.duplicate() }.getOrNull() ?: return
+                val command = RemoteControlProtocol.decode(duplicate) ?: return
+                mainHandler.post {
+                    remoteControlManager.execute(command)
+                    publishRemoteControlState()
+                }
+            }
+        })
+    }
+
+    private fun publishRemoteControlState() {
+        ensureMainThread("publishRemoteControlState")
+        mutableState.value = mutableState.value.copy(remoteControl = remoteControlManager.state.value)
+    }
+
     private fun closeInternal() {
         ensureMainThread("closeInternal")
         logStep("closeInternal:begin")
@@ -964,6 +1080,10 @@ class GovChatWebRtcController(
         isScreenShareSupported = false
         isScreenSharing = false
         videoRtpSender = null
+        runCatching { controlDataChannel?.unregisterObserver() }
+        controlDataChannel = null
+        remoteControlManager.clearSession()
+        remoteControlManager.refreshAvailability(isScreenSharing = false, allowRequests = false)
 
         peerConnection?.close()
         peerConnection = null
@@ -1056,6 +1176,7 @@ class GovChatWebRtcController(
 
     private companion object {
         private const val LOCAL_MEDIA_STREAM_ID = "govchat-local-stream"
+        private const val CONTROL_CHANNEL_LABEL = "govchat-control-v1"
         private const val WEBRTC_STEP_TAG = "WEBRTC_STEP"
         private const val SCREEN_SHARE_MAX_LONG_SIDE_PX = 1280
         private const val SCREEN_SHARE_MAX_SHORT_SIDE_PX = 720
@@ -1080,5 +1201,6 @@ data class CallMediaState(
     val isUsingFrontCamera: Boolean = true,
     val canSwitchCamera: Boolean = false,
     val isScreenShareSupported: Boolean = false,
-    val isScreenSharing: Boolean = false
+    val isScreenSharing: Boolean = false,
+    val remoteControl: RemoteControlUiState = RemoteControlUiState()
 )

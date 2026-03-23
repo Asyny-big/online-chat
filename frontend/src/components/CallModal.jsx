@@ -140,6 +140,63 @@ function buildScreenShareConstraints(tierConfig = QUALITY_PROFILES.p2pScreen.tie
   };
 }
 
+const CONTROL_PROTOCOL_VERSION = 1;
+const CONTROL_FRAME_TYPES = {
+  SCREEN_INFO: 1,
+  POINTER_DOWN: 2,
+  POINTER_MOVE: 3,
+  POINTER_UP: 4,
+  TAP: 5,
+  SWIPE: 6,
+  TEXT: 7,
+  GLOBAL_ACTION: 8,
+  HEARTBEAT: 9,
+  STOP: 10
+};
+
+const CONTROL_GLOBAL_ACTIONS = {
+  BACK: 1,
+  HOME: 2,
+  RECENTS: 3
+};
+
+function encodeUtf8(value) {
+  try {
+    return new TextEncoder().encode(String(value || ''));
+  } catch (_) {
+    return new Uint8Array([]);
+  }
+}
+
+function buildControlFrame({
+  type,
+  seq,
+  x = 0,
+  y = 0,
+  x2 = 0,
+  y2 = 0,
+  arg = 0,
+  payload = null
+}) {
+  const payloadBytes = payload instanceof Uint8Array ? payload : encodeUtf8(payload || '');
+  const buffer = new ArrayBuffer(18 + payloadBytes.length);
+  const view = new DataView(buffer);
+  view.setUint8(0, CONTROL_PROTOCOL_VERSION);
+  view.setUint8(1, type);
+  view.setUint8(2, 0);
+  view.setUint32(3, seq >>> 0);
+  view.setUint16(7, x);
+  view.setUint16(9, y);
+  view.setUint16(11, x2);
+  view.setUint16(13, y2);
+  view.setUint16(15, arg);
+  view.setUint16(17, payloadBytes.length);
+  payloadBytes.forEach((value, index) => {
+    view.setUint8(18 + index, value);
+  });
+  return buffer;
+}
+
 function getOrderedVideoCodecs(codecs) {
   if (!Array.isArray(codecs) || codecs.length === 0) return [];
 
@@ -228,6 +285,7 @@ function CallModal({
   currentUserId,
   token,          // JWT токен для авторизации запросов
 }) {
+  const controlSessionSummaryValue = arguments?.[0]?.controlSessionSummary || null;
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
   // videoMode описывает, ЧТО именно мы отправляем в видеотреке: камера или демонстрация экрана.
@@ -242,6 +300,21 @@ function CallModal({
   const [facingMode, setFacingMode] = useState('user'); // 'user' = фронтальная, 'environment' = задняя
   const [hasRemoteStream, setHasRemoteStream] = useState(false);
   const [iceServers, setIceServers] = useState(null);
+  const [controlTextInput, setControlTextInput] = useState('');
+  const [remoteControlState, setRemoteControlState] = useState({
+    enabled: false,
+    accessibilityEnabled: false,
+    canRequest: false,
+    sessionId: null,
+    active: false,
+    viewOnly: false,
+    pending: false,
+    expiresAt: null,
+    channelState: 'closed',
+    screenWidth: 0,
+    screenHeight: 0,
+    rotation: 0
+  });
 
   // P2P swap UX (как Telegram/FaceTime): клик по PiP меняет местами local/remote.
   // Важно: только layout/рендер-стили, без изменения MediaStream/WebRTC.
@@ -309,6 +382,22 @@ function CallModal({
   const isInitiatorRef = useRef(false);
   const remoteUserIdRef = useRef(null); // ID собеседника для отправки сигналов
   const localVideoModeRef = useRef('camera');
+  const controlDcRef = useRef(null);
+  const controlSeqRef = useRef(1);
+  const captureOverlayRef = useRef(null);
+  const controlMetricsRef = useRef({ width: 0, height: 0, rotation: 0 });
+  const controlGestureRef = useRef({
+    active: false,
+    moved: false,
+    pointerId: null,
+    startX: 0,
+    startY: 0,
+    lastX: 0,
+    lastY: 0,
+    startedAt: 0,
+    lastMoveTs: 0
+  });
+  const controlHeartbeatRef = useRef(null);
   const autoQualityManagersRef = useRef({
     camera: createAutoQualityManager({ profile: QUALITY_PROFILES.p2pCamera, initialTier: 'ultra' }),
     screen: createAutoQualityManager({ profile: QUALITY_PROFILES.p2pScreen, initialTier: 'ultra' })
@@ -319,6 +408,40 @@ function CallModal({
   useEffect(() => {
     localVideoModeRef.current = localVideoMode;
   }, [localVideoMode]);
+
+  useEffect(() => {
+    controlMetricsRef.current = {
+      width: Number(remoteControlState.screenWidth || 0),
+      height: Number(remoteControlState.screenHeight || 0),
+      rotation: Number(remoteControlState.rotation || 0)
+    };
+  }, [remoteControlState.screenWidth, remoteControlState.screenHeight, remoteControlState.rotation]);
+
+  useEffect(() => {
+    const summary = controlSessionSummaryValue;
+    if (!summary || String(summary.controllerUserId || '').trim() !== String(currentUserId || '').trim()) {
+      return;
+    }
+    setRemoteControlState((prev) => ({
+      ...prev,
+      sessionId: summary.sessionId || null,
+      pending: summary.state === 'requested',
+      active: summary.state === 'granted' && !summary.viewOnly,
+      viewOnly: summary.state === 'granted' && Boolean(summary.viewOnly),
+      expiresAt: summary.expiresAt || null
+    }));
+  }, [controlSessionSummaryValue, currentUserId]);
+
+  const sendControlSignal = useCallback((signal, explicitTargetUserId = null) => {
+    const targetId = explicitTargetUserId || remoteUserIdRef.current || remoteUser?._id;
+    if (!socket || !callId || !targetId) return false;
+    socket.emit('call:signal', {
+      callId,
+      targetUserId: targetId,
+      signal
+    });
+    return true;
+  }, [socket, callId, remoteUser]);
 
   const syncLocalScreenHint = useCallback((track) => {
     setLocalTrackLooksScreen(isScreenLikeTrack(track));
@@ -528,6 +651,146 @@ function CallModal({
     });
   }, [socket, callId, remoteUser]);
 
+  const nextControlSeq = useCallback(() => {
+    const current = Number(controlSeqRef.current || 1);
+    controlSeqRef.current = current + 1;
+    return current;
+  }, []);
+
+  const bindControlChannel = useCallback((channel) => {
+    if (!channel || channel.label !== 'govchat-control-v1') return;
+    controlDcRef.current = channel;
+    channel.binaryType = 'arraybuffer';
+    channel.onopen = () => {
+      console.log('[CallModal] Control channel open');
+      setRemoteControlState((prev) => ({ ...prev, channelState: 'open' }));
+    };
+    channel.onclose = () => {
+      console.log('[CallModal] Control channel closed');
+      setRemoteControlState((prev) => ({ ...prev, channelState: 'closed', active: false }));
+    };
+    channel.onerror = (error) => {
+      console.warn('[CallModal] Control channel error:', error);
+      setRemoteControlState((prev) => ({ ...prev, channelState: 'error' }));
+    };
+    channel.onmessage = () => {};
+  }, []);
+
+  const sendControlFrame = useCallback((frame) => {
+    const channel = controlDcRef.current;
+    if (!channel || channel.readyState !== 'open') return false;
+    if (!remoteControlState.active || remoteControlState.viewOnly) return false;
+    try {
+      channel.send(frame);
+      return true;
+    } catch (error) {
+      console.warn('[CallModal] Failed to send control frame:', error);
+      return false;
+    }
+  }, [remoteControlState.active, remoteControlState.viewOnly]);
+
+  const resolveRemoteContentRect = useCallback(() => {
+    const videoEl = remoteVideoRef.current;
+    if (!videoEl) return null;
+    const rect = videoEl.getBoundingClientRect();
+    if (!rect?.width || !rect?.height) return null;
+
+    const sourceWidth = Number(controlMetricsRef.current.width || videoEl.videoWidth || 0);
+    const sourceHeight = Number(controlMetricsRef.current.height || videoEl.videoHeight || 0);
+    if (!sourceWidth || !sourceHeight) {
+      return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+    }
+
+    const containerAspect = rect.width / rect.height;
+    const sourceAspect = sourceWidth / sourceHeight;
+    let width = rect.width;
+    let height = rect.height;
+    let left = rect.left;
+    let top = rect.top;
+
+    if (containerAspect > sourceAspect) {
+      height = rect.height;
+      width = height * sourceAspect;
+      left = rect.left + ((rect.width - width) / 2);
+    } else {
+      width = rect.width;
+      height = width / sourceAspect;
+      top = rect.top + ((rect.height - height) / 2);
+    }
+
+    return { left, top, width, height };
+  }, []);
+
+  const normalizeControlPoint = useCallback((clientX, clientY) => {
+    const rect = resolveRemoteContentRect();
+    if (!rect) return null;
+    const relX = (clientX - rect.left) / rect.width;
+    const relY = (clientY - rect.top) / rect.height;
+    if (relX < 0 || relX > 1 || relY < 0 || relY > 1) return null;
+    return {
+      x: Math.max(0, Math.min(65535, Math.round(relX * 65535))),
+      y: Math.max(0, Math.min(65535, Math.round(relY * 65535)))
+    };
+  }, [resolveRemoteContentRect]);
+
+  const requestRemoteControl = useCallback(() => {
+    const sessionId = (globalThis.crypto?.randomUUID?.() || `rc-${Date.now()}`);
+    const sent = sendControlSignal({
+      type: 'control-request',
+      sessionId,
+      requestedBy: currentUserId || ''
+    });
+    if (sent) {
+      setRemoteControlState((prev) => ({
+        ...prev,
+        sessionId,
+        pending: true,
+        active: false,
+        viewOnly: false
+      }));
+    }
+  }, [sendControlSignal, currentUserId]);
+
+  const stopRemoteControlSession = useCallback((reason = 'controller_stopped') => {
+    const sessionId = remoteControlState.sessionId;
+    if (!sessionId) return;
+    sendControlSignal({
+      type: 'control-stop',
+      sessionId,
+      reason
+    });
+    setRemoteControlState((prev) => ({
+      ...prev,
+      sessionId: null,
+      pending: false,
+      active: false,
+      viewOnly: false,
+      expiresAt: null
+    }));
+  }, [remoteControlState.sessionId, sendControlSignal]);
+
+  const sendControlText = useCallback(() => {
+    const value = String(controlTextInput || '').trim();
+    if (!value) return;
+    const payload = encodeUtf8(value);
+    const sent = sendControlFrame(buildControlFrame({
+      type: CONTROL_FRAME_TYPES.TEXT,
+      seq: nextControlSeq(),
+      payload
+    }));
+    if (sent) {
+      setControlTextInput('');
+    }
+  }, [controlTextInput, nextControlSeq, sendControlFrame]);
+
+  const sendGlobalAction = useCallback((action) => {
+    sendControlFrame(buildControlFrame({
+      type: CONTROL_FRAME_TYPES.GLOBAL_ACTION,
+      seq: nextControlSeq(),
+      arg: action
+    }));
+  }, [nextControlSeq, sendControlFrame]);
+
   // Загрузка ICE серверов с backend (с временными TURN credentials)
   const fetchIceServers = useCallback(async () => {
     try {
@@ -600,6 +863,16 @@ function CallModal({
       peerConnectionRef.current = null;
     }
 
+    if (controlHeartbeatRef.current) {
+      clearInterval(controlHeartbeatRef.current);
+      controlHeartbeatRef.current = null;
+    }
+
+    if (controlDcRef.current) {
+      try { controlDcRef.current.close(); } catch (e) {}
+      controlDcRef.current = null;
+    }
+
     if (remoteStreamRef.current) {
       try {
         remoteStreamRef.current.getTracks().forEach((track) => {
@@ -623,7 +896,33 @@ function CallModal({
     setRemoteVideoMode('camera');
     setLocalTrackLooksScreen(false);
     setRemoteTrackLooksScreen(false);
+    setRemoteControlState({
+      enabled: false,
+      accessibilityEnabled: false,
+      canRequest: false,
+      sessionId: null,
+      active: false,
+      viewOnly: false,
+      pending: false,
+      expiresAt: null,
+      channelState: 'closed',
+      screenWidth: 0,
+      screenHeight: 0,
+      rotation: 0
+    });
+    setControlTextInput('');
     setIsLocalFullscreen(false);
+    controlGestureRef.current = {
+      active: false,
+      moved: false,
+      pointerId: null,
+      startX: 0,
+      startY: 0,
+      lastX: 0,
+      lastY: 0,
+      startedAt: 0,
+      lastMoveTs: 0
+    };
     pipPosRef.current = null;
     pipElRef.current = null;
   }, []);
@@ -683,6 +982,9 @@ function CallModal({
     
     const pc = new RTCPeerConnection(iceConfig);
     peerConnectionRef.current = pc;
+    if (isInitiatorRef.current && !controlDcRef.current) {
+      bindControlChannel(pc.createDataChannel('govchat-control-v1', { ordered: true }));
+    }
     
     // Add local tracks
     if (stream) {
@@ -728,6 +1030,12 @@ function CallModal({
         setHasRemoteStream(true);
         syncRemoteScreenHint(event.track || fallbackStream.getVideoTracks?.()[0] || null);
         console.log('[CallModal] Remote track attached via fallback stream:', event.track.kind, event.track.id);
+      }
+    };
+
+    pc.ondatachannel = (event) => {
+      if (event?.channel?.label === 'govchat-control-v1') {
+        bindControlChannel(event.channel);
       }
     };
     
@@ -808,7 +1116,7 @@ function CallModal({
     };
     
     return pc;
-  }, [applyP2PQualityDecision, getActiveP2PQualityTarget, socket, callId, remoteUser, syncRemoteScreenHint]);
+  }, [applyP2PQualityDecision, bindControlChannel, getActiveP2PQualityTarget, socket, callId, remoteUser, syncRemoteScreenHint]);
 
   // Start call timer
   const startTimer = () => {
@@ -951,11 +1259,17 @@ function CallModal({
   // End active call
   const handleEndCall = useCallback(() => {
     console.log('[CallModal] Ending call');
-    
+    if (remoteControlState.sessionId) {
+      sendControlSignal({
+        type: 'control-stop',
+        sessionId: remoteControlState.sessionId,
+        reason: 'call_ended'
+      });
+    }
     socket.emit('call:leave', { callId });
     cleanup();
     onClose?.();
-  }, [socket, callId, cleanup, onClose]);
+  }, [socket, callId, cleanup, onClose, remoteControlState.sessionId, sendControlSignal]);
 
   // Toggle mute
   const toggleMute = useCallback(() => {
@@ -1154,6 +1468,45 @@ function CallModal({
             console.log('[CallModal] Remote video mode:', mode);
             setRemoteVideoMode(mode);
           }
+        } else if (signal.type === 'control-state') {
+          setRemoteControlState((prev) => ({
+            ...prev,
+            enabled: Boolean(signal?.enabled),
+            accessibilityEnabled: Boolean(signal?.accessibilityEnabled),
+            canRequest: Boolean(signal?.canRequest),
+            sessionId: signal?.enabled ? (signal?.sessionId || prev.sessionId) : null,
+            screenWidth: Number(signal?.screenWidth || 0),
+            screenHeight: Number(signal?.screenHeight || 0),
+            rotation: Number(signal?.rotation || 0),
+            pending: signal?.enabled ? prev.pending : false,
+            active: signal?.enabled ? prev.active : false,
+            viewOnly: signal?.enabled ? prev.viewOnly : false,
+            expiresAt: signal?.enabled ? prev.expiresAt : null
+          }));
+        } else if (signal.type === 'control-request') {
+          setRemoteControlState((prev) => ({
+            ...prev,
+            sessionId: signal?.sessionId || prev.sessionId,
+            pending: true
+          }));
+        } else if (signal.type === 'control-grant') {
+          setRemoteControlState((prev) => ({
+            ...prev,
+            sessionId: signal?.sessionId || prev.sessionId,
+            pending: false,
+            active: !signal?.viewOnly,
+            viewOnly: Boolean(signal?.viewOnly),
+            expiresAt: signal?.expiresAt || null
+          }));
+        } else if (signal.type === 'control-deny' || signal.type === 'control-stop') {
+          setRemoteControlState((prev) => ({
+            ...prev,
+            sessionId: null,
+            pending: false,
+            active: false,
+            viewOnly: false,
+            expiresAt: null
+          }));
         }
       } catch (err) {
         console.error('[CallModal] Signal handling error:', err);
@@ -1240,6 +1593,208 @@ function CallModal({
       socket.off('call:participant_left', handleParticipantLeft);
     };
   }, [socket, callId, callType, handleOffer, handleAnswer, handleIceCandidate, cleanup, onClose, remoteUser, currentUserId, sendVideoMode]);
+
+  useEffect(() => {
+    if (controlHeartbeatRef.current) {
+      clearInterval(controlHeartbeatRef.current);
+      controlHeartbeatRef.current = null;
+    }
+    if (!remoteControlState.sessionId) return undefined;
+    if (!remoteControlState.active && !remoteControlState.viewOnly) return undefined;
+
+    controlHeartbeatRef.current = setInterval(() => {
+      sendControlSignal({
+        type: 'control-heartbeat',
+        sessionId: remoteControlState.sessionId
+      });
+    }, 2000);
+
+    return () => {
+      if (controlHeartbeatRef.current) {
+        clearInterval(controlHeartbeatRef.current);
+        controlHeartbeatRef.current = null;
+      }
+    };
+  }, [remoteControlState.sessionId, remoteControlState.active, remoteControlState.viewOnly, sendControlSignal]);
+
+  useEffect(() => {
+    if (!remoteControlState.active) return undefined;
+    if (!remoteControlState.screenWidth || !remoteControlState.screenHeight) return undefined;
+
+    sendControlFrame(buildControlFrame({
+      type: CONTROL_FRAME_TYPES.SCREEN_INFO,
+      seq: nextControlSeq(),
+      x: Math.max(0, Math.min(65535, Number(remoteControlState.screenWidth || 0))),
+      y: Math.max(0, Math.min(65535, Number(remoteControlState.screenHeight || 0))),
+      arg: Math.max(0, Math.min(65535, Number(remoteControlState.rotation || 0)))
+    }));
+    return undefined;
+  }, [
+    nextControlSeq,
+    remoteControlState.active,
+    remoteControlState.rotation,
+    remoteControlState.screenHeight,
+    remoteControlState.screenWidth,
+    sendControlFrame
+  ]);
+
+  const remoteControlAllowed = callType === 'video' &&
+    callState === 'active' &&
+    !isMobileBrowser() &&
+    isRemoteScreen &&
+    hasRemoteStream;
+
+  const remoteControlOverlayEnabled = remoteControlAllowed &&
+    remoteControlState.active &&
+    !remoteControlState.viewOnly &&
+    remoteControlState.channelState === 'open';
+
+  const canRequestRemoteControl = remoteControlAllowed &&
+    remoteControlState.enabled &&
+    remoteControlState.canRequest &&
+    !remoteControlState.pending &&
+    !remoteControlState.active &&
+    !remoteControlState.viewOnly;
+
+  const remoteControlStatusText = useMemo(() => {
+    if (!remoteControlAllowed) return '';
+    if (remoteControlState.pending) return 'Ожидание подтверждения управления';
+    if (remoteControlState.viewOnly && remoteControlState.sessionId) return 'Режим только просмотра';
+    if (remoteControlState.active) return 'Удалённое управление активно';
+    if (remoteControlState.enabled && !remoteControlState.accessibilityEnabled) return 'На Android доступен только просмотр';
+    if (remoteControlState.enabled && remoteControlState.channelState !== 'open') return 'Ожидание control channel';
+    if (remoteControlState.enabled) return 'Можно запросить управление';
+    return 'Управление недоступно';
+  }, [
+    remoteControlAllowed,
+    remoteControlState.pending,
+    remoteControlState.viewOnly,
+    remoteControlState.sessionId,
+    remoteControlState.active,
+    remoteControlState.enabled,
+    remoteControlState.accessibilityEnabled,
+    remoteControlState.channelState
+  ]);
+
+  const handleControlPointerDown = useCallback((event) => {
+    if (!remoteControlOverlayEnabled) return;
+    const point = normalizeControlPoint(event.clientX, event.clientY);
+    if (!point) return;
+
+    controlGestureRef.current = {
+      active: true,
+      moved: false,
+      pointerId: event.pointerId,
+      startX: point.x,
+      startY: point.y,
+      lastX: point.x,
+      lastY: point.y,
+      startedAt: performance.now(),
+      lastMoveTs: 0
+    };
+
+    try {
+      captureOverlayRef.current?.focus?.();
+      event.currentTarget?.setPointerCapture?.(event.pointerId);
+    } catch (_) {}
+
+    sendControlFrame(buildControlFrame({
+      type: CONTROL_FRAME_TYPES.POINTER_DOWN,
+      seq: nextControlSeq(),
+      x: point.x,
+      y: point.y
+    }));
+
+    try {
+      event.preventDefault();
+    } catch (_) {}
+  }, [nextControlSeq, normalizeControlPoint, remoteControlOverlayEnabled, sendControlFrame]);
+
+  const handleControlPointerMove = useCallback((event) => {
+    const gesture = controlGestureRef.current;
+    if (!remoteControlOverlayEnabled || !gesture.active || gesture.pointerId !== event.pointerId) return;
+
+    const point = normalizeControlPoint(event.clientX, event.clientY);
+    if (!point) return;
+
+    const now = performance.now();
+    if (!gesture.moved && (Math.abs(point.x - gesture.startX) > 120 || Math.abs(point.y - gesture.startY) > 120)) {
+      gesture.moved = true;
+    }
+    gesture.lastX = point.x;
+    gesture.lastY = point.y;
+    if ((now - Number(gesture.lastMoveTs || 0)) < 50) {
+      try {
+        event.preventDefault();
+      } catch (_) {}
+      return;
+    }
+    gesture.lastMoveTs = now;
+
+    sendControlFrame(buildControlFrame({
+      type: CONTROL_FRAME_TYPES.POINTER_MOVE,
+      seq: nextControlSeq(),
+      x: point.x,
+      y: point.y
+    }));
+
+    try {
+      event.preventDefault();
+    } catch (_) {}
+  }, [nextControlSeq, normalizeControlPoint, remoteControlOverlayEnabled, sendControlFrame]);
+
+  const finishControlGesture = useCallback((event, cancelled = false) => {
+    const gesture = controlGestureRef.current;
+    if (!gesture.active || gesture.pointerId !== event.pointerId) return;
+
+    const point = normalizeControlPoint(event.clientX, event.clientY) || {
+      x: gesture.lastX || gesture.startX,
+      y: gesture.lastY || gesture.startY
+    };
+
+    controlGestureRef.current = {
+      active: false,
+      moved: false,
+      pointerId: null,
+      startX: 0,
+      startY: 0,
+      lastX: 0,
+      lastY: 0,
+      startedAt: 0,
+      lastMoveTs: 0
+    };
+
+    try {
+      event.currentTarget?.releasePointerCapture?.(event.pointerId);
+    } catch (_) {}
+
+    if (!cancelled) {
+      sendControlFrame(buildControlFrame({
+        type: CONTROL_FRAME_TYPES.POINTER_UP,
+        seq: nextControlSeq(),
+        x: point.x,
+        y: point.y
+      }));
+    }
+
+    try {
+      event.preventDefault();
+    } catch (_) {}
+  }, [nextControlSeq, normalizeControlPoint, sendControlFrame]);
+
+  const handleControlPointerUp = useCallback((event) => {
+    finishControlGesture(event, false);
+  }, [finishControlGesture]);
+
+  const handleControlPointerCancel = useCallback((event) => {
+    finishControlGesture(event, true);
+  }, [finishControlGesture]);
+
+  const handleControlTextKeyDown = useCallback((event) => {
+    if (event.key !== 'Enter' || event.shiftKey) return;
+    event.preventDefault();
+    sendControlText();
+  }, [sendControlText]);
 
   // Initialize call based on state
   useEffect(() => {
@@ -1688,6 +2243,34 @@ function CallModal({
               }}
             />
           )}
+
+          {remoteControlAllowed && (
+            <>
+              <div style={styles.remoteControlBadge}>
+                <span>{remoteControlStatusText}</span>
+                {remoteControlState.expiresAt ? (
+                  <span style={styles.remoteControlMeta}>
+                    до {new Date(remoteControlState.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                ) : null}
+              </div>
+
+              <div
+                ref={captureOverlayRef}
+                tabIndex={remoteControlOverlayEnabled ? 0 : -1}
+                onPointerDown={handleControlPointerDown}
+                onPointerMove={handleControlPointerMove}
+                onPointerUp={handleControlPointerUp}
+                onPointerCancel={handleControlPointerCancel}
+                style={{
+                  ...styles.remoteControlOverlay,
+                  opacity: remoteControlOverlayEnabled ? 1 : 0,
+                  pointerEvents: remoteControlOverlayEnabled ? 'auto' : 'none',
+                  cursor: remoteControlOverlayEnabled ? 'crosshair' : 'default'
+                }}
+              />
+            </>
+          )}
         </div>
         
         {/* Info */}
@@ -1700,6 +2283,79 @@ function CallModal({
             </div>
           )}
         </div>
+
+        {remoteControlAllowed && (
+          <div style={styles.remoteControlPanel}>
+            <div style={styles.remoteControlPanelRow}>
+              {canRequestRemoteControl && (
+                <button
+                  onClick={requestRemoteControl}
+                  style={{
+                    ...styles.remoteControlActionBtn,
+                    ...styles.remoteControlPrimaryBtn
+                  }}
+                >
+                  Запросить управление
+                </button>
+              )}
+
+              {(remoteControlState.active || remoteControlState.viewOnly || remoteControlState.pending) && (
+                <button
+                  onClick={() => stopRemoteControlSession('controller_stopped')}
+                  style={styles.remoteControlActionBtn}
+                >
+                  Отключить
+                </button>
+              )}
+
+              <div style={styles.remoteControlChannelState}>
+                DataChannel: {remoteControlState.channelState}
+              </div>
+            </div>
+
+            <div style={styles.remoteControlPanelRow}>
+              <button
+                onClick={() => sendGlobalAction(CONTROL_GLOBAL_ACTIONS.BACK)}
+                style={styles.remoteControlMiniBtn}
+                disabled={!remoteControlOverlayEnabled}
+              >
+                Назад
+              </button>
+              <button
+                onClick={() => sendGlobalAction(CONTROL_GLOBAL_ACTIONS.HOME)}
+                style={styles.remoteControlMiniBtn}
+                disabled={!remoteControlOverlayEnabled}
+              >
+                Домой
+              </button>
+              <button
+                onClick={() => sendGlobalAction(CONTROL_GLOBAL_ACTIONS.RECENTS)}
+                style={styles.remoteControlMiniBtn}
+                disabled={!remoteControlOverlayEnabled}
+              >
+                Recent
+              </button>
+            </div>
+
+            <div style={styles.remoteControlPanelRow}>
+              <input
+                value={controlTextInput}
+                onChange={(event) => setControlTextInput(event.target.value)}
+                onKeyDown={handleControlTextKeyDown}
+                placeholder="Текст для Android"
+                style={styles.remoteControlInput}
+                disabled={!remoteControlOverlayEnabled}
+              />
+              <button
+                onClick={sendControlText}
+                style={styles.remoteControlActionBtn}
+                disabled={!remoteControlOverlayEnabled || !String(controlTextInput || '').trim()}
+              >
+                Отправить текст
+              </button>
+            </div>
+          </div>
+        )}
         
         {/* Controls */}
         <div style={{
@@ -1897,6 +2553,96 @@ const styles = {
     fontSize: '14px',
     color: '#60a5fa',
     textShadow: '0 1px 2px rgba(0,0,0,0.8)',
+  },
+  remoteControlBadge: {
+    position: 'absolute',
+    top: '24px',
+    left: '24px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    padding: '10px 14px',
+    borderRadius: '14px',
+    background: 'rgba(15, 23, 42, 0.82)',
+    border: '1px solid rgba(96, 165, 250, 0.25)',
+    color: '#e2e8f0',
+    fontSize: '13px',
+    zIndex: 45,
+    backdropFilter: 'blur(12px)',
+  },
+  remoteControlMeta: {
+    color: 'rgba(191, 219, 254, 0.9)'
+  },
+  remoteControlOverlay: {
+    position: 'absolute',
+    inset: 0,
+    zIndex: 42,
+    touchAction: 'none',
+    outline: 'none'
+  },
+  remoteControlPanel: {
+    position: 'absolute',
+    left: '24px',
+    right: '24px',
+    bottom: '122px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '10px',
+    padding: '14px',
+    borderRadius: '18px',
+    background: 'rgba(15, 23, 42, 0.82)',
+    border: '1px solid rgba(148, 163, 184, 0.2)',
+    backdropFilter: 'blur(16px)',
+    zIndex: 48,
+  },
+  remoteControlPanelRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    flexWrap: 'wrap',
+  },
+  remoteControlActionBtn: {
+    height: '40px',
+    padding: '0 14px',
+    borderRadius: '12px',
+    border: '1px solid rgba(148, 163, 184, 0.25)',
+    background: 'rgba(30, 41, 59, 0.9)',
+    color: '#f8fafc',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: 600,
+  },
+  remoteControlPrimaryBtn: {
+    background: '#2563eb',
+    borderColor: '#2563eb',
+  },
+  remoteControlMiniBtn: {
+    height: '36px',
+    padding: '0 12px',
+    borderRadius: '10px',
+    border: '1px solid rgba(148, 163, 184, 0.25)',
+    background: 'rgba(30, 41, 59, 0.9)',
+    color: '#f8fafc',
+    cursor: 'pointer',
+    fontSize: '13px',
+    fontWeight: 600,
+  },
+  remoteControlChannelState: {
+    color: 'rgba(191, 219, 254, 0.9)',
+    fontSize: '12px',
+    marginLeft: 'auto',
+  },
+  remoteControlInput: {
+    flex: 1,
+    minWidth: '220px',
+    height: '40px',
+    borderRadius: '12px',
+    border: '1px solid rgba(148, 163, 184, 0.25)',
+    background: 'rgba(15, 23, 42, 0.92)',
+    color: '#f8fafc',
+    padding: '0 12px',
+    fontSize: '14px',
+    outline: 'none',
   },
   controls: {
     position: 'absolute',

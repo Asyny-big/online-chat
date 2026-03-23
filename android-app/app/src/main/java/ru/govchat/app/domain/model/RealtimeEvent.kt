@@ -57,7 +57,8 @@ sealed interface RealtimeEvent {
         val initiatorAvatarUrl: String?,
         val targetUserId: String,
         val targetUserName: String,
-        val targetUserAvatarUrl: String?
+        val targetUserAvatarUrl: String?,
+        val controlSession: CallControlSessionSummary? = null
     ) : RealtimeEvent
     data class CallSyncComplete(
         val privateCallIds: List<String>,

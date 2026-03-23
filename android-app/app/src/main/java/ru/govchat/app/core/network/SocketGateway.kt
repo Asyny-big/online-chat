@@ -14,6 +14,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import org.json.JSONArray
 import org.json.JSONObject
+import ru.govchat.app.domain.model.CallControlSessionSummary
 import ru.govchat.app.domain.model.CallJoinParticipant
 import ru.govchat.app.domain.model.GroupCallStartResult
 import ru.govchat.app.domain.model.CallSignalPayload
@@ -196,7 +197,8 @@ class SocketGateway(
                     initiatorAvatarUrl = initiator?.optString("avatarUrl")?.takeIf { it.isNotBlank() },
                     targetUserId = targetUser?.optString("_id").orEmpty(),
                     targetUserName = targetUser?.optString("name").orEmpty(),
-                    targetUserAvatarUrl = targetUser?.optString("avatarUrl")?.takeIf { it.isNotBlank() }
+                    targetUserAvatarUrl = targetUser?.optString("avatarUrl")?.takeIf { it.isNotBlank() },
+                    controlSession = payload.optJSONObject("controlSession")?.toCallControlSessionSummary()
                 )
             )
         }
@@ -408,20 +410,7 @@ class SocketGateway(
             val signalJson = payload.optJSONObject("signal") ?: return@on
             if (callId.isBlank() || fromUserId.isBlank()) return@on
 
-            val signal = when (signalJson.optString("type")) {
-                "offer" -> CallSignalPayload.Offer(signalJson.optString("sdp"))
-                "answer" -> CallSignalPayload.Answer(signalJson.optString("sdp"))
-                "ice-candidate" -> {
-                    val candidate = signalJson.optJSONObject("candidate")
-                    CallSignalPayload.IceCandidate(
-                        candidate = candidate?.optString("candidate").orEmpty(),
-                        sdpMid = candidate?.optString("sdpMid")?.takeIf { it.isNotBlank() },
-                        sdpMLineIndex = candidate?.optInt("sdpMLineIndex") ?: 0
-                    )
-                }
-                "video-mode" -> CallSignalPayload.VideoMode(signalJson.optString("mode"))
-                else -> CallSignalPayload.Unknown(signalJson.optString("type"))
-            }
+            val signal = signalJson.toCallSignalPayload()
 
             emit(
                 RealtimeEvent.CallSignalReceived(
@@ -440,20 +429,7 @@ class SocketGateway(
             val signalJson = payload.optJSONObject("signal") ?: return@on
             if (callId.isBlank() || fromUserId.isBlank()) return@on
 
-            val signal = when (signalJson.optString("type")) {
-                "offer" -> CallSignalPayload.Offer(signalJson.optString("sdp"))
-                "answer" -> CallSignalPayload.Answer(signalJson.optString("sdp"))
-                "ice-candidate" -> {
-                    val candidate = signalJson.optJSONObject("candidate")
-                    CallSignalPayload.IceCandidate(
-                        candidate = candidate?.optString("candidate").orEmpty(),
-                        sdpMid = candidate?.optString("sdpMid")?.takeIf { it.isNotBlank() },
-                        sdpMLineIndex = candidate?.optInt("sdpMLineIndex") ?: 0
-                    )
-                }
-                "video-mode" -> CallSignalPayload.VideoMode(signalJson.optString("mode"))
-                else -> CallSignalPayload.Unknown(signalJson.optString("type"))
-            }
+            val signal = signalJson.toCallSignalPayload()
 
             emit(
                 RealtimeEvent.CallSignalReceived(
@@ -651,29 +627,70 @@ class SocketGateway(
         return emitWithAck("group-call:leave", payload).map { Unit }
     }
 
-    fun sendCallSignal(callId: String, targetUserId: String, signal: CallSignalPayload) {
-        val signalPayload = when (signal) {
-            is CallSignalPayload.Offer -> JSONObject()
-                .put("type", "offer")
-                .put("sdp", signal.sdp)
-            is CallSignalPayload.Answer -> JSONObject()
-                .put("type", "answer")
-                .put("sdp", signal.sdp)
-            is CallSignalPayload.IceCandidate -> JSONObject()
-                .put("type", "ice-candidate")
-                .put(
-                    "candidate",
-                    JSONObject()
-                        .put("candidate", signal.candidate)
-                        .put("sdpMid", signal.sdpMid)
-                        .put("sdpMLineIndex", signal.sdpMLineIndex)
+    private fun JSONObject.toCallSignalPayload(): CallSignalPayload {
+        return when (optString("type")) {
+            "offer" -> CallSignalPayload.Offer(optString("sdp"))
+            "answer" -> CallSignalPayload.Answer(optString("sdp"))
+            "ice-candidate" -> {
+                val candidate = optJSONObject("candidate")
+                CallSignalPayload.IceCandidate(
+                    candidate = candidate?.optString("candidate").orEmpty(),
+                    sdpMid = candidate?.optString("sdpMid")?.takeIf { it.isNotBlank() },
+                    sdpMLineIndex = candidate?.optInt("sdpMLineIndex") ?: 0
                 )
-            is CallSignalPayload.VideoMode -> JSONObject()
-                .put("type", "video-mode")
-                .put("mode", signal.mode)
-            is CallSignalPayload.Unknown -> JSONObject()
-                .put("type", signal.type)
+            }
+            "video-mode" -> CallSignalPayload.VideoMode(optString("mode"))
+            "control-state" -> CallSignalPayload.ControlState(
+                enabled = optBoolean("enabled"),
+                accessibilityEnabled = optBoolean("accessibilityEnabled"),
+                canRequest = optBoolean("canRequest"),
+                sessionId = optString("sessionId").takeIf { it.isNotBlank() },
+                screenWidth = optInt("screenWidth"),
+                screenHeight = optInt("screenHeight"),
+                rotation = optInt("rotation")
+            )
+            "control-request" -> CallSignalPayload.ControlRequest(
+                sessionId = optString("sessionId"),
+                requestedBy = optString("requestedBy")
+            )
+            "control-grant" -> CallSignalPayload.ControlGrant(
+                sessionId = optString("sessionId"),
+                expiresAt = optString("expiresAt"),
+                viewOnly = optBoolean("viewOnly")
+            )
+            "control-deny" -> CallSignalPayload.ControlDeny(
+                sessionId = optString("sessionId"),
+                reason = optString("reason")
+            )
+            "control-stop" -> CallSignalPayload.ControlStop(
+                sessionId = optString("sessionId"),
+                reason = optString("reason")
+            )
+            "control-heartbeat" -> CallSignalPayload.ControlHeartbeat(
+                sessionId = optString("sessionId")
+            )
+            else -> CallSignalPayload.Unknown(optString("type"))
         }
+    }
+
+    private fun JSONObject.toCallControlSessionSummary(): CallControlSessionSummary? {
+        val sessionId = optString("sessionId").takeIf { it.isNotBlank() } ?: return null
+        return CallControlSessionSummary(
+            sessionId = sessionId,
+            controllerUserId = optString("controllerUserId"),
+            targetUserId = optString("targetUserId"),
+            state = optString("state"),
+            viewOnly = optBoolean("viewOnly"),
+            grantedAt = optString("grantedAt").takeIf { it.isNotBlank() },
+            requestedAt = optString("requestedAt").takeIf { it.isNotBlank() },
+            expiresAt = optString("expiresAt").takeIf { it.isNotBlank() },
+            lastHeartbeatAt = optString("lastHeartbeatAt").takeIf { it.isNotBlank() },
+            reconnectGraceUntil = optString("reconnectGraceUntil").takeIf { it.isNotBlank() }
+        )
+    }
+
+    fun sendCallSignal(callId: String, targetUserId: String, signal: CallSignalPayload) {
+        val signalPayload = signal.toSocketPayload()
 
         val payload = JSONObject()
             .put("callId", callId)
@@ -684,34 +701,67 @@ class SocketGateway(
     }
 
     fun sendGroupCallSignal(callId: String, targetUserId: String, signal: CallSignalPayload) {
-        val signalPayload = when (signal) {
-            is CallSignalPayload.Offer -> JSONObject()
-                .put("type", "offer")
-                .put("sdp", signal.sdp)
-            is CallSignalPayload.Answer -> JSONObject()
-                .put("type", "answer")
-                .put("sdp", signal.sdp)
-            is CallSignalPayload.IceCandidate -> JSONObject()
-                .put("type", "ice-candidate")
-                .put(
-                    "candidate",
-                    JSONObject()
-                        .put("candidate", signal.candidate)
-                        .put("sdpMid", signal.sdpMid)
-                        .put("sdpMLineIndex", signal.sdpMLineIndex)
-                )
-            is CallSignalPayload.VideoMode -> JSONObject()
-                .put("type", "video-mode")
-                .put("mode", signal.mode)
-            is CallSignalPayload.Unknown -> JSONObject()
-                .put("type", signal.type)
-        }
+        val signalPayload = signal.toSocketPayload()
 
         val payload = JSONObject()
             .put("callId", callId)
             .put("oderId", targetUserId)
             .put("signal", signalPayload)
         socket?.emit("group-call:signal", payload)
+    }
+
+    private fun CallSignalPayload.toSocketPayload(): JSONObject {
+        return when (this) {
+            is CallSignalPayload.Offer -> JSONObject()
+                .put("type", "offer")
+                .put("sdp", sdp)
+            is CallSignalPayload.Answer -> JSONObject()
+                .put("type", "answer")
+                .put("sdp", sdp)
+            is CallSignalPayload.IceCandidate -> JSONObject()
+                .put("type", "ice-candidate")
+                .put(
+                    "candidate",
+                    JSONObject()
+                        .put("candidate", candidate)
+                        .put("sdpMid", sdpMid)
+                        .put("sdpMLineIndex", sdpMLineIndex)
+                )
+            is CallSignalPayload.VideoMode -> JSONObject()
+                .put("type", "video-mode")
+                .put("mode", mode)
+            is CallSignalPayload.ControlState -> JSONObject()
+                .put("type", "control-state")
+                .put("enabled", enabled)
+                .put("accessibilityEnabled", accessibilityEnabled)
+                .put("canRequest", canRequest)
+                .put("sessionId", sessionId)
+                .put("screenWidth", screenWidth)
+                .put("screenHeight", screenHeight)
+                .put("rotation", rotation)
+            is CallSignalPayload.ControlRequest -> JSONObject()
+                .put("type", "control-request")
+                .put("sessionId", sessionId)
+                .put("requestedBy", requestedBy)
+            is CallSignalPayload.ControlGrant -> JSONObject()
+                .put("type", "control-grant")
+                .put("sessionId", sessionId)
+                .put("expiresAt", expiresAt)
+                .put("viewOnly", viewOnly)
+            is CallSignalPayload.ControlDeny -> JSONObject()
+                .put("type", "control-deny")
+                .put("sessionId", sessionId)
+                .put("reason", reason)
+            is CallSignalPayload.ControlStop -> JSONObject()
+                .put("type", "control-stop")
+                .put("sessionId", sessionId)
+                .put("reason", reason)
+            is CallSignalPayload.ControlHeartbeat -> JSONObject()
+                .put("type", "control-heartbeat")
+                .put("sessionId", sessionId)
+            is CallSignalPayload.Unknown -> JSONObject()
+                .put("type", type)
+        }
     }
 
     private suspend fun sendMessage(

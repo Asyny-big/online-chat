@@ -153,6 +153,7 @@ function ChatPageInner({
   const [callType, setCallType] = useState(null);     // audio | video
   const [callId, setCallId] = useState(null);
   const [remoteUser, setRemoteUser] = useState(null);
+  const [callControlSession, setCallControlSession] = useState(null);
 
   // Данные входящего звонка для отображения в UI (баннер и индикатор)
   const [incomingCallData, setIncomingCallData] = useState(null);
@@ -686,7 +687,7 @@ function ChatPageInner({
     });
 
     // === ЗВОНКИ ===
-    socket.on('call:sync', ({ callId: syncCallId, chatId: syncChatId, chatName, targetUser, initiator, type, direction, status }) => {
+    socket.on('call:sync', ({ callId: syncCallId, chatId: syncChatId, chatName, targetUser, initiator, type, direction, status, controlSession }) => {
       if (!syncCallId || !syncChatId) return;
       if (!shouldHandlePrivateCallEvent(direction === 'outgoing' ? 'outgoing' : 'incoming', syncCallId)) return;
       const normalizedStatus = String(status || 'ringing').toLowerCase();
@@ -730,9 +731,11 @@ function ChatPageInner({
           name: targetUser?.name || chat?.displayName || chat?.name || 'Пользователь',
           avatarUrl: normalizedTargetUser?.avatarUrl || null
         });
+        setCallControlSession(controlSession || null);
         setCallType(type || 'video');
         setCallId(syncCallId);
         setCallState(normalizedStatus === 'active' ? 'active' : 'outgoing');
+        setCallControlSession(controlSession || null);
         return;
       }
 
@@ -749,6 +752,7 @@ function ChatPageInner({
         return;
       }
 
+      setCallControlSession(controlSession || null);
       setIncomingCallData({
         callId: syncCallId,
         chatId: syncChatId,
@@ -827,6 +831,7 @@ function ChatPageInner({
       }
 
       setIncomingCallData(null);
+      setCallControlSession(null);
       setRemoteUser({
         _id: targetUser?._id,
         name: targetUser?.name || chat?.displayName || chat?.name || 'Пользователь',
@@ -863,6 +868,7 @@ function ChatPageInner({
       });
 
       setCallState('incoming');
+      setCallControlSession(null);
       setCallType(type);
       setCallId(incomingCallId);
       setRemoteUser({
@@ -1314,6 +1320,7 @@ function ChatPageInner({
     setCallId(null);
     setRemoteUser(null);
     setIncomingCallData(null);
+    setCallControlSession(null);
   };
 
   const resetGroupCallState = () => {
@@ -1480,6 +1487,7 @@ function ChatPageInner({
           onCallAccepted={handleCallAccepted}
           currentUserId={currentUserId}
           token={token}
+          controlSessionSummary={callControlSession}
         />
       )}
 

@@ -22,6 +22,28 @@ data class CallControlsState(
     val isScreenSharing: Boolean = false
 )
 
+data class RemoteControlRequestUi(
+    val sessionId: String,
+    val requestedByUserId: String
+)
+
+data class RemoteControlUiState(
+    val enabled: Boolean = false,
+    val accessibilityEnabled: Boolean = false,
+    val canRequest: Boolean = false,
+    val sessionId: String? = null,
+    val controllerUserId: String? = null,
+    val targetUserId: String? = null,
+    val isActive: Boolean = false,
+    val isViewOnly: Boolean = false,
+    val pendingRequest: RemoteControlRequestUi? = null,
+    val expiresAtMillis: Long? = null,
+    val screenWidth: Int = 0,
+    val screenHeight: Int = 0,
+    val rotation: Int = 0,
+    val statusMessage: String? = null
+)
+
 enum class CallUiPhase {
     Idle,
     Outgoing,
@@ -45,5 +67,6 @@ data class CallUiState(
     val isVideoCall: Boolean = false,
     val isControlsVisible: Boolean = true,
     val isMinimized: Boolean = false,
-    val statusMessage: String? = null
+    val statusMessage: String? = null,
+    val remoteControl: RemoteControlUiState = RemoteControlUiState()
 )

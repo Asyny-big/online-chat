@@ -8,6 +8,7 @@ import android.media.MediaMetadataRetriever
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
+import android.provider.Settings as AndroidSettings
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -260,8 +261,11 @@ fun MainScreen(
     onSelectAudioRoute: (CallAudioRoute) -> Unit,
     onToggleCamera: () -> Unit,
     onSwitchCamera: () -> Unit,
-    onStartScreenShare: (Int, Intent?) -> Unit,
+    onStartScreenShare: (Int, Intent?, Boolean) -> Unit,
     onStopScreenShare: () -> Unit,
+    onGrantRemoteControl: () -> Unit,
+    onDenyRemoteControl: () -> Unit,
+    onStopRemoteControlSession: () -> Unit,
     onClearCallError: () -> Unit,
     onLogout: () -> Unit,
     onSearchUserByPhone: (String) -> Unit,
@@ -291,6 +295,14 @@ fun MainScreen(
     }
 
     var permissionPrompt by remember { mutableStateOf<PermissionPrompt?>(null) }
+    val openAccessibilitySettings = remember(context) {
+        {
+            val intent = Intent(AndroidSettings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        }
+    }
 
     BackHandler(
         enabled =
@@ -376,6 +388,8 @@ fun MainScreen(
         }
     }
     val screenShareScope = rememberCoroutineScope()
+    var showScreenShareSheet by remember { mutableStateOf(false) }
+    var pendingRemoteControlOptIn by remember { mutableStateOf(false) }
     val screenShareLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -394,11 +408,12 @@ fun MainScreen(
             // Give the service a short window to switch foreground type to mediaProjection.
             screenShareScope.launch {
                 delay(150)
-                onStartScreenShare(result.resultCode, result.data)
+                onStartScreenShare(result.resultCode, result.data, pendingRemoteControlOptIn)
             }
         } else {
-            onStartScreenShare(result.resultCode, result.data)
+            onStartScreenShare(result.resultCode, result.data, pendingRemoteControlOptIn)
         }
+        pendingRemoteControlOptIn = false
     }
     val toggleScreenShare: () -> Unit = screenShareToggle@{
         if (callUiState.controls.isScreenSharing) {
@@ -417,12 +432,25 @@ fun MainScreen(
             Toast.makeText(context, "Демонстрация экрана недоступна", Toast.LENGTH_SHORT).show()
             return@screenShareToggle
         }
+        if (state.activeCall?.isGroup == true) {
+            pendingRemoteControlOptIn = false
+            mediaProjectionManager?.let { manager ->
+                screenShareLauncher.launch(manager.createScreenCaptureIntent())
+            } ?: Toast.makeText(context, "MediaProjectionManager недоступен", Toast.LENGTH_SHORT).show()
+            return@screenShareToggle
+        }
+        showScreenShareSheet = true
+    }
+    val launchScreenShare: (Boolean) -> Unit = { withControl ->
+        showScreenShareSheet = false
+        pendingRemoteControlOptIn = withControl
         val manager = mediaProjectionManager
         if (manager == null) {
             Toast.makeText(context, "MediaProjectionManager недоступен", Toast.LENGTH_SHORT).show()
-            return@screenShareToggle
+            pendingRemoteControlOptIn = false
+        } else {
+            screenShareLauncher.launch(manager.createScreenCaptureIntent())
         }
-        screenShareLauncher.launch(manager.createScreenCaptureIntent())
     }
 
     LaunchedEffect(state.incomingCall?.callId) {
@@ -605,7 +633,119 @@ fun MainScreen(
                     onClearCallError()
                 }
             }
+
+            val remoteControl = callUiState.remoteControl
+            val hasRemoteControlBanner =
+                remoteControl.sessionId != null &&
+                    remoteControl.pendingRequest == null &&
+                    (remoteControl.isActive || remoteControl.isViewOnly)
+            if (state.activeCall != null && hasRemoteControlBanner) {
+                Surface(
+                    color = Color(0xD9273441),
+                    shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .statusBarsPadding()
+                        .padding(top = 16.dp, start = 16.dp, end = 16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = if (remoteControl.isViewOnly) {
+                                    "Экран открыт для просмотра"
+                                } else {
+                                    "Вами управляют"
+                                },
+                                color = Color.White,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = if (remoteControl.isViewOnly) {
+                                    "Полный контроль недоступен без службы специальных возможностей."
+                                } else {
+                                    "Доступ можно отключить в любой момент."
+                                },
+                                color = Color(0xFFD5E2F0),
+                                fontSize = 12.sp
+                            )
+                        }
+                        TextButton(onClick = onStopRemoteControlSession) {
+                            Text("Отключить", color = Color.White)
+                        }
+                    }
+                }
+            }
         }
+    }
+
+    if (showScreenShareSheet && !isInPictureInPictureMode) {
+        AlertDialog(
+            onDismissRequest = {
+                showScreenShareSheet = false
+                pendingRemoteControlOptIn = false
+            },
+            title = { Text("Демонстрация экрана") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Выберите режим трансляции экрана для текущего звонка.")
+                    Text(
+                        "Полный контроль всё равно потребует отдельного подтверждения на Android.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 13.sp
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { launchScreenShare(true) }) {
+                    Text("Экран + управление")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { launchScreenShare(false) }) {
+                    Text("Только экран")
+                }
+            }
+        )
+    }
+
+    val pendingRemoteControlRequest = callUiState.remoteControl.pendingRequest
+    if (pendingRemoteControlRequest != null && !isInPictureInPictureMode) {
+        AlertDialog(
+            onDismissRequest = onDenyRemoteControl,
+            title = { Text("Запрос на управление") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("${state.activeCall?.chatName ?: "Пользователь"} хочет управлять вашим устройством.")
+                    if (!callUiState.remoteControl.accessibilityEnabled) {
+                        Text(
+                            "Служба специальных возможностей выключена, поэтому сейчас доступен только просмотр экрана.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 13.sp
+                        )
+                        TextButton(
+                            onClick = openAccessibilitySettings,
+                            contentPadding = PaddingValues(0.dp)
+                        ) {
+                            Text("Открыть настройки специальных возможностей")
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = onGrantRemoteControl) {
+                    Text(if (callUiState.remoteControl.accessibilityEnabled) "Разрешить" else "Разрешить просмотр")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onDenyRemoteControl) {
+                    Text("Отклонить")
+                }
+            }
+        )
     }
 
     if (permissionPrompt != null && !isInPictureInPictureMode) {

@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const User = require('../models/User');
 const Chat = require('../models/Chat');
 const Message = require('../models/Message');
@@ -36,6 +37,207 @@ const userSockets = new Map();
 const activeCalls = new Map();
 const activeGroupCalls = new Map(); // chatId -> { callId, type, participants:Set<userId> }
 const activeGroupCallStreams = new Map(); // callId -> Map<userId, streamId>
+const CONTROL_PERMISSION_SIGNAL_TYPES = new Set([
+  'control-request',
+  'control-grant',
+  'control-deny',
+  'control-stop',
+  'control-heartbeat'
+]);
+const CONTROL_SESSION_TTL_MS = 15 * 60 * 1000;
+const CONTROL_RECONNECT_GRACE_MS = 30 * 1000;
+
+function ensureActivePrivateCallEntry(chatId, callId, seedParticipantId = null) {
+  const normalizedChatId = String(chatId || '').trim();
+  const normalizedCallId = String(callId || '').trim();
+  if (!normalizedChatId || !normalizedCallId) return null;
+
+  let entry = activeCalls.get(normalizedChatId);
+  if (!entry || String(entry.callId || '').trim() !== normalizedCallId) {
+    entry = {
+      callId: normalizedCallId,
+      participants: new Set(),
+      controlSession: null
+    };
+    activeCalls.set(normalizedChatId, entry);
+  }
+
+  if (!(entry.participants instanceof Set)) {
+    entry.participants = new Set(Array.isArray(entry.participants) ? entry.participants : []);
+  }
+  if (!Object.prototype.hasOwnProperty.call(entry, 'controlSession')) {
+    entry.controlSession = null;
+  }
+  if (seedParticipantId) {
+    entry.participants.add(String(seedParticipantId));
+  }
+  return entry;
+}
+
+function getActivePrivateCallEntry(chatId, callId = null) {
+  const normalizedChatId = String(chatId || '').trim();
+  if (!normalizedChatId) return null;
+  const entry = activeCalls.get(normalizedChatId);
+  if (!entry) return null;
+  if (callId && String(entry.callId || '').trim() !== String(callId || '').trim()) {
+    return null;
+  }
+  if (!(entry.participants instanceof Set)) {
+    entry.participants = new Set(Array.isArray(entry.participants) ? entry.participants : []);
+  }
+  if (!Object.prototype.hasOwnProperty.call(entry, 'controlSession')) {
+    entry.controlSession = null;
+  }
+  return entry;
+}
+
+function clearActiveControlSession(entry) {
+  if (entry) {
+    entry.controlSession = null;
+  }
+}
+
+function normalizeIsoDateString(value) {
+  const next = new Date(value || '');
+  return Number.isNaN(next.getTime()) ? null : next.toISOString();
+}
+
+function getValidatedActiveControlSession(entry) {
+  const session = entry?.controlSession;
+  if (!session || typeof session !== 'object') return null;
+
+  const expiresAtMs = Date.parse(session.expiresAt || '');
+  if (Number.isFinite(expiresAtMs) && expiresAtMs <= Date.now()) {
+    entry.controlSession = null;
+    return null;
+  }
+
+  return session;
+}
+
+function isControlPermissionSignalType(type) {
+  return CONTROL_PERMISSION_SIGNAL_TYPES.has(String(type || '').trim().toLowerCase());
+}
+
+function validateAndApplyControlPermissionSignal({ entry, signal, senderUserId, targetUserId }) {
+  const signalType = String(signal?.type || '').trim().toLowerCase();
+  if (!isControlPermissionSignalType(signalType)) {
+    return { ok: true, forwardedSignal: signal };
+  }
+
+  const now = Date.now();
+  const nowIso = new Date(now).toISOString();
+  const normalizedSenderId = String(senderUserId || '').trim();
+  const normalizedTargetId = String(targetUserId || '').trim();
+
+  if (signalType === 'control-request') {
+    const sessionId = String(signal?.sessionId || crypto.randomUUID()).trim();
+    entry.controlSession = {
+      sessionId,
+      controllerUserId: normalizedSenderId,
+      targetUserId: normalizedTargetId,
+      requestedAt: nowIso,
+      grantedAt: null,
+      expiresAt: null,
+      lastHeartbeatAt: null,
+      reconnectGraceUntil: new Date(now + CONTROL_RECONNECT_GRACE_MS).toISOString(),
+      state: 'requested',
+      viewOnly: false
+    };
+    return {
+      ok: true,
+      forwardedSignal: {
+        ...signal,
+        type: 'control-request',
+        sessionId,
+        requestedBy: normalizedSenderId
+      }
+    };
+  }
+
+  const session = getValidatedActiveControlSession(entry);
+  if (!session) {
+    return { ok: false, reason: 'control_session_missing' };
+  }
+  if (signal?.sessionId && String(signal.sessionId).trim() !== String(session.sessionId || '').trim()) {
+    return { ok: false, reason: 'control_session_mismatch' };
+  }
+
+  const isControllerPath =
+    normalizedSenderId === String(session.controllerUserId || '') &&
+    normalizedTargetId === String(session.targetUserId || '');
+  const isTargetPath =
+    normalizedSenderId === String(session.targetUserId || '') &&
+    normalizedTargetId === String(session.controllerUserId || '');
+
+  if (signalType === 'control-grant' || signalType === 'control-deny') {
+    if (!isTargetPath) {
+      return { ok: false, reason: 'control_permission_denied' };
+    }
+  } else if (signalType === 'control-heartbeat') {
+    if (!isControllerPath || String(session.state || '') !== 'granted') {
+      return { ok: false, reason: 'control_session_not_granted' };
+    }
+  } else if (signalType === 'control-stop') {
+    if (!isControllerPath && !isTargetPath) {
+      return { ok: false, reason: 'control_permission_denied' };
+    }
+  }
+
+  if (signalType === 'control-grant') {
+    const expiresAt = normalizeIsoDateString(signal?.expiresAt) || new Date(now + CONTROL_SESSION_TTL_MS).toISOString();
+    entry.controlSession = {
+      ...session,
+      state: 'granted',
+      grantedAt: nowIso,
+      expiresAt,
+      lastHeartbeatAt: nowIso,
+      reconnectGraceUntil: new Date(now + CONTROL_RECONNECT_GRACE_MS).toISOString(),
+      viewOnly: Boolean(signal?.viewOnly)
+    };
+    return {
+      ok: true,
+      forwardedSignal: {
+        ...signal,
+        type: 'control-grant',
+        sessionId: String(session.sessionId),
+        expiresAt,
+        viewOnly: Boolean(signal?.viewOnly)
+      }
+    };
+  }
+
+  if (signalType === 'control-heartbeat') {
+    entry.controlSession = {
+      ...session,
+      lastHeartbeatAt: nowIso,
+      reconnectGraceUntil: new Date(now + CONTROL_RECONNECT_GRACE_MS).toISOString()
+    };
+    return {
+      ok: true,
+      forwardedSignal: {
+        ...signal,
+        type: 'control-heartbeat',
+        sessionId: String(session.sessionId)
+      }
+    };
+  }
+
+  if (signalType === 'control-deny' || signalType === 'control-stop') {
+    clearActiveControlSession(entry);
+    return {
+      ok: true,
+      forwardedSignal: {
+        ...signal,
+        type: signalType,
+        sessionId: String(session.sessionId),
+        reason: String(signal?.reason || '').trim() || (signalType === 'control-deny' ? 'denied' : 'stopped')
+      }
+    };
+  }
+
+  return { ok: false, reason: 'unsupported_control_signal' };
+}
 
 async function joinCallParticipantAtomically({ callId, userId, promoteToActive = false }) {
   const normalizedUserId = String(userId || '').trim();
@@ -147,6 +349,16 @@ async function forceLeaveUserFromCall({ io, userId, call, notificationService, s
       });
     }
   } else {
+    const activeCallEntry = getActivePrivateCallEntry(chat._id, call._id);
+    if (
+      activeCallEntry?.controlSession &&
+      [
+        String(activeCallEntry.controlSession.controllerUserId || ''),
+        String(activeCallEntry.controlSession.targetUserId || '')
+      ].includes(String(userId))
+    ) {
+      clearActiveControlSession(activeCallEntry);
+    }
     if (stillIn.length <= 1) {
       call.status = 'ended';
       call.endedAt = new Date();
@@ -1156,7 +1368,7 @@ io.on('connection', async (socket) => {
           }
         }
 
-        const activeCall = activeCalls.get(chat._id.toString());
+        const activeCall = ensureActivePrivateCallEntry(chat._id, call._id, call.initiator);
         if (activeCall) {
           activeCall.participants.add(userId);
         }
@@ -1227,6 +1439,24 @@ io.on('connection', async (socket) => {
         return;
       }
 
+      const activeCallEntry = ensureActivePrivateCallEntry(call.chat, call._id, call.initiator);
+      if (activeCallEntry) {
+        activeCallEntry.participants.add(String(userId));
+        activeCallEntry.participants.add(normalizedTargetUserId);
+      }
+
+      const permissionCheck = validateAndApplyControlPermissionSignal({
+        entry: activeCallEntry,
+        signal,
+        senderUserId: userId,
+        targetUserId: normalizedTargetUserId
+      });
+      if (!permissionCheck.ok) {
+        console.log('[Socket] call:signal - control signal rejected:', permissionCheck.reason);
+        return;
+      }
+
+      const forwardedSignal = permissionCheck.forwardedSignal;
       const targetSockets = userSockets.get(normalizedTargetUserId);
       if (targetSockets && targetSockets.size > 0) {
         console.log(`[Socket] Sending signal to ${normalizedTargetUserId}, sockets: ${targetSockets.size}`);
@@ -1234,7 +1464,7 @@ io.on('connection', async (socket) => {
           io.to(socketId).emit('call:signal', {
             callId,
             fromUserId: userId,
-            signal
+            signal: forwardedSignal
           });
         });
       } else {
@@ -1277,6 +1507,16 @@ io.on('connection', async (socket) => {
         }
 
         if (!participant) return callback?.({ error: 'РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅРµ СѓС‡Р°СЃС‚РІСѓРµС‚ РІ Р·РІРѕРЅРєРµ' });
+        const activeCallEntry = getActivePrivateCallEntry(chat._id, call._id);
+        if (
+          activeCallEntry?.controlSession &&
+          [
+            String(activeCallEntry.controlSession.controllerUserId || ''),
+            String(activeCallEntry.controlSession.targetUserId || '')
+          ].includes(String(userId))
+        ) {
+          clearActiveControlSession(activeCallEntry);
+        }
         const activeParticipants = call.participants.filter(p => !p.leftAt);
 
         if (activeParticipants.length <= 1) {

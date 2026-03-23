@@ -168,8 +168,26 @@ function updateActivePrivateCallMap(activeCalls, chatId, callId, initiatorId) {
   if (!activeCalls?.set) return;
   activeCalls.set(String(chatId), {
     callId: String(callId),
-    participants: new Set([String(initiatorId)])
+    participants: new Set([String(initiatorId)]),
+    controlSession: null
   });
+}
+
+function buildControlSessionSummary(activeCallEntry) {
+  const session = activeCallEntry?.controlSession;
+  if (!session || typeof session !== 'object') return null;
+  return {
+    sessionId: String(session.sessionId || '').trim(),
+    controllerUserId: String(session.controllerUserId || '').trim(),
+    targetUserId: String(session.targetUserId || '').trim(),
+    state: String(session.state || '').trim() || 'requested',
+    viewOnly: Boolean(session.viewOnly),
+    grantedAt: session.grantedAt || null,
+    requestedAt: session.requestedAt || null,
+    expiresAt: session.expiresAt || null,
+    lastHeartbeatAt: session.lastHeartbeatAt || null,
+    reconnectGraceUntil: session.reconnectGraceUntil || null
+  };
 }
 
 async function resolveExistingActiveCall(chatId) {
@@ -339,7 +357,7 @@ async function syncActiveCallsForUser({ app, userId, socketId = null }) {
     return;
   }
 
-  const { io, userSockets } = getSocketState(app);
+  const { io, userSockets, activeCalls } = getSocketState(app);
   if (!io || (!socketId && !userSockets?.get?.(String(userId)))) {
     return;
   }
@@ -423,7 +441,8 @@ async function syncActiveCallsForUser({ app, userId, socketId = null }) {
       source: 'sync',
       direction,
       initiator: buildUserSummary(call.initiator),
-      targetUser: buildUserSummary(direction === 'outgoing' ? targetUser : call.initiator)
+      targetUser: buildUserSummary(direction === 'outgoing' ? targetUser : call.initiator),
+      controlSession: buildControlSessionSummary(activeCalls?.get?.(String(chat._id)))
     };
 
     if (socketId) {
