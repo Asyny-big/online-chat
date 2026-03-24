@@ -1448,6 +1448,10 @@ class MainViewModel(
         callManager.updateUiContext(context)
     }
 
+    fun refreshRemoteControlAvailability() {
+        callManager.refreshRemoteControlAvailability()
+    }
+
     private suspend fun observeRealtime() {
         chatRepository.observeRealtimeEvents().collect { event ->
             when (event) {

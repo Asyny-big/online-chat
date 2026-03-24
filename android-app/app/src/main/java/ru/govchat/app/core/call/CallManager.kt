@@ -235,6 +235,11 @@ class CallManager(
         return webRtcController.stopRemoteControl(reason = reason)
     }
 
+    fun refreshRemoteControlAvailability(): Boolean {
+        if (mediaEngine != MediaEngine.WebRtc) return false
+        return webRtcController.refreshRemoteControlAvailability()
+    }
+
     fun setControlsVisible(visible: Boolean) {
         mutableState.update { it.copy(isControlsVisible = visible) }
     }

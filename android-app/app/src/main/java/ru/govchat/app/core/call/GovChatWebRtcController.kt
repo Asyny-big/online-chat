@@ -332,6 +332,16 @@ class GovChatWebRtcController(
         return true
     }
 
+    fun refreshRemoteControlAvailability(): Boolean {
+        ensureMainThread("refreshRemoteControlAvailability")
+        remoteControlManager.refreshAvailability(
+            isScreenSharing = isScreenSharing,
+            allowRequests = allowRemoteControlRequests
+        )
+        publishRemoteControlState()
+        return true
+    }
+
     fun setMicrophoneEnabled(enabled: Boolean): Boolean {
         ensureMainThread("setMicrophoneEnabled")
         val track = audioTrack ?: return false

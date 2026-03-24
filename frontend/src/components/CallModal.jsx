@@ -1663,7 +1663,8 @@ function CallModal({
     if (remoteControlState.active) return 'Удалённое управление активно';
     if (remoteControlState.enabled && !remoteControlState.accessibilityEnabled) return 'На Android доступен только просмотр';
     if (remoteControlState.enabled && remoteControlState.channelState !== 'open') return 'Ожидание control channel';
-    if (remoteControlState.enabled) return 'Можно запросить управление';
+    if (remoteControlState.enabled && remoteControlState.canRequest) return 'Можно запросить управление';
+    if (remoteControlState.enabled) return 'Управление пока недоступно';
     return 'Управление недоступно';
   }, [
     remoteControlAllowed,

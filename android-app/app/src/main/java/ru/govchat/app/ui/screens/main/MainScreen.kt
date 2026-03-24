@@ -162,6 +162,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.ui.PlayerView
 import androidx.compose.ui.zIndex
 import io.livekit.android.room.participant.RemoteParticipant
@@ -267,6 +270,7 @@ fun MainScreen(
     onDenyRemoteControl: () -> Unit,
     onStopRemoteControlSession: () -> Unit,
     onBindCallUiContext: (Context?) -> Unit,
+    onRefreshRemoteControlAvailability: () -> Unit,
     onClearCallError: () -> Unit,
     onLogout: () -> Unit,
     onSearchUserByPhone: (String) -> Unit,
@@ -280,6 +284,7 @@ fun MainScreen(
 ) {
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
+    val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(activity, context) {
         onBindCallUiContext(activity ?: context)
     }
@@ -393,10 +398,13 @@ fun MainScreen(
     }
     val screenShareScope = rememberCoroutineScope()
     var showScreenShareSheet by remember { mutableStateOf(false) }
+    var showAccessibilityControlDialog by remember { mutableStateOf(false) }
     var pendingRemoteControlOptIn by remember { mutableStateOf(false) }
+    var resumeControlAfterAccessibility by remember { mutableStateOf(false) }
     val screenShareLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
+        val requestedRemoteControl = pendingRemoteControlOptIn
         val activeCall = state.activeCall
         val shouldPrepareMediaProjectionService =
             result.resultCode == Activity.RESULT_OK &&
@@ -412,10 +420,10 @@ fun MainScreen(
             // Give the service a short window to switch foreground type to mediaProjection.
             screenShareScope.launch {
                 delay(150)
-                onStartScreenShare(result.resultCode, result.data, pendingRemoteControlOptIn)
+                onStartScreenShare(result.resultCode, result.data, requestedRemoteControl)
             }
         } else {
-            onStartScreenShare(result.resultCode, result.data, pendingRemoteControlOptIn)
+            onStartScreenShare(result.resultCode, result.data, requestedRemoteControl)
         }
         pendingRemoteControlOptIn = false
     }
@@ -445,8 +453,13 @@ fun MainScreen(
         }
         showScreenShareSheet = true
     }
-    val launchScreenShare: (Boolean) -> Unit = { withControl ->
+    val launchScreenShare: (Boolean) -> Unit = launchScreenShare@{ withControl ->
         showScreenShareSheet = false
+        if (withControl && !callUiState.remoteControl.accessibilityEnabled) {
+            pendingRemoteControlOptIn = false
+            showAccessibilityControlDialog = true
+            return@launchScreenShare
+        }
         pendingRemoteControlOptIn = withControl
         val manager = mediaProjectionManager
         if (manager == null) {
@@ -454,6 +467,26 @@ fun MainScreen(
             pendingRemoteControlOptIn = false
         } else {
             screenShareLauncher.launch(manager.createScreenCaptureIntent())
+        }
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                onRefreshRemoteControlAvailability()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    LaunchedEffect(callUiState.remoteControl.accessibilityEnabled, resumeControlAfterAccessibility) {
+        if (!resumeControlAfterAccessibility) return@LaunchedEffect
+        if (callUiState.remoteControl.accessibilityEnabled) {
+            resumeControlAfterAccessibility = false
+            launchScreenShare(true)
         }
     }
 
@@ -711,6 +744,49 @@ fun MainScreen(
             dismissButton = {
                 TextButton(onClick = { launchScreenShare(false) }) {
                     Text("Только экран")
+                }
+            }
+        )
+    }
+
+    if (showAccessibilityControlDialog && !isInPictureInPictureMode) {
+        AlertDialog(
+            onDismissRequest = {
+                showAccessibilityControlDialog = false
+                resumeControlAfterAccessibility = false
+                pendingRemoteControlOptIn = false
+            },
+            title = { Text("Нужно включить управление") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Для удалённого управления включите GovChat Accessibility Service.")
+                    Text(
+                        "Без службы специальных возможностей можно продолжить только просмотр экрана.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 13.sp
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showAccessibilityControlDialog = false
+                        resumeControlAfterAccessibility = true
+                        openAccessibilitySettings()
+                    }
+                ) {
+                    Text("Открыть настройки")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showAccessibilityControlDialog = false
+                        resumeControlAfterAccessibility = false
+                        launchScreenShare(false)
+                    }
+                ) {
+                    Text("Продолжить только просмотр")
                 }
             }
         )
