@@ -68,7 +68,7 @@ sealed interface RemoteControlCommand {
 
 object RemoteControlProtocol {
     const val VERSION = 1
-    private const val HEADER_SIZE = 18
+    private const val HEADER_SIZE = 19
 
     const val TYPE_SCREEN_INFO = 1
     const val TYPE_POINTER_DOWN = 2

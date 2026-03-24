@@ -159,6 +159,7 @@ const CONTROL_GLOBAL_ACTIONS = {
   HOME: 2,
   RECENTS: 3
 };
+const CONTROL_FRAME_HEADER_SIZE = 19;
 
 function encodeUtf8(value) {
   try {
@@ -179,7 +180,7 @@ function buildControlFrame({
   payload = null
 }) {
   const payloadBytes = payload instanceof Uint8Array ? payload : encodeUtf8(payload || '');
-  const buffer = new ArrayBuffer(18 + payloadBytes.length);
+  const buffer = new ArrayBuffer(CONTROL_FRAME_HEADER_SIZE + payloadBytes.length);
   const view = new DataView(buffer);
   view.setUint8(0, CONTROL_PROTOCOL_VERSION);
   view.setUint8(1, type);
@@ -192,7 +193,7 @@ function buildControlFrame({
   view.setUint16(15, arg);
   view.setUint16(17, payloadBytes.length);
   payloadBytes.forEach((value, index) => {
-    view.setUint8(18 + index, value);
+    view.setUint8(CONTROL_FRAME_HEADER_SIZE + index, value);
   });
   return buffer;
 }
