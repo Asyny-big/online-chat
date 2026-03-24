@@ -1647,6 +1647,7 @@ function CallModal({
     !isMobileBrowser() &&
     isRemoteScreen &&
     hasRemoteStream;
+  const shouldDockCallControlsAside = remoteControlAllowed && callState === 'active';
 
   const remoteControlOverlayEnabled = remoteControlAllowed &&
     remoteControlState.active &&
@@ -2381,12 +2382,20 @@ function CallModal({
         
         {/* Controls */}
         <div style={{
-          ...styles.controls,
-          ...(callState === 'active' ? {
-             opacity: showControls ? 1 : 0,
-             transform: showControls ? 'translateX(-50%) translateY(0)' : 'translateX(-50%) translateY(24px)',
-             pointerEvents: showControls ? 'auto' : 'none',
-          } : {})
+          ...(shouldDockCallControlsAside ? styles.controlsDocked : styles.controls),
+          ...(callState === 'active' ? (
+            shouldDockCallControlsAside
+              ? {
+                  opacity: showControls ? 1 : 0,
+                  transform: showControls ? 'translateY(-50%) translateX(0)' : 'translateY(-50%) translateX(24px)',
+                  pointerEvents: showControls ? 'auto' : 'none',
+                }
+              : {
+                  opacity: showControls ? 1 : 0,
+                  transform: showControls ? 'translateX(-50%) translateY(0)' : 'translateX(-50%) translateY(24px)',
+                  pointerEvents: showControls ? 'auto' : 'none',
+                }
+          ) : {})
         }}>
           {callState === 'incoming' ? (
             // Incoming call controls
@@ -2450,7 +2459,7 @@ function CallModal({
                 </button>
               )}
               
-              <button onClick={handleEndCall} style={styles.endBtn} title="Завершить">
+              <button onClick={handleEndCall} style={{ ...styles.endBtn, ...(shouldDockCallControlsAside ? styles.endBtnDocked : {}) }} title="Завершить">
                 <Icons.Hangup />
               </button>
             </>
@@ -2713,6 +2722,24 @@ const styles = {
     zIndex: 50,
     transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
   },
+  controlsDocked: {
+    position: 'absolute',
+    top: '50%',
+    right: '24px',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '12px',
+    padding: '14px 12px',
+    borderRadius: '24px',
+    background: 'rgba(30, 41, 59, 0.78)',
+    backdropFilter: 'blur(16px) saturate(180%)',
+    border: '1px solid rgba(255, 255, 255, 0.1)',
+    boxShadow: '0 20px 40px rgba(0, 0, 0, 0.4), inset 0 1px 1px rgba(255,255,255,0.1)',
+    zIndex: 50,
+    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+  },
   controlBtn: {
     width: '52px',
     height: '52px',
@@ -2775,6 +2802,9 @@ const styles = {
     marginLeft: '12px',
     boxShadow: '0 4px 16px rgba(239, 68, 68, 0.3)',
     transition: 'all 0.2s ease',
+  },
+  endBtnDocked: {
+    marginLeft: 0,
   },
 };
 
