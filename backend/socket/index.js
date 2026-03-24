@@ -112,6 +112,16 @@ function getValidatedActiveControlSession(entry) {
     return null;
   }
 
+  const reconnectGraceUntilMs = Date.parse(session.reconnectGraceUntil || '');
+  if (
+    String(session.state || '').trim() === 'granted' &&
+    Number.isFinite(reconnectGraceUntilMs) &&
+    reconnectGraceUntilMs <= Date.now()
+  ) {
+    entry.controlSession = null;
+    return null;
+  }
+
   return session;
 }
 

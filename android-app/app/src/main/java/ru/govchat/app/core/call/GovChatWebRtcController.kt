@@ -308,6 +308,10 @@ class GovChatWebRtcController(
     fun grantRemoteControl(): Boolean {
         ensureMainThread("grantRemoteControl")
         val targetUserId = remoteUserId ?: return false
+        remoteControlManager.refreshAvailability(
+            isScreenSharing = isScreenSharing,
+            allowRequests = allowRemoteControlRequests
+        )
         val signal = remoteControlManager.buildGrantSignal() ?: return false
         onSignal?.invoke(targetUserId, signal)
         publishRemoteControlState()
@@ -339,6 +343,7 @@ class GovChatWebRtcController(
             allowRequests = allowRemoteControlRequests
         )
         publishRemoteControlState()
+        sendControlState()
         return true
     }
 

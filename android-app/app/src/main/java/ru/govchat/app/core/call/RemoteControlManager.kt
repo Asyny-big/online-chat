@@ -303,8 +303,9 @@ class RemoteControlManager(
 
     private fun denormalize(x: Int, y: Int): Pair<Float, Float> {
         val state = mutableState.value
-        val width = state.screenWidth.coerceAtLeast(1)
-        val height = state.screenHeight.coerceAtLeast(1)
+        val liveMetrics = readScreenMetrics()
+        val width = liveMetrics.width.takeIf { it > 0 } ?: state.screenWidth.coerceAtLeast(1)
+        val height = liveMetrics.height.takeIf { it > 0 } ?: state.screenHeight.coerceAtLeast(1)
         val px = (x.toFloat() / 65535f) * width.toFloat()
         val py = (y.toFloat() / 65535f) * height.toFloat()
         return px to py

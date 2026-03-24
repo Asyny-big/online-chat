@@ -176,6 +176,21 @@ function updateActivePrivateCallMap(activeCalls, chatId, callId, initiatorId) {
 function buildControlSessionSummary(activeCallEntry) {
   const session = activeCallEntry?.controlSession;
   if (!session || typeof session !== 'object') return null;
+  const now = Date.now();
+  const expiresAtMs = Date.parse(session.expiresAt || '');
+  if (Number.isFinite(expiresAtMs) && expiresAtMs <= now) {
+    if (activeCallEntry) activeCallEntry.controlSession = null;
+    return null;
+  }
+  const reconnectGraceUntilMs = Date.parse(session.reconnectGraceUntil || '');
+  if (
+    String(session.state || '').trim() === 'granted' &&
+    Number.isFinite(reconnectGraceUntilMs) &&
+    reconnectGraceUntilMs <= now
+  ) {
+    if (activeCallEntry) activeCallEntry.controlSession = null;
+    return null;
+  }
   return {
     sessionId: String(session.sessionId || '').trim(),
     controllerUserId: String(session.controllerUserId || '').trim(),

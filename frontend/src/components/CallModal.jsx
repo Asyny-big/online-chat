@@ -274,9 +274,10 @@ async function tunePeerConnectionVideoSender(pc, options = {}) {
   }
 }
 
-function CallModal({
-  socket,
-  callState,      // 'idle' | 'outgoing' | 'incoming' | 'active'
+function CallModal(props) {
+  const {
+    socket,
+    callState,      // 'idle' | 'outgoing' | 'incoming' | 'active'
   callType,       // 'audio' | 'video'
   callId,
   chatId,
@@ -285,8 +286,8 @@ function CallModal({
   onCallAccepted, // Колбэк когда звонок принят
   currentUserId,
   token,          // JWT токен для авторизации запросов
-}) {
-  const controlSessionSummaryValue = arguments?.[0]?.controlSessionSummary || null;
+    controlSessionSummary = null,
+  } = props;
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
   // videoMode описывает, ЧТО именно мы отправляем в видеотреке: камера или демонстрация экрана.
@@ -420,7 +421,7 @@ function CallModal({
   }, [remoteControlState.screenWidth, remoteControlState.screenHeight, remoteControlState.rotation]);
 
   useEffect(() => {
-    const summary = controlSessionSummaryValue;
+    const summary = controlSessionSummary;
     if (!summary || String(summary.controllerUserId || '').trim() !== String(currentUserId || '').trim()) {
       return;
     }
@@ -432,7 +433,7 @@ function CallModal({
       viewOnly: summary.state === 'granted' && Boolean(summary.viewOnly),
       expiresAt: summary.expiresAt || null
     }));
-  }, [controlSessionSummaryValue, currentUserId]);
+  }, [controlSessionSummary, currentUserId]);
 
   const sendControlSignal = useCallback((signal, explicitTargetUserId = null) => {
     const targetId = explicitTargetUserId || remoteUserIdRef.current || remoteUser?._id;
@@ -1678,6 +1679,7 @@ function CallModal({
     remoteControlState.sessionId,
     remoteControlState.active,
     remoteControlState.enabled,
+    remoteControlState.canRequest,
     remoteControlState.accessibilityEnabled,
     remoteControlState.channelState
   ]);
