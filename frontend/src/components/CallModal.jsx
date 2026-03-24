@@ -302,6 +302,7 @@ function CallModal({
   const [hasRemoteStream, setHasRemoteStream] = useState(false);
   const [iceServers, setIceServers] = useState(null);
   const [controlTextInput, setControlTextInput] = useState('');
+  const [isControlTextComposerOpen, setIsControlTextComposerOpen] = useState(false);
   const [remoteControlState, setRemoteControlState] = useState({
     enabled: false,
     accessibilityEnabled: false,
@@ -781,6 +782,7 @@ function CallModal({
     }));
     if (sent) {
       setControlTextInput('');
+      setIsControlTextComposerOpen(false);
     }
   }, [controlTextInput, nextControlSeq, sendControlFrame]);
 
@@ -912,6 +914,7 @@ function CallModal({
       rotation: 0
     });
     setControlTextInput('');
+    setIsControlTextComposerOpen(false);
     setIsLocalFullscreen(false);
     controlGestureRef.current = {
       active: false,
@@ -1678,6 +1681,11 @@ function CallModal({
     remoteControlState.channelState
   ]);
 
+  useEffect(() => {
+    if (remoteControlOverlayEnabled) return;
+    setIsControlTextComposerOpen(false);
+  }, [remoteControlOverlayEnabled]);
+
   const handleControlPointerDown = useCallback((event) => {
     if (!remoteControlOverlayEnabled) return;
     const point = normalizeControlPoint(event.clientX, event.clientY);
@@ -2287,8 +2295,8 @@ function CallModal({
         </div>
 
         {remoteControlAllowed && (
-          <div style={styles.remoteControlPanel}>
-            <div style={styles.remoteControlPanelRow}>
+          <>
+            <div style={styles.remoteControlDock}>
               {canRequestRemoteControl && (
                 <button
                   onClick={requestRemoteControl}
@@ -2310,12 +2318,6 @@ function CallModal({
                 </button>
               )}
 
-              <div style={styles.remoteControlChannelState}>
-                DataChannel: {remoteControlState.channelState}
-              </div>
-            </div>
-
-            <div style={styles.remoteControlPanelRow}>
               <button
                 onClick={() => sendGlobalAction(CONTROL_GLOBAL_ACTIONS.BACK)}
                 style={styles.remoteControlMiniBtn}
@@ -2337,26 +2339,44 @@ function CallModal({
               >
                 Recent
               </button>
+              <button
+                onClick={() => setIsControlTextComposerOpen((value) => !value)}
+                style={{
+                  ...styles.remoteControlMiniBtn,
+                  ...(isControlTextComposerOpen ? styles.remoteControlMiniBtnActive : {})
+                }}
+                disabled={!remoteControlOverlayEnabled}
+              >
+                Текст
+              </button>
+              <div style={styles.remoteControlChannelStateCompact}>
+                DC: {remoteControlState.channelState}
+              </div>
             </div>
 
-            <div style={styles.remoteControlPanelRow}>
-              <input
-                value={controlTextInput}
-                onChange={(event) => setControlTextInput(event.target.value)}
-                onKeyDown={handleControlTextKeyDown}
-                placeholder="Текст для Android"
-                style={styles.remoteControlInput}
-                disabled={!remoteControlOverlayEnabled}
-              />
-              <button
-                onClick={sendControlText}
-                style={styles.remoteControlActionBtn}
-                disabled={!remoteControlOverlayEnabled || !String(controlTextInput || '').trim()}
-              >
-                Отправить текст
-              </button>
-            </div>
-          </div>
+            {isControlTextComposerOpen && (
+              <div style={styles.remoteControlTextPopover}>
+                <div style={styles.remoteControlTextPopoverTitle}>Текст для Android</div>
+                <div style={styles.remoteControlTextPopoverRow}>
+                  <input
+                    value={controlTextInput}
+                    onChange={(event) => setControlTextInput(event.target.value)}
+                    onKeyDown={handleControlTextKeyDown}
+                    placeholder="Введите текст"
+                    style={styles.remoteControlInput}
+                    disabled={!remoteControlOverlayEnabled}
+                  />
+                  <button
+                    onClick={sendControlText}
+                    style={styles.remoteControlActionBtn}
+                    disabled={!remoteControlOverlayEnabled || !String(controlTextInput || '').trim()}
+                  >
+                    Отправить
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
         )}
         
         {/* Controls */}
@@ -2582,26 +2602,45 @@ const styles = {
     touchAction: 'none',
     outline: 'none'
   },
-  remoteControlPanel: {
+  remoteControlDock: {
     position: 'absolute',
     left: '24px',
-    right: '24px',
-    bottom: '122px',
+    top: '112px',
     display: 'flex',
     flexDirection: 'column',
-    gap: '10px',
-    padding: '14px',
+    gap: '8px',
+    width: '164px',
+    padding: '12px',
     borderRadius: '18px',
     background: 'rgba(15, 23, 42, 0.82)',
     border: '1px solid rgba(148, 163, 184, 0.2)',
     backdropFilter: 'blur(16px)',
     zIndex: 48,
   },
-  remoteControlPanelRow: {
+  remoteControlTextPopover: {
+    position: 'absolute',
+    left: '204px',
+    top: '112px',
+    width: '320px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '10px',
+    padding: '12px',
+    borderRadius: '18px',
+    background: 'rgba(15, 23, 42, 0.88)',
+    border: '1px solid rgba(148, 163, 184, 0.2)',
+    backdropFilter: 'blur(16px)',
+    zIndex: 48,
+  },
+  remoteControlTextPopoverTitle: {
+    color: '#e2e8f0',
+    fontSize: '13px',
+    fontWeight: 600,
+  },
+  remoteControlTextPopoverRow: {
     display: 'flex',
     alignItems: 'center',
     gap: '10px',
-    flexWrap: 'wrap',
   },
   remoteControlActionBtn: {
     height: '40px',
@@ -2629,14 +2668,24 @@ const styles = {
     fontSize: '13px',
     fontWeight: 600,
   },
+  remoteControlMiniBtnActive: {
+    background: '#2563eb',
+    borderColor: '#2563eb',
+  },
   remoteControlChannelState: {
     color: 'rgba(191, 219, 254, 0.9)',
     fontSize: '12px',
     marginLeft: 'auto',
   },
+  remoteControlChannelStateCompact: {
+    color: 'rgba(191, 219, 254, 0.9)',
+    fontSize: '11px',
+    padding: '4px 2px 0',
+    textAlign: 'center',
+  },
   remoteControlInput: {
     flex: 1,
-    minWidth: '220px',
+    minWidth: 0,
     height: '40px',
     borderRadius: '12px',
     border: '1px solid rgba(148, 163, 184, 0.25)',
