@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
 import ru.govchat.app.core.AppContainer
 import ru.govchat.app.core.notification.NotificationCommand
+import ru.govchat.app.core.update.AppUpdateUiState
 import ru.govchat.app.ui.screens.login.LoginEffect
 import ru.govchat.app.ui.screens.login.LoginScreen
 import ru.govchat.app.ui.screens.login.LoginViewModel
@@ -28,7 +29,11 @@ fun GovChatNavGraph(
     navController: NavHostController = rememberNavController(),
     isInPictureInPictureMode: Boolean = false,
     onCallPipAvailabilityChanged: (Boolean) -> Unit = {},
-    notificationCommands: Flow<NotificationCommand>? = null
+    notificationCommands: Flow<NotificationCommand>? = null,
+    appUpdateState: AppUpdateUiState = AppUpdateUiState(),
+    onStartAppUpdate: () -> Unit = {},
+    onPostponeAppUpdate: () -> Unit = {},
+    onRetryAppUpdate: () -> Unit = {}
 ) {
     NavHost(
         navController = navController,
@@ -205,7 +210,11 @@ fun GovChatNavGraph(
                 onRefreshProfile = viewModel::refreshProfile,
                 onOpenChatFromCallHistory = viewModel::openChatFromCallHistory,
                 onDeleteCallHistoryEntries = viewModel::deleteCallHistoryEntries,
-                onClearCallHistory = viewModel::clearCallHistory
+                onClearCallHistory = viewModel::clearCallHistory,
+                appUpdateState = appUpdateState,
+                onStartAppUpdate = onStartAppUpdate,
+                onPostponeAppUpdate = onPostponeAppUpdate,
+                onRetryAppUpdate = onRetryAppUpdate
             )
         }
     }

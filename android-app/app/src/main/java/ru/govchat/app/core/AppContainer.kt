@@ -16,6 +16,11 @@ import ru.govchat.app.core.network.GovChatApi
 import ru.govchat.app.core.network.SocketGateway
 import ru.govchat.app.core.storage.ChatMessagesCacheStorage
 import ru.govchat.app.core.storage.SessionStorage
+import ru.govchat.app.core.update.AppUpdateDownloadManager
+import ru.govchat.app.core.update.AppUpdateInstaller
+import ru.govchat.app.core.update.AppUpdateIntegrityVerifier
+import ru.govchat.app.core.update.AppUpdateManager
+import ru.govchat.app.core.update.AppUpdateStorage
 import ru.govchat.app.data.local.callhistory.CallHistoryDatabase
 import ru.govchat.app.data.repository.AuthRepositoryImpl
 import ru.govchat.app.data.repository.CallHistoryRepositoryImpl
@@ -61,6 +66,9 @@ class AppContainer(application: Application) {
     val chatMessagesCacheStorage: ChatMessagesCacheStorage = ChatMessagesCacheStorage(
         appContext = application.applicationContext
     )
+    val appUpdateStorage: AppUpdateStorage = AppUpdateStorage(
+        appContext = application.applicationContext
+    )
     private val callHistoryDatabase: CallHistoryDatabase = CallHistoryDatabase.getInstance(
         application.applicationContext
     )
@@ -94,6 +102,14 @@ class AppContainer(application: Application) {
     private val socketGateway = SocketGateway(
         baseUrl = BuildConfig.SOCKET_BASE_URL,
         applicationScope = applicationScope
+    )
+    val appUpdateManager: AppUpdateManager = AppUpdateManager(
+        applicationScope = applicationScope,
+        api = api,
+        storage = appUpdateStorage,
+        downloader = AppUpdateDownloadManager(application.applicationContext),
+        verifier = AppUpdateIntegrityVerifier(application.applicationContext),
+        installer = AppUpdateInstaller(application.applicationContext)
     )
 
     val authRepository: AuthRepository = AuthRepositoryImpl(api, sessionStorage)

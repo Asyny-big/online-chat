@@ -333,21 +333,12 @@ class RemoteControlManager(
         }
         val rotation = display?.rotation ?: Surface.ROTATION_0
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val resourceMetrics = appContext.resources.displayMetrics
-            return ScreenMetrics(
-                width = resourceMetrics.widthPixels,
-                height = resourceMetrics.heightPixels,
-                rotation = rotation
-            )
-        }
-
         @Suppress("DEPRECATION")
         display?.getRealMetrics(metrics)
-        @Suppress("DEPRECATION")
+        val fallbackMetrics = appContext.resources.displayMetrics
         return ScreenMetrics(
-            width = metrics.widthPixels.takeIf { it > 0 } ?: appContext.resources.displayMetrics.widthPixels,
-            height = metrics.heightPixels.takeIf { it > 0 } ?: appContext.resources.displayMetrics.heightPixels,
+            width = metrics.widthPixels.takeIf { it > 0 } ?: fallbackMetrics.widthPixels,
+            height = metrics.heightPixels.takeIf { it > 0 } ?: fallbackMetrics.heightPixels,
             rotation = rotation
         )
     }

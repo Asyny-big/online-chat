@@ -14,6 +14,9 @@ import retrofit2.http.Query
 
 interface GovChatApi {
 
+    @GET("app/android-update")
+    suspend fun getAndroidAppUpdate(): AndroidAppUpdateDto
+
     @POST("auth/login")
     suspend fun login(@Body request: LoginRequest): AuthResponse
 
@@ -235,4 +238,16 @@ data class CreateGroupChatRequest(
     val name: String,
     val participantPhones: List<String> = emptyList(),
     val participantIds: List<String> = emptyList()
+)
+
+data class AndroidAppUpdateDto(
+    val latestVersion: String,
+    val latestVersionCode: Long? = null,
+    val minSupportedVersion: String,
+    val minSupportedVersionCode: Long? = null,
+    val forceUpdate: Boolean = false,
+    val apkUrl: String,
+    val changelog: List<String>? = null,
+    val apkSha256: String? = null,
+    val signingCertSha256: List<String>? = null
 )

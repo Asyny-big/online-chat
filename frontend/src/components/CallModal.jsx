@@ -698,8 +698,8 @@ function CallModal(props) {
     const rect = videoEl.getBoundingClientRect();
     if (!rect?.width || !rect?.height) return null;
 
-    const sourceWidth = Number(controlMetricsRef.current.width || videoEl.videoWidth || 0);
-    const sourceHeight = Number(controlMetricsRef.current.height || videoEl.videoHeight || 0);
+    const sourceWidth = Number(videoEl.videoWidth || controlMetricsRef.current.width || 0);
+    const sourceHeight = Number(videoEl.videoHeight || controlMetricsRef.current.height || 0);
     if (!sourceWidth || !sourceHeight) {
       return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
     }

@@ -203,6 +203,8 @@ import ru.govchat.app.core.file.GovChatAttachmentDownloader
 import ru.govchat.app.core.notification.CallNotificationManager
 import ru.govchat.app.core.permission.GovChatPermissionFeature
 import ru.govchat.app.core.permission.rememberGovChatPermissionFlow
+import ru.govchat.app.core.update.AppUpdateTransferPhase
+import ru.govchat.app.core.update.AppUpdateUiState
 import ru.govchat.app.domain.model.CallHistory
 import ru.govchat.app.domain.model.CallHistoryDirection
 import ru.govchat.app.domain.model.CallHistoryStatus
@@ -280,7 +282,11 @@ fun MainScreen(
     onRefreshProfile: () -> Unit,
     onOpenChatFromCallHistory: (String) -> Unit,
     onDeleteCallHistoryEntries: (List<String>) -> Unit,
-    onClearCallHistory: () -> Unit
+    onClearCallHistory: () -> Unit,
+    appUpdateState: AppUpdateUiState,
+    onStartAppUpdate: () -> Unit,
+    onPostponeAppUpdate: () -> Unit,
+    onRetryAppUpdate: () -> Unit
 ) {
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
@@ -578,7 +584,11 @@ fun MainScreen(
                         onRefreshProfile = onRefreshProfile,
                         onOpenChatFromCallHistory = onOpenChatFromCallHistory,
                         onDeleteCallHistoryEntries = onDeleteCallHistoryEntries,
-                        onClearCallHistory = onClearCallHistory
+                        onClearCallHistory = onClearCallHistory,
+                        appUpdateState = appUpdateState,
+                        onStartAppUpdate = onStartAppUpdate,
+                        onPostponeAppUpdate = onPostponeAppUpdate,
+                        onRetryAppUpdate = onRetryAppUpdate
                     )
                 } else {
                     ChatContent(
@@ -893,7 +903,11 @@ private fun ChatsListContent(
     onRefreshProfile: () -> Unit,
     onOpenChatFromCallHistory: (String) -> Unit,
     onDeleteCallHistoryEntries: (List<String>) -> Unit,
-    onClearCallHistory: () -> Unit
+    onClearCallHistory: () -> Unit,
+    appUpdateState: AppUpdateUiState,
+    onStartAppUpdate: () -> Unit,
+    onPostponeAppUpdate: () -> Unit,
+    onRetryAppUpdate: () -> Unit
 ) {
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     var showAddChatDialog by remember { mutableStateOf(false) }
@@ -1080,7 +1094,11 @@ private fun ChatsListContent(
                 3 -> ProfileTabContent(
                     state = state,
                     onLogout = onLogout,
-                    onRefreshProfile = onRefreshProfile
+                    onRefreshProfile = onRefreshProfile,
+                    appUpdateState = appUpdateState,
+                    onStartAppUpdate = onStartAppUpdate,
+                    onPostponeAppUpdate = onPostponeAppUpdate,
+                    onRetryAppUpdate = onRetryAppUpdate
                 )
             }
 
@@ -1468,7 +1486,11 @@ private fun PlaceholderTabContent(title: String, subtitle: String) {
 private fun ProfileTabContent(
     state: MainUiState,
     onLogout: () -> Unit,
-    onRefreshProfile: () -> Unit
+    onRefreshProfile: () -> Unit,
+    appUpdateState: AppUpdateUiState,
+    onStartAppUpdate: () -> Unit,
+    onPostponeAppUpdate: () -> Unit,
+    onRetryAppUpdate: () -> Unit
 ) {
     val profile = state.userProfile
     var showLogoutConfirm by remember { mutableStateOf(false) }
@@ -1581,6 +1603,119 @@ private fun ProfileTabContent(
             color = Color(0xFF1E2C3A)
         ) {
             Column {
+                ProfileSettingsRow(
+                    icon = Icons.Filled.Cached,
+                    title = "Версия приложения",
+                    value = "${appUpdateState.currentVersionName} (${appUpdateState.statusLabel})"
+                )
+                if (appUpdateState.isUpdateAvailable || appUpdateState.transferPhase != AppUpdateTransferPhase.Idle) {
+                    Divider(
+                        modifier = Modifier.padding(start = 56.dp),
+                        color = Color(0xFF1D2E3D),
+                        thickness = 0.5.dp
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(
+                                enabled = appUpdateState.canStartUpdate ||
+                                    appUpdateState.transferPhase == AppUpdateTransferPhase.Error
+                            ) {
+                                when (appUpdateState.transferPhase) {
+                                    AppUpdateTransferPhase.Error -> onRetryAppUpdate()
+                                    else -> onStartAppUpdate()
+                                }
+                            }
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.AttachFile,
+                            contentDescription = null,
+                            tint = Color(0xFF5EB5F7),
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = if (appUpdateState.isMandatory) {
+                                    "Требуется обновление"
+                                } else {
+                                    "Обновление приложения"
+                                },
+                                color = Color.White,
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = when (appUpdateState.transferPhase) {
+                                    AppUpdateTransferPhase.Downloading -> {
+                                        val percent = appUpdateState.progressPercent
+                                        if (percent != null) "Загрузка: $percent%" else "Загрузка обновления"
+                                    }
+                                    AppUpdateTransferPhase.Verifying -> "Проверка загруженного APK"
+                                    AppUpdateTransferPhase.ReadyToInstall -> "Файл готов к установке"
+                                    AppUpdateTransferPhase.Installing -> "Открыт системный установщик"
+                                    AppUpdateTransferPhase.Error -> appUpdateState.errorMessage ?: "Ошибка обновления"
+                                    else -> "Доступна версия ${appUpdateState.info?.latestVersion.orEmpty()}"
+                                },
+                                color = if (appUpdateState.transferPhase == AppUpdateTransferPhase.Error) {
+                                    Color(0xFFFF9E9E)
+                                } else {
+                                    Color(0xFF8296AC)
+                                },
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        if (appUpdateState.transferPhase == AppUpdateTransferPhase.Error) {
+                            Text(
+                                text = "Повторить",
+                                color = Color(0xFF5EB5F7),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        } else if (appUpdateState.canStartUpdate) {
+                            Text(
+                                text = "Обновить",
+                                color = Color(0xFF5EB5F7),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                    if (appUpdateState.canPostpone) {
+                        Divider(
+                            modifier = Modifier.padding(start = 56.dp),
+                            color = Color(0xFF1D2E3D),
+                            thickness = 0.5.dp
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onPostponeAppUpdate() }
+                                .padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Close,
+                                contentDescription = null,
+                                tint = Color(0xFF8296AC),
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Text(
+                                text = "Напомнить позже",
+                                color = Color.White,
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                        }
+                    }
+                }
+                Divider(
+                    modifier = Modifier.padding(start = 56.dp),
+                    color = Color(0xFF1D2E3D),
+                    thickness = 0.5.dp
+                )
                 // Refresh
                 Row(
                     modifier = Modifier
