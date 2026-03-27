@@ -44,8 +44,11 @@ class AppUpdateManager(
             skippedVersionCode = storage.readSkippedVersionCode()
             activeDownload = storage.readActiveDownload()
             pendingInstall = storage.readPendingInstall()?.takeIf { File(it.apkPath).exists() }
-            if (pendingInstall == null) {
-                storage.clearPendingInstall()
+            if (pendingInstall == null || isVersionInstalled(pendingInstall?.versionCode)) {
+                clearPendingInstallState(deleteFile = true)
+            }
+            if (isVersionInstalled(activeDownload?.versionCode)) {
+                clearActiveDownloadState(removeFromSystem = true)
             }
             if (activeDownload != null) {
                 mutableState.update {
@@ -212,14 +215,33 @@ class AppUpdateManager(
                 }
             }
 
-            if (pendingInstall != null) {
+            if (pendingInstall != null && !isVersionInstalled(pendingInstall?.versionCode)) {
                 launchInstallerIfReady()
             }
         }
     }
 
-    private fun applyUpdateInfo(info: AppUpdateInfo, forceRefresh: Boolean) {
+    private suspend fun applyUpdateInfo(info: AppUpdateInfo, forceRefresh: Boolean) {
         val availability = resolveAvailability(info)
+        if (availability == AppUpdateAvailability.UpToDate) {
+            clearCompletedUpdateState()
+            mutableState.update {
+                it.copy(
+                    info = info,
+                    availability = availability,
+                    isChecking = false,
+                    transferPhase = AppUpdateTransferPhase.Idle,
+                    showPrompt = false,
+                    progressPercent = null,
+                    downloadedBytes = 0L,
+                    totalBytes = null,
+                    errorMessage = null,
+                    installPermissionRequired = false
+                )
+            }
+            return
+        }
+
         val shouldShowPrompt = when (availability) {
             AppUpdateAvailability.Mandatory -> true
             AppUpdateAvailability.Optional -> skippedVersionCode != info.latestVersionCode || forceRefresh
@@ -231,22 +253,20 @@ class AppUpdateManager(
                 info = info,
                 availability = availability,
                 isChecking = false,
-                showPrompt = shouldShowPrompt || current.shouldShowModal,
+                showPrompt = shouldShowPrompt,
                 errorMessage = current.errorMessage?.takeIf { current.transferPhase == AppUpdateTransferPhase.Error }
             )
         }
 
         pendingInstall?.let { pending ->
-            if (pending.versionCode == info.latestVersionCode) {
+            if (pending.versionCode == info.latestVersionCode && !isVersionInstalled(pending.versionCode)) {
                 mutableState.update {
                     it.copy(
                         transferPhase = AppUpdateTransferPhase.ReadyToInstall,
                         showPrompt = true
                     )
                 }
-                applicationScope.launch {
-                    launchInstallerIfReady()
-                }
+                launchInstallerIfReady()
             }
         }
     }
@@ -388,9 +408,7 @@ class AppUpdateManager(
     }
 
     private suspend fun handleDownloadFailure(message: String) {
-        activeDownload?.let { downloader.remove(it.downloadId) }
-        activeDownload = null
-        storage.clearActiveDownload()
+        clearActiveDownloadState(removeFromSystem = true)
         mutableState.update {
             it.copy(
                 transferPhase = AppUpdateTransferPhase.Error,
@@ -416,6 +434,35 @@ class AppUpdateManager(
             DownloadManager.ERROR_UNKNOWN -> "Неизвестная ошибка загрузки обновления"
             else -> "Не удалось загрузить обновление"
         }
+    }
+
+    private suspend fun clearCompletedUpdateState() {
+        clearActiveDownloadState(removeFromSystem = true)
+        clearPendingInstallState(deleteFile = true)
+    }
+
+    private suspend fun clearActiveDownloadState(removeFromSystem: Boolean) {
+        activeDownload?.let { download ->
+            if (removeFromSystem) {
+                downloader.remove(download.downloadId)
+            }
+        }
+        activeDownload = null
+        storage.clearActiveDownload()
+    }
+
+    private suspend fun clearPendingInstallState(deleteFile: Boolean) {
+        pendingInstall?.let { pending ->
+            if (deleteFile) {
+                runCatching { File(pending.apkPath).delete() }
+            }
+        }
+        pendingInstall = null
+        storage.clearPendingInstall()
+    }
+
+    private fun isVersionInstalled(versionCode: Long?): Boolean {
+        return versionCode != null && BuildConfig.VERSION_CODE.toLong() >= versionCode
     }
 
     private companion object {

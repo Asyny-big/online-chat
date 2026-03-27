@@ -1,16 +1,16 @@
 {
-  "latestVersion": "1.0-bot",
-  "latestVersionCode": 4,
+  "latestVersion": "1.0-loopfix",
+  "latestVersionCode": 5,
   "minSupportedVersion": "1.0",
   "minSupportedVersionCode": 1,
   "forceUpdate": false,
-  "apkFile": "Bager.apk",
-  "apkSha256": "03a0f8d88323c4a7890db45f559ed0b6037012dba5a417efb4664309bbeb1186",
+  "apkFile": "Nsdfg.apk",
+  "apkSha256": "d2fd076f76fba75d4a7241e31c40cd759bfea82e599ca211bca7b0d643475e16",
   "signingCertSha256": [
     "cf75eb6b4475ca93be8b8dd976a89045d2c6f749bde0cac21031fc88302fb5ea"
   ],
   "changelog": [
     "Тестовая сборка для проверки in-app update.",
-    "Иконка приложения обновлена: новый персонаж-бот GovChat."
+    "Исправлен цикл повторного запуска установщика после успешного обновления."
   ]
 }
