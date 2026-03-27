@@ -4,8 +4,8 @@
   "minSupportedVersion": "1.0",
   "minSupportedVersionCode": 1,
   "forceUpdate": false,
-  "apkFile": "app-arm64-v8a-debug.apk",
-  "apkSha256": "3706b6a9a6bc1370f1f89314d0fce208cd219f87cbdedbc1b3f824abefd2260f",
+  "apkFile": "GoVchatLok.apk",
+  "apkSha256": "eb57cbe708aff814076887cda034e8d487ace08e6c6b1e65f24d38787c60aeb2",
   "signingCertSha256": [
     "cf75eb6b4475ca93be8b8dd976a89045d2c6f749bde0cac21031fc88302fb5ea"
   ],

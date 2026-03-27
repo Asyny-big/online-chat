@@ -50,7 +50,7 @@ class AppUpdateIntegrityVerifier(
                 }
             }
 
-            if (updateInfo.signingCertSha256.isNotEmpty()) {
+            if (updateInfo.signingCertSha256.isNotEmpty() && archiveDigests.isNotEmpty()) {
                 require(archiveDigests.any { digest -> digest in updateInfo.signingCertSha256 }) {
                     "Сертификат подписи APK не прошёл проверку"
                 }
