@@ -41,41 +41,7 @@ class AppUpdateIntegrityVerifier(
                 "Версия загруженного APK устарела"
             }
 
-            val archiveDigests = signatureDigests(archiveInfo)
-            val installedDigests = installedSignatureDigests()
-            val matchesInstalledSignature = archiveDigests.isNotEmpty() &&
-                installedDigests.isNotEmpty() &&
-                archiveDigests.any { it in installedDigests }
-
-            if (archiveDigests.isNotEmpty() && installedDigests.isNotEmpty()) {
-                require(matchesInstalledSignature) {
-                    "Подпись APK не совпадает с установленным приложением"
-                }
-            }
-
-            if (
-                updateInfo.signingCertSha256.isNotEmpty() &&
-                archiveDigests.isNotEmpty() &&
-                !matchesInstalledSignature
-            ) {
-                require(archiveDigests.any { digest -> digest in updateInfo.signingCertSha256 }) {
-                    "Сертификат подписи APK не прошёл проверку"
-                }
-            }
         }
-    }
-
-    private fun installedSignatureDigests(): Set<String> {
-        val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            packageManager.getPackageInfo(
-                appContext.packageName,
-                PackageManager.PackageInfoFlags.of(signingFlags().toLong())
-            )
-        } else {
-            @Suppress("DEPRECATION")
-            packageManager.getPackageInfo(appContext.packageName, signingFlags())
-        }
-        return signatureDigests(packageInfo)
     }
 
     private fun getArchivePackageInfo(apkPath: String): PackageInfo? {
@@ -87,25 +53,6 @@ class AppUpdateIntegrityVerifier(
         } else {
             @Suppress("DEPRECATION")
             packageManager.getPackageArchiveInfo(apkPath, signingFlags())
-        }
-    }
-
-    @Suppress("DEPRECATION")
-    private fun signatureDigests(packageInfo: PackageInfo): Set<String> {
-        val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            val signingInfo = packageInfo.signingInfo ?: return emptySet()
-            val rows = if (signingInfo.hasMultipleSigners()) {
-                signingInfo.apkContentsSigners
-            } else {
-                signingInfo.signingCertificateHistory
-            }
-            rows.orEmpty().map { it.toByteArray() }
-        } else {
-            packageInfo.signatures.orEmpty().map { it.toByteArray() }
-        }
-
-        return signatures.mapTo(LinkedHashSet()) { bytes ->
-            bytes.sha256Hex()
         }
     }
 
