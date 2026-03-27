@@ -43,14 +43,21 @@ class AppUpdateIntegrityVerifier(
 
             val archiveDigests = signatureDigests(archiveInfo)
             val installedDigests = installedSignatureDigests()
+            val matchesInstalledSignature = archiveDigests.isNotEmpty() &&
+                installedDigests.isNotEmpty() &&
+                archiveDigests.any { it in installedDigests }
 
             if (archiveDigests.isNotEmpty() && installedDigests.isNotEmpty()) {
-                require(archiveDigests.any { it in installedDigests }) {
+                require(matchesInstalledSignature) {
                     "Подпись APK не совпадает с установленным приложением"
                 }
             }
 
-            if (updateInfo.signingCertSha256.isNotEmpty() && archiveDigests.isNotEmpty()) {
+            if (
+                updateInfo.signingCertSha256.isNotEmpty() &&
+                archiveDigests.isNotEmpty() &&
+                !matchesInstalledSignature
+            ) {
                 require(archiveDigests.any { digest -> digest in updateInfo.signingCertSha256 }) {
                     "Сертификат подписи APK не прошёл проверку"
                 }
