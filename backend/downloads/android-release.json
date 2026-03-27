@@ -4,8 +4,8 @@
   "minSupportedVersion": "1.0",
   "minSupportedVersionCode": 1,
   "forceUpdate": false,
-  "apkFile": "app-arm64-v8a-debug.apk",
-  "apkSha256": "cb4caed210a7b1f8c082bdce296082849d1ee6a89e8949ef6758f89ca3280090",
+  "apkFile": "app-arm64-v8a-debug_1.apk",
+  "apkSha256": "fd2d2b0ef7fc5b636cc07d68bf0e586523e6d13e8e32c72729960ee14a6a28e9",
   "signingCertSha256": [
     "cf75eb6b4475ca93be8b8dd976a89045d2c6f749bde0cac21031fc88302fb5ea"
   ],
