@@ -1,16 +1,16 @@
 {
-  "latestVersion": "1.0-meme",
-  "latestVersionCode": 2,
+  "latestVersion": "1.0-lol",
+  "latestVersionCode": 3,
   "minSupportedVersion": "1.0",
   "minSupportedVersionCode": 1,
   "forceUpdate": false,
-  "apkFile": "GoVchatAGA.apk",
-  "apkSha256": "76fb6a51e12d6f00025eda35b1004505d5ee5774968c83fcab3ecb9425b94a0c",
+  "apkFile": "VOT.apk",
+  "apkSha256": "c6fc24ed86ec15fb5621714e46479721afdc1200a10b767ce048c656c2784000",
   "signingCertSha256": [
     "cf75eb6b4475ca93be8b8dd976a89045d2c6f749bde0cac21031fc88302fb5ea"
   ],
   "changelog": [
-    "Тестовая сборка для проверки in-app update.",
-    "Иконка приложения заменена на мемную для визуальной проверки обновления."
+    "Тестовая сборка для повторной проверки in-app update.",
+    "Иконка приложения обновлена: циановый чат-персонаж в очках."
   ]
 }
