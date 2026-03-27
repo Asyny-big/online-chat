@@ -3,30 +3,25 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-
-    <!-- Subtle outer glow (behind the main bubble) -->
     <path
-        android:fillColor="#1A00C3FF"
-        android:pathData="M32,30 h44 a12,12 0 0 1 12,12 v24 a12,12 0 0 1 -12,12 h-20 l-12,12 v-12 h-12 a12,12 0 0 1 -12,-12 v-24 a12,12 0 0 1 12,-12 z" />
-
-    <!-- Main chat bubble -->
+        android:fillColor="#F5C84C"
+        android:pathData="M54,54m-33,0a33,33 0,1 1,66 0a33,33 0,1 1,-66 0" />
     <path
-        android:fillColor="#00C3FF"
-        android:pathData="M34,32 h40 a10,10 0 0 1 10,10 v22 a10,10 0 0 1 -10,10 h-20 l-10,10 v-10 h-10 a10,10 0 0 1 -10,-10 v-22 a10,10 0 0 1 10,-10 z" />
-
-    <!-- Inner highlight for glass/depth effect -->
+        android:fillColor="#FFE27A"
+        android:pathData="M54,42m-24,0a24,24 0,1 1,48 0a24,24 0,1 1,-48 0" />
     <path
-        android:fillColor="#33FFFFFF"
-        android:pathData="M34,32 h40 a10,10 0 0 1 10,10 v8 h-60 v-8 a10,10 0 0 1 10,-10 z" />
-
-    <!-- Three dots (typing indicator) -->
+        android:fillColor="#1A1A1A"
+        android:pathData="M29,41 h22 c5,0 8,2 10,5 h-34 c0,-3 1,-5 2,-5 z" />
+    <path
+        android:fillColor="#1A1A1A"
+        android:pathData="M47,41 h22 c1,0 2,0 3,1 c1,1 2,2 3,4 h-33 c1,-2 2,-3 5,-5 z" />
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M44,53 m-3,0 a3,3 0 1 1 6,0 a3,3 0 1 1 -6,0" />
+        android:pathData="M41,58 q13,12 26,0 q1,-1 2,0 l3,3 q1,1 0,2 q-18,16 -36,0 q-1,-1 0,-2 l3,-3 q1,-1 2,0 z" />
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M54,53 m-3,0 a3,3 0 1 1 6,0 a3,3 0 1 1 -6,0" />
+        android:fillColor="#E06A6A"
+        android:pathData="M45,72 m-4,0 a4,2.5 0 1 1 8,0 a4,2.5 0 1 1 -8,0" />
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M64,53 m-3,0 a3,3 0 1 1 6,0 a3,3 0 1 1 -6,0" />
+        android:fillColor="#E06A6A"
+        android:pathData="M63,72 m-4,0 a4,2.5 0 1 1 8,0 a4,2.5 0 1 1 -8,0" />
 </vector>

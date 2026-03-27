@@ -1,16 +1,16 @@
 {
-  "latestVersion": "1.0",
-  "latestVersionCode": 1,
+  "latestVersion": "1.0-meme",
+  "latestVersionCode": 2,
   "minSupportedVersion": "1.0",
   "minSupportedVersionCode": 1,
   "forceUpdate": false,
-  "apkFile": "app-arm64-v8a-debug_1.apk",
-  "apkSha256": "fd2d2b0ef7fc5b636cc07d68bf0e586523e6d13e8e32c72729960ee14a6a28e9",
+  "apkFile": "app-arm64-v8a-debug.apk",
+  "apkSha256": "3706b6a9a6bc1370f1f89314d0fce208cd219f87cbdedbc1b3f824abefd2260f",
   "signingCertSha256": [
     "cf75eb6b4475ca93be8b8dd976a89045d2c6f749bde0cac21031fc88302fb5ea"
   ],
   "changelog": [
-    "Текущая тестовая сборка GovChat.",
-    "Перед production-релизом замените APK на release-подписанный файл."
+    "Тестовая сборка для проверки in-app update.",
+    "Иконка приложения заменена на мемную для визуальной проверки обновления."
   ]
 }
