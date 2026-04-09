@@ -43,6 +43,7 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [route, setRoute] = useState(normalizeRoute(window.location.hash));
   const [pendingPrivateChatTarget, setPendingPrivateChatTarget] = useState(null);
+  const [pendingSupportChatRequest, setPendingSupportChatRequest] = useState(null);
   const [navBadgeCounts, setNavBadgeCounts] = useState({ notifications: 0, messages: 0 });
   const prevUnreadRef = useRef({ notifications: 0, messages: 0 });
   const unreadInitializedRef = useRef(false);
@@ -201,6 +202,19 @@ function App() {
     });
   }, []);
 
+  const handlePendingSupportChatHandled = useCallback((requestId) => {
+    setPendingSupportChatRequest((prev) => {
+      if (!prev) return null;
+      if (!requestId) return null;
+      return prev.requestId === requestId ? null : prev;
+    });
+  }, []);
+
+  const handleOpenSupportChat = useCallback(() => {
+    setPendingSupportChatRequest({ requestId: `support-${Date.now()}` });
+    navigateTo('#/messages');
+  }, [navigateTo]);
+
   const buildRouteView = () => {
     const key = resolveRouteKey(route);
 
@@ -226,6 +240,8 @@ function App() {
               onLogout={handleLogout}
               pendingPrivateChatTarget={pendingPrivateChatTarget}
               onPendingPrivateChatHandled={handlePendingPrivateChatHandled}
+              pendingSupportChatRequest={pendingSupportChatRequest}
+              onPendingSupportChatHandled={handlePendingSupportChatHandled}
             />
           )
         };
@@ -282,7 +298,12 @@ function App() {
           content: (
             <div className="page-frame">
               <div className="page-rail page-rail--profile">
-                <ProfileRoutePage token={token} onLogout={handleLogout} onClose={() => navigateTo('#/')} />
+                <ProfileRoutePage
+                  token={token}
+                  onLogout={handleLogout}
+                  onClose={() => navigateTo('#/')}
+                  onOpenSupportChat={handleOpenSupportChat}
+                />
               </div>
             </div>
           )

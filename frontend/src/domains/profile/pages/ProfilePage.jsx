@@ -6,6 +6,7 @@ import HrumOverview from '@/domains/profile/components/HrumOverview';
 import TasksPanel from '@/domains/profile/components/TasksPanel';
 import ShopPanel from '@/domains/profile/components/ShopPanel';
 import WalletHistoryPanel from '@/domains/profile/components/WalletHistoryPanel';
+import FAQPage from '@/domains/profile/components/FAQPage';
 
 function SkeletonLine({ w = 160 }) {
   return (
@@ -22,8 +23,8 @@ function SkeletonLine({ w = 160 }) {
   );
 }
 
-export default function ProfilePage({ token, onLogout }) {
-  const [view, setView] = useState('home'); // home | tasks | shop | history
+export default function ProfilePage({ token, onLogout, onOpenSupportChat }) {
+  const [view, setView] = useState('home');
   const [profile, setProfile] = useState(null);
   const [avatarBroken, setAvatarBroken] = useState(false);
   const [profileLoading, setProfileLoading] = useState(false);
@@ -59,8 +60,17 @@ export default function ProfilePage({ token, onLogout }) {
     if (view === 'tasks') return 'Задания';
     if (view === 'shop') return 'Магазин';
     if (view === 'history') return 'История';
+    if (view === 'faq') return 'Помощь / FAQ';
     return 'Профиль';
   }, [view]);
+
+  const handleHeaderAction = useCallback(() => {
+    if (view === 'faq') {
+      onOpenSupportChat?.();
+      return;
+    }
+    setView('faq');
+  }, [onOpenSupportChat, view]);
 
   return (
     <EconomyStoreProvider token={token}>
@@ -77,7 +87,11 @@ export default function ProfilePage({ token, onLogout }) {
               )}
               <h2 className="page-title">{headerTitle}</h2>
             </div>
+
             <div className="actions">
+              <button type="button" onClick={handleHeaderAction} className="btn btn-secondary profile-help-btn">
+                {view === 'faq' ? 'Поддержка' : 'Помощь / FAQ'}
+              </button>
               <button type="button" onClick={onLogout} className="btn btn-ghost danger-text">Выйти</button>
             </div>
           </div>
@@ -131,11 +145,41 @@ export default function ProfilePage({ token, onLogout }) {
                     onOpenTasks={() => setView('tasks')}
                   />
                 </div>
+
                 <div className="half-width">
                   <TasksPanel mode="preview" onOpenAll={() => setView('tasks')} />
                 </div>
+
                 <div className="half-width">
                   <ShopPanel mode="preview" onOpenAll={() => setView('shop')} />
+                </div>
+
+                <div className="full-width">
+                  <section className="profile-help-card" aria-label="Блок помощи">
+                    <div className="profile-help-copy">
+                      <span className="profile-help-eyebrow">Помощь / FAQ</span>
+                      <h3 className="profile-help-title">Готовые ответы и быстрый переход в поддержку</h3>
+                      <p className="profile-help-text">
+                        Раздел FAQ собран для новичков: сообщения, файлы, доступ и поиск пользователей.
+                        Если ответа нет, можно сразу открыть чат поддержки GovChat.
+                      </p>
+                      <div className="profile-help-tags">
+                        <span>Сообщения</span>
+                        <span>Аккаунт</span>
+                        <span>Файлы</span>
+                        <span>Поиск</span>
+                      </div>
+                    </div>
+
+                    <div className="profile-help-actions">
+                      <button type="button" className="btn btn-primary" onClick={() => setView('faq')}>
+                        Открыть FAQ
+                      </button>
+                      <button type="button" className="btn btn-secondary" onClick={onOpenSupportChat}>
+                        Задать вопрос
+                      </button>
+                    </div>
+                  </section>
                 </div>
               </div>
             )}
@@ -143,6 +187,7 @@ export default function ProfilePage({ token, onLogout }) {
             {view === 'tasks' && <TasksPanel mode="full" />}
             {view === 'shop' && <ShopPanel mode="full" />}
             {view === 'history' && <WalletHistoryPanel />}
+            {view === 'faq' && <FAQPage onOpenSupportChat={onOpenSupportChat} />}
           </div>
         </div>
 
@@ -187,7 +232,8 @@ export default function ProfilePage({ token, onLogout }) {
             min-height: 48px;
           }
 
-          .profile-left-header {
+          .profile-left-header,
+          .actions {
             display: flex;
             align-items: center;
             gap: var(--space-10);
@@ -208,6 +254,18 @@ export default function ProfilePage({ token, onLogout }) {
             border-radius: 12px;
             border: 1px solid var(--border-color);
             background: rgba(15, 23, 42, 0.7);
+          }
+
+          .profile-help-btn {
+            border-color: rgba(96, 165, 250, 0.22);
+            color: #dbeafe;
+            background: rgba(59, 130, 246, 0.12);
+          }
+
+          .profile-help-btn:hover {
+            border-color: rgba(96, 165, 250, 0.4);
+            background: rgba(59, 130, 246, 0.2);
+            color: #eff6ff;
           }
 
           .profile-header-card {
@@ -295,23 +353,10 @@ export default function ProfilePage({ token, onLogout }) {
             font-weight: 600;
           }
 
-          .profile-phone {
-            color: var(--text-secondary);
-          }
-
-          .profile-date {
-            color: var(--text-muted);
-          }
-
-          .error-text {
-            margin-top: var(--space-8);
-            color: #fda4af;
-            font-size: 13px;
-          }
-
-          .profile-content {
-            border-radius: var(--radius-xl);
-          }
+          .profile-phone { color: var(--text-secondary); }
+          .profile-date { color: var(--text-muted); }
+          .error-text { margin-top: var(--space-8); color: #fda4af; font-size: 13px; }
+          .profile-content { border-radius: var(--radius-xl); }
 
           .dashboard-grid {
             display: grid;
@@ -319,38 +364,101 @@ export default function ProfilePage({ token, onLogout }) {
             gap: var(--space-12);
           }
 
-          .full-width {
-            grid-column: span 2;
+          .full-width { grid-column: span 2; }
+
+          .profile-help-card {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: var(--space-20);
+            border-radius: 24px;
+            padding: clamp(18px, 3vw, 24px);
+            border: 1px solid var(--border-color);
+            background:
+              radial-gradient(circle at top right, rgba(59, 130, 246, 0.2), transparent 28%),
+              linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(15, 23, 42, 0.82)),
+              var(--bg-card);
+            box-shadow: var(--shadow-xl);
           }
 
-          .danger-text {
-            color: #fda4af;
+          .profile-help-copy { min-width: 0; flex: 1; }
+
+          .profile-help-eyebrow {
+            display: inline-flex;
+            align-items: center;
+            min-height: 28px;
+            padding: 0 12px;
+            border-radius: 999px;
+            background: rgba(59, 130, 246, 0.16);
+            border: 1px solid rgba(96, 165, 250, 0.24);
+            color: #bfdbfe;
+            font-size: 12px;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
           }
 
-          .danger-text:hover {
-            background-color: rgba(244, 63, 94, 0.16);
-            color: #fecdd3;
+          .profile-help-title {
+            margin: var(--space-12) 0 var(--space-8);
+            color: var(--text-primary);
+            font-size: 24px;
+            font-weight: 800;
+            letter-spacing: -0.02em;
           }
+
+          .profile-help-text {
+            margin: 0;
+            color: var(--text-secondary);
+            font-size: 14px;
+            max-width: 680px;
+          }
+
+          .profile-help-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: var(--space-8);
+            margin-top: var(--space-14);
+          }
+
+          .profile-help-tags span {
+            display: inline-flex;
+            align-items: center;
+            min-height: 28px;
+            padding: 0 12px;
+            border-radius: 999px;
+            background: rgba(148, 163, 184, 0.1);
+            border: 1px solid rgba(148, 163, 184, 0.14);
+            color: var(--text-secondary);
+            font-size: 12px;
+            font-weight: 700;
+          }
+
+          .profile-help-actions {
+            display: grid;
+            gap: var(--space-10);
+            flex-shrink: 0;
+            min-width: min(220px, 100%);
+          }
+
+          .danger-text { color: #fda4af; }
+          .danger-text:hover { background-color: rgba(244, 63, 94, 0.16); color: #fecdd3; }
 
           @media (max-width: 768px) {
-            .dashboard-grid {
-              grid-template-columns: 1fr;
-            }
-
+            .dashboard-grid { grid-template-columns: 1fr; }
             .full-width,
-            .half-width {
-              grid-column: span 1;
-            }
-
-            .profile-header-content {
+            .half-width { grid-column: span 1; }
+            .profile-header-content,
+            .profile-help-card,
+            .profile-nav-header,
+            .actions {
               flex-direction: column;
-              text-align: center;
+              align-items: stretch;
             }
-
             .profile-name-row,
-            .profile-details {
-              justify-content: center;
-            }
+            .profile-details { justify-content: center; }
+            .profile-header-content { text-align: center; }
+            .actions > * { width: 100%; }
+            .profile-help-title { font-size: 21px; }
           }
         `}</style>
       </div>

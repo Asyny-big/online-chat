@@ -39,6 +39,14 @@ function isPrivateChatWithUser(chat, targetUserId, viewerUserId = '') {
   return participantIds.includes(normalizedViewerUserId);
 }
 
+function isSupportChat(chat) {
+  return Boolean(
+    chat?.isAiChat === true
+    || chat?.isSystemChat === true
+    || String(chat?.systemChatKey || '').trim() === 'ai-bot'
+  );
+}
+
 const DELETED_MESSAGE_TEXT = '\u0421\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u0435 \u0443\u0434\u0430\u043b\u0435\u043d\u043e';
 const DEFAULT_PRIVATE_USER_NAME = '\u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044c';
 const DEFAULT_GROUP_CHAT_NAME = '\u0413\u0440\u0443\u043f\u043f\u043e\u0432\u043e\u0439 \u0447\u0430\u0442';
@@ -139,7 +147,9 @@ function ChatPageInner({
   token,
   onLogout,
   pendingPrivateChatTarget = null,
-  onPendingPrivateChatHandled = null
+  onPendingPrivateChatHandled = null,
+  pendingSupportChatRequest = null,
+  onPendingSupportChatHandled = null
 }) {
   const { showEarn } = useHrumToast();
   const [chats, setChats] = useState([]);
@@ -178,6 +188,7 @@ function ChatPageInner({
   const groupCallStateRef = useRef(groupCallState);
   const groupCallDataRef = useRef(groupCallData);
   const handledPrivateChatRequestIdRef = useRef('');
+  const handledSupportChatRequestIdRef = useRef('');
 
   // Обновляем refs при изменении состояния
   useEffect(() => { chatsRef.current = chats; }, [chats]);
@@ -213,7 +224,7 @@ function ChatPageInner({
   const fetchChats = useCallback(async () => {
     if (!token) {
       setChats([]);
-      return;
+      return [];
     }
 
     try {
@@ -224,7 +235,7 @@ function ChatPageInner({
       setChats(nextChats);
       const currentSelectedChatId = String(selectedChatRef.current?._id || '').trim();
       if (!currentSelectedChatId) {
-        return;
+        return nextChats;
       }
       const refreshedSelectedChat = nextChats.find((chat) => chat?._id === currentSelectedChatId) || null;
       if (refreshedSelectedChat) {
@@ -233,9 +244,11 @@ function ChatPageInner({
         setSelectedChat(null);
         setMessages([]);
       }
+      return nextChats;
     } catch (error) {
       console.error('[ChatPage] Failed to fetch chats:', error);
       setChats([]);
+      return [];
     }
   }, [token]);
 
@@ -454,6 +467,50 @@ function ChatPageInner({
       cancelled = true;
     };
   }, [token, pendingPrivateChatTarget, onPendingPrivateChatHandled]);
+
+  useEffect(() => {
+    const requestId = String(pendingSupportChatRequest?.requestId || '').trim();
+
+    if (!token || !pendingSupportChatRequest) return;
+    if (requestId && handledSupportChatRequestIdRef.current === requestId) return;
+
+    let cancelled = false;
+
+    const openSupportChat = async () => {
+      try {
+        let supportChat = chatsRef.current.find(isSupportChat) || null;
+
+        if (!supportChat) {
+          const nextChats = await fetchChats();
+          supportChat = nextChats.find(isSupportChat) || null;
+        }
+
+        if (!cancelled) {
+          if (supportChat) {
+            setSelectedChat(supportChat);
+          } else {
+            alert('Чат поддержки пока недоступен. Попробуйте еще раз.');
+          }
+        }
+      } catch (error) {
+        console.error('[ChatPage] Failed to open support chat:', error);
+        if (!cancelled) {
+          alert('Не удалось открыть чат поддержки');
+        }
+      } finally {
+        handledSupportChatRequestIdRef.current = requestId || `support:${Date.now()}`;
+        if (!cancelled) {
+          onPendingSupportChatHandled?.(requestId);
+        }
+      }
+    };
+
+    void openSupportChat();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token, pendingSupportChatRequest, onPendingSupportChatHandled, fetchChats]);
 
   const ensureChatSelected = useCallback(async (chatId, chatName = '') => {
     if (!chatId || !token) return null;
