@@ -10,7 +10,7 @@ export default function OnboardingStep(props) {
 
   return (
     <div className="onboarding-layer" role="dialog" aria-modal="true" aria-label={activeStep.title}>
-      <OnboardingOverlay />
+      <OnboardingOverlay rect={targetRect} targetMissing={targetMissing} />
       {!targetMissing ? <OnboardingHighlight rect={targetRect} /> : null}
       <OnboardingPopover {...props} />
     </div>
