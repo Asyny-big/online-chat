@@ -140,8 +140,8 @@ export default function FeedPage({ token }) {
         </div>
       ) : null}
 
-      <div className="feed-list">
-        {items.map((item) => {
+      <div className="feed-list" data-onboarding-id="feed-list">
+        {items.map((item, index) => {
           const post = item?.post || item || {};
           return (
             <PostCard
@@ -151,6 +151,7 @@ export default function FeedPage({ token }) {
               likedByMe={Boolean(post?.likedByMe)}
               onOpenComments={setActivePostId}
               onLikeSuccess={handleLikeSuccess}
+              onboardingTarget={index === 0}
             />
           );
         })}

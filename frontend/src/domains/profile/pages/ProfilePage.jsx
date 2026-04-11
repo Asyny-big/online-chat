@@ -7,6 +7,7 @@ import TasksPanel from '@/domains/profile/components/TasksPanel';
 import ShopPanel from '@/domains/profile/components/ShopPanel';
 import WalletHistoryPanel from '@/domains/profile/components/WalletHistoryPanel';
 import FAQPage from '@/domains/profile/components/FAQPage';
+import { useOnboarding } from '@/onboarding/OnboardingProvider';
 
 function SkeletonLine({ w = 160 }) {
   return (
@@ -24,6 +25,11 @@ function SkeletonLine({ w = 160 }) {
 }
 
 export default function ProfilePage({ token, onLogout, onOpenSupportChat }) {
+  const {
+    reset: restartOnboarding,
+    isOpen: isOnboardingOpen,
+    activeStep
+  } = useOnboarding();
   const [view, setView] = useState('home');
   const [profile, setProfile] = useState(null);
   const [avatarBroken, setAvatarBroken] = useState(false);
@@ -72,6 +78,12 @@ export default function ProfilePage({ token, onLogout, onOpenSupportChat }) {
     setView('faq');
   }, [onOpenSupportChat, view]);
 
+  useEffect(() => {
+    if (isOnboardingOpen && activeStep?.id === 'support' && view !== 'home') {
+      setView('home');
+    }
+  }, [activeStep?.id, isOnboardingOpen, view]);
+
   return (
     <EconomyStoreProvider token={token}>
       <div className="profile-page">
@@ -89,6 +101,9 @@ export default function ProfilePage({ token, onLogout, onOpenSupportChat }) {
             </div>
 
             <div className="actions">
+              <button type="button" onClick={restartOnboarding} className="btn btn-ghost profile-tour-btn">
+                Тур по приложению
+              </button>
               <button type="button" onClick={handleHeaderAction} className="btn btn-secondary profile-help-btn">
                 {view === 'faq' ? 'Поддержка' : 'Помощь / FAQ'}
               </button>
@@ -175,7 +190,12 @@ export default function ProfilePage({ token, onLogout, onOpenSupportChat }) {
                       <button type="button" className="btn btn-primary" onClick={() => setView('faq')}>
                         Открыть FAQ
                       </button>
-                      <button type="button" className="btn btn-secondary" onClick={onOpenSupportChat}>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={onOpenSupportChat}
+                        data-onboarding-id="profile-support-button"
+                      >
                         Задать вопрос
                       </button>
                     </div>
@@ -265,6 +285,16 @@ export default function ProfilePage({ token, onLogout, onOpenSupportChat }) {
           .profile-help-btn:hover {
             border-color: rgba(96, 165, 250, 0.4);
             background: rgba(59, 130, 246, 0.2);
+            color: #eff6ff;
+          }
+
+          .profile-tour-btn {
+            border-color: rgba(148, 163, 184, 0.22);
+            color: var(--text-primary);
+          }
+
+          .profile-tour-btn:hover {
+            border-color: rgba(96, 165, 250, 0.26);
             color: #eff6ff;
           }
 

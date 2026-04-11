@@ -13,6 +13,7 @@ import AndroidAppDownloadModal from './components/AndroidAppDownloadModal';
 import AppShell from './app/AppShell';
 import RootProviders from './app/providers/RootProviders';
 import { initNotificationSound, playNotificationTone } from '@/shared/lib/playNotificationTone';
+import { OnboardingProvider } from '@/onboarding/OnboardingProvider';
 
 const UNREAD_BADGES_REFRESH_EVENT = 'govchat:unread-badges-refresh';
 
@@ -402,18 +403,20 @@ function App() {
   const appView = (() => {
     const routeView = buildRouteView();
     return (
-      <AppShell
-        showPrimaryNav={routeView.showPrimaryNav}
-        activeNavKey={routeView.key}
-        onNavigate={navigateTo}
-        onLogout={handleLogout}
-        navBadgeCounts={navBadgeCounts}
-        withRightPanel={routeView.withRightPanel}
-        rightPanel={routeView.rightPanel}
-        overlay={<AndroidAppDownloadModal />}
-      >
-        {routeView.content}
-      </AppShell>
+      <OnboardingProvider enabled={Boolean(token)} route={route} navigate={navigateTo}>
+        <AppShell
+          showPrimaryNav={routeView.showPrimaryNav}
+          activeNavKey={routeView.key}
+          onNavigate={navigateTo}
+          onLogout={handleLogout}
+          navBadgeCounts={navBadgeCounts}
+          withRightPanel={routeView.withRightPanel}
+          rightPanel={routeView.rightPanel}
+          overlay={<AndroidAppDownloadModal />}
+        >
+          {routeView.content}
+        </AppShell>
+      </OnboardingProvider>
     );
   })();
 

@@ -9,6 +9,7 @@ import GroupCallModalLiveKit from '@/components/GroupCallModalLiveKit';
 import { useHrumToast } from '@/components/HrumToast';
 import { getTransactions } from '@/domains/hrum/api/economyApi';
 import { consumePendingPushAction, pushEvents } from '@/mobile/pushNotifications';
+import { useOnboarding } from '@/onboarding/OnboardingProvider';
 
 const WALLET_UPDATE_EVENT = 'govchat:wallet-update';
 
@@ -152,6 +153,7 @@ function ChatPageInner({
   onPendingSupportChatHandled = null
 }) {
   const { showEarn } = useHrumToast();
+  const { isOpen: isOnboardingOpen, activeStep } = useOnboarding();
   const [chats, setChats] = useState([]);
   const [selectedChat, setSelectedChat] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -511,6 +513,25 @@ function ChatPageInner({
       cancelled = true;
     };
   }, [token, pendingSupportChatRequest, onPendingSupportChatHandled, fetchChats]);
+
+  useEffect(() => {
+    if (!isOnboardingOpen || activeStep?.id !== 'calls') return;
+    if (selectedChat && !isSupportChat(selectedChat)) return;
+    if (!Array.isArray(chats) || chats.length === 0) return;
+
+    const eligibleChat = chats.find((chat) => !isSupportChat(chat)) || null;
+    if (eligibleChat) {
+      setSelectedChat((prev) => (prev?._id === eligibleChat._id ? prev : eligibleChat));
+    }
+  }, [activeStep?.id, chats, isOnboardingOpen, selectedChat]);
+
+  useEffect(() => {
+    if (!isOnboardingOpen || activeStep?.id !== 'chats') return;
+    if (window.innerWidth > 768) return;
+    if (selectedChat) {
+      setSelectedChat(null);
+    }
+  }, [activeStep?.id, isOnboardingOpen, selectedChat]);
 
   const ensureChatSelected = useCallback(async (chatId, chatName = '') => {
     if (!chatId || !token) return null;

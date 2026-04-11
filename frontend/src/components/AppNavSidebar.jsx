@@ -43,6 +43,7 @@ export default function AppNavSidebar({ activeKey, onNavigate, badgeCounts = {} 
               className={`app-nav-item ${active ? 'active' : ''}`}
               onClick={() => onNavigate(item.hash)}
               aria-current={active ? 'page' : undefined}
+              data-onboarding-id={`nav-${item.key}`}
             >
               <span className="app-nav-icon" aria-hidden="true">
                 <IconComponent size={20} />

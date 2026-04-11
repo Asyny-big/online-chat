@@ -363,7 +363,10 @@ function ChatWindow({
             )}
           </div>
         </div>
-        <div className="header-actions">
+        <div
+          className="header-actions"
+          data-onboarding-id={!isAiChat ? 'chat-call-actions' : undefined}
+        >
           {!isGroupChat && !isAiChat && (
             <>
               <button onClick={() => onStartCall?.('audio')} className="header-action-btn" title="Аудиозвонок">

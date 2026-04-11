@@ -55,7 +55,14 @@ function MediaBlock({ media }) {
   );
 }
 
-export default function PostCard({ item, token, likedByMe = false, onOpenComments, onLikeSuccess }) {
+export default function PostCard({
+  item,
+  token,
+  likedByMe = false,
+  onOpenComments,
+  onLikeSuccess,
+  onboardingTarget = false
+}) {
   const post = item?.post || item || {};
   const author = useMemo(() => {
     const raw = post?.authorId;
@@ -130,6 +137,7 @@ export default function PostCard({ item, token, likedByMe = false, onOpenComment
           onClick={handleLike}
           disabled={isLiking}
           aria-label="Like post"
+          data-onboarding-id={onboardingTarget ? 'post-like-button' : undefined}
         >
           <span className="icon">
             <HeartIcon size={16} />
@@ -142,6 +150,7 @@ export default function PostCard({ item, token, likedByMe = false, onOpenComment
           className="action-btn comment-btn"
           onClick={() => onOpenComments?.(post?._id)}
           aria-label="Open comments"
+          data-onboarding-id={onboardingTarget ? 'post-comment-button' : undefined}
         >
           <span className="icon">
             <CommentIcon size={16} />

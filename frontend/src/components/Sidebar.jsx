@@ -53,7 +53,7 @@ function Sidebar({
   };
 
   return (
-    <div className="chat-sidebar">
+    <div className="chat-sidebar" data-onboarding-id="chat-sidebar">
       <div className="sidebar-header">
         <h2 className="sidebar-title">
           <span className="logo-mark" aria-hidden="true">

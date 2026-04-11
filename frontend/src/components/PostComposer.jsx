@@ -79,7 +79,7 @@ export default function PostComposer({ token, onCreated }) {
   };
 
   return (
-    <div className="composer-container">
+    <div className="composer-container" data-onboarding-id="post-composer">
       <div className="composer-avatar" aria-hidden="true">ME</div>
 
       <form onSubmit={handleSubmit} className="composer-form">
