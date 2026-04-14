@@ -7,6 +7,7 @@ const authMiddleware = require('../middleware/auth');
 const { checkChatAccess } = require('../middleware/checkChatAccess');
 const { scheduleFileCleanup } = require('../services/fileCleanupService');
 const { syncChatLastMessage } = require('../services/messageStateService');
+const { markMessagesRead } = require('../services/messageReceiptService');
 
 const router = express.Router();
 
@@ -254,18 +255,13 @@ router.get('/:chatId', checkChatAccess, async (req, res) => {
       }
     }
 
-    const readQuery = {
-      chat: chatId,
-      deleted: { $ne: true },
-      sender: { $ne: userId },
-      'readBy.user': { $ne: userId }
-    };
-    if (userObjectId) {
-      readQuery.deletedFor = { $ne: userObjectId };
-    }
-
-    await Message.updateMany(readQuery, {
-      $push: { readBy: { user: userId, readAt: new Date() } }
+    await markMessagesRead({
+      app: req.app,
+      userId,
+      chatId,
+      extraQuery: userObjectId
+        ? { deletedFor: { $ne: userObjectId } }
+        : {}
     });
 
     const messages = await Message.find(query)

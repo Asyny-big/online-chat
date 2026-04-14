@@ -55,6 +55,10 @@ const messageSchema = new mongoose.Schema({
     thumbnailUrl: String,
     previewUrl: String
   },
+  deliveredTo: [{
+    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    deliveredAt: { type: Date, default: Date.now }
+  }],
   readBy: [{
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     readAt: { type: Date, default: Date.now }

@@ -1,8 +1,20 @@
 import React from 'react';
 import { resolveAssetUrl } from '@/shared/lib/resolveAssetUrl';
 
+function getLastMessagePreview(lastMessage) {
+  if (!lastMessage) return 'Нет сообщений';
+
+  const type = String(lastMessage.type || 'text').trim().toLowerCase();
+  if (type === 'audio' || type === 'voice') return '🎤 Голосовое сообщение';
+  if (type === 'image') return '📷 Изображение';
+  if (type === 'video') return '🎥 Видео';
+  if (type === 'video_note') return '🎥 Видеокружок';
+  if (type === 'file') return '📎 Файл';
+  if (type === 'system') return lastMessage.text || 'Системное сообщение';
+  return lastMessage.text || 'Сообщение';
+}
+
 function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
-  // Защита от неправильного типа данных
   const chatList = Array.isArray(chats) ? chats : [];
 
   if (chatList.length === 0) {
@@ -26,29 +38,24 @@ function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
         const isGroupChat = chat.type === 'group' || chat.isGroup === true;
         const hasActiveGroupCall = chat.activeGroupCall !== null && chat.activeGroupCall !== undefined;
         const displayName = chat.displayName || chat.name || 'Чат';
-        const lastMsg = chat.lastMessage;
         const isOnline = !isGroupChat && String(chat.displayStatus || '').trim().toLowerCase() === 'online';
+        const unreadCount = Math.max(0, Number(chat?.unreadCount || 0));
+        const hasUnread = unreadCount > 0;
+        const lastMessageText = hasActiveGroupCall
+          ? '🎥 Идет групповой звонок...'
+          : (hasIncomingCall ? '🔔 Входящий звонок...' : getLastMessagePreview(chat.lastMessage));
 
-        let lastMessageText = 'Нет сообщений';
-        if (lastMsg) {
-          if (lastMsg.type === 'audio') lastMessageText = '🎤 Голосовое сообщение';
-          else if (lastMsg.type === 'image') lastMessageText = '📷 Изображение';
-          else if (lastMsg.type === 'video') lastMessageText = '🎥 Видео';
-          else if (lastMsg.type === 'file') lastMessageText = '📎 Файл';
-          else lastMessageText = lastMsg.text || 'Сообщение';
-        }
-
-        const initial = isGroupChat ? '👥' : displayName.charAt(0).toUpperCase();
-
-        const avatarUrl = chat.displayAvatar; // private: аватар собеседника, group: аватар группы
+        const avatarUrl = chat.displayAvatar;
         const isDefaultAvatar = typeof avatarUrl === 'string' && /avatar-default\.(png|jpg|jpeg|webp|svg)$/i.test(avatarUrl);
         const showAvatarImg = !!avatarUrl && typeof avatarUrl === 'string' && !isDefaultAvatar;
+        const initial = isGroupChat ? '👥' : displayName.charAt(0).toUpperCase();
 
         return (
           <button
             key={chat._id}
+            type="button"
             onClick={() => onSelectChat(chat)}
-            className={`chat-item ${isActive ? 'active' : ''} ${hasIncomingCall ? 'calling' : ''} ${hasActiveGroupCall ? 'active-group-call' : ''}`}
+            className={`chat-item ${isActive ? 'active' : ''} ${hasUnread ? 'unread' : ''} ${hasIncomingCall ? 'calling' : ''} ${hasActiveGroupCall ? 'active-group-call' : ''}`}
           >
             <div className="chat-item-avatar-wrap">
               <div className={`chat-item-avatar ${isGroupChat ? 'group' : ''}`}>
@@ -67,6 +74,7 @@ function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
                 </div>
               )}
             </div>
+
             <div className="chat-item-info">
               <div className="chat-item-row">
                 <span className="chat-item-name">{displayName}</span>
@@ -75,15 +83,17 @@ function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
                     {isOnline ? 'в сети' : 'не в сети'}
                   </span>
                 )}
-                {isGroupChat && (
-                  <span className="group-badge">👥</span>
-                )}
-                {(hasIncomingCall || hasActiveGroupCall) && (
-                  <span className="call-badge">📞</span>
+                {isGroupChat && <span className="group-badge">👥</span>}
+                {(hasIncomingCall || hasActiveGroupCall) && <span className="call-badge">📞</span>}
+                {hasUnread && (
+                  <span className="unread-badge" aria-label={`${unreadCount} непрочитанных`}>
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </span>
                 )}
               </div>
-              <div className="chat-item-last-msg">
-                {hasActiveGroupCall ? '🎥 Идет групповой звонок...' : (hasIncomingCall ? '🔔 Входящий звонок...' : lastMessageText)}
+
+              <div className={`chat-item-last-msg ${hasUnread ? 'unread' : ''}`}>
+                {lastMessageText}
               </div>
             </div>
           </button>
@@ -156,6 +166,10 @@ function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
 
         .chat-item.active {
             background: var(--accent);
+        }
+
+        .chat-item.unread:not(.active) {
+            background: rgba(59, 130, 246, 0.12);
         }
 
         .chat-item.calling {
@@ -247,12 +261,21 @@ function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
             align-items: center;
             gap: 6px;
             margin-bottom: 2px;
+            min-width: 0;
         }
 
         .chat-item-name {
             font-weight: 600;
             font-size: 14px;
             color: var(--text-primary);
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .chat-item.unread .chat-item-name {
+            font-weight: 800;
         }
         
         .chat-item.active .chat-item-name {
@@ -262,6 +285,7 @@ function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
         .presence-text {
             font-size: 11px;
             color: var(--text-muted);
+            flex-shrink: 0;
         }
 
         .presence-text.online {
@@ -278,11 +302,29 @@ function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
             padding: 2px 6px;
             border-radius: 4px;
             color: #d8b4fe;
+            flex-shrink: 0;
         }
 
         .call-badge {
             font-size: 12px;
             animation: shake 0.5s infinite;
+            flex-shrink: 0;
+        }
+
+        .unread-badge {
+            margin-left: auto;
+            min-width: 20px;
+            height: 20px;
+            padding: 0 6px;
+            border-radius: 999px;
+            background: #3b82f6;
+            color: white;
+            font-size: 11px;
+            font-weight: 800;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
         }
 
         .chat-item-last-msg {
@@ -293,8 +335,17 @@ function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
             white-space: nowrap;
         }
 
+        .chat-item-last-msg.unread {
+            color: var(--text-primary);
+            font-weight: 700;
+        }
+
         .chat-item.active .chat-item-last-msg {
             color: rgba(255, 255, 255, 0.8);
+        }
+
+        .chat-item.active .chat-item-last-msg.unread {
+            color: white;
         }
 
         @keyframes pulse-call {

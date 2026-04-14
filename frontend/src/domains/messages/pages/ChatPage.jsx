@@ -10,8 +10,26 @@ import { useHrumToast } from '@/components/HrumToast';
 import { getTransactions } from '@/domains/hrum/api/economyApi';
 import { consumePendingPushAction, pushEvents } from '@/mobile/pushNotifications';
 import { useOnboarding } from '@/onboarding/OnboardingProvider';
+import { playIncomingCallTone, playNotificationTone } from '@/shared/lib/playNotificationTone';
 
 const WALLET_UPDATE_EVENT = 'govchat:wallet-update';
+const UNREAD_BADGES_REFRESH_EVENT = 'govchat:unread-badges-refresh';
+const MESSAGE_TITLE_BLINK_MS = 1000;
+const MESSAGE_SOUND_DEBOUNCE_MS = 1200;
+
+function isDocumentVisibleAndFocused() {
+  if (typeof document === 'undefined') return true;
+  return document.visibilityState === 'visible' && typeof document.hasFocus === 'function'
+    ? document.hasFocus()
+    : true;
+}
+
+function extractReceiptUserIds(entries, fieldName) {
+  if (!Array.isArray(entries)) return [];
+  return entries
+    .map((entry) => String(entry?.[fieldName]?._id || entry?.[fieldName] || '').trim())
+    .filter(Boolean);
+}
 
 function extractParticipantUserId(participant) {
   return String(
@@ -94,6 +112,31 @@ function applyPresenceToChat(chat, { userId, status, lastSeen, viewerUserId }) {
     peerUserId,
     displayStatus: normalizedStatus,
     displayLastSeen: nextLastSeen
+  };
+}
+
+function appendReceiptEntries(message, fieldName, userId, timestampField, timestampValue = null) {
+  if (!message) return message;
+
+  const normalizedUserId = String(userId || '').trim();
+  if (!normalizedUserId) return message;
+
+  const currentEntries = Array.isArray(message[fieldName]) ? message[fieldName] : [];
+  const alreadyPresent = currentEntries.some((entry) => (
+    String(entry?.user?._id || entry?.user || '').trim() === normalizedUserId
+  ));
+
+  if (alreadyPresent) return message;
+
+  return {
+    ...message,
+    [fieldName]: [
+      ...currentEntries,
+      {
+        user: normalizedUserId,
+        [timestampField]: timestampValue || new Date().toISOString()
+      }
+    ]
   };
 }
 
@@ -229,6 +272,10 @@ function ChatPageInner({
   const messagesRequestIdRef = useRef(0);
   const pendingMessageUpdatesRef = useRef(new Map());
   const recentPrivateCallEventsRef = useRef(new Map());
+  const unreadAttentionCountRef = useRef(0);
+  const documentTitleBaseRef = useRef(typeof document !== 'undefined' ? document.title : 'GovChat');
+  const titleBlinkTimerRef = useRef(null);
+  const titleBlinkVisibleRef = useRef(false);
 
   // Refs для использования актуальных значений в обработчиках сокета
   const chatsRef = useRef(chats);
@@ -271,6 +318,138 @@ function ChatPageInner({
     recentPrivateCallEventsRef.current.set(key, now);
     return true;
   }, []);
+
+  const dispatchUnreadRefresh = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new Event(UNREAD_BADGES_REFRESH_EVENT));
+  }, []);
+
+  const stopTitleBlink = useCallback(() => {
+    if (titleBlinkTimerRef.current) {
+      clearInterval(titleBlinkTimerRef.current);
+      titleBlinkTimerRef.current = null;
+    }
+    titleBlinkVisibleRef.current = false;
+    if (typeof document !== 'undefined') {
+      document.title = documentTitleBaseRef.current;
+    }
+  }, []);
+
+  const startTitleBlink = useCallback((count) => {
+    if (typeof document === 'undefined') return;
+
+    const nextCount = Math.max(0, Number(count || 0));
+    if (nextCount <= 0) {
+      stopTitleBlink();
+      return;
+    }
+
+    const attentionTitle = `(${nextCount}) Новое сообщение`;
+    if (titleBlinkTimerRef.current) {
+      clearInterval(titleBlinkTimerRef.current);
+      titleBlinkTimerRef.current = null;
+    }
+
+    document.title = attentionTitle;
+    titleBlinkVisibleRef.current = true;
+    titleBlinkTimerRef.current = setInterval(() => {
+      titleBlinkVisibleRef.current = !titleBlinkVisibleRef.current;
+      document.title = titleBlinkVisibleRef.current ? attentionTitle : documentTitleBaseRef.current;
+    }, MESSAGE_TITLE_BLINK_MS);
+  }, [stopTitleBlink]);
+
+  const resetMessageAttention = useCallback(() => {
+    unreadAttentionCountRef.current = 0;
+    stopTitleBlink();
+  }, [stopTitleBlink]);
+
+  const registerIncomingMessageAttention = useCallback(() => {
+    unreadAttentionCountRef.current += 1;
+    startTitleBlink(unreadAttentionCountRef.current);
+  }, [startTitleBlink]);
+
+  const updateChatUnreadCount = useCallback((chatId, updater) => {
+    const normalizedChatId = String(chatId || '').trim();
+    if (!normalizedChatId) return;
+
+    setChats((prev) => prev.map((chat) => {
+      if (chat._id !== normalizedChatId) return chat;
+      const nextUnreadCount = Math.max(0, Number(updater(Number(chat.unreadCount || 0))) || 0);
+      if (nextUnreadCount === Number(chat.unreadCount || 0)) return chat;
+      return { ...chat, unreadCount: nextUnreadCount };
+    }));
+
+    setSelectedChat((prev) => {
+      if (!prev || prev._id !== normalizedChatId) return prev;
+      const nextUnreadCount = Math.max(0, Number(updater(Number(prev.unreadCount || 0))) || 0);
+      if (nextUnreadCount === Number(prev.unreadCount || 0)) return prev;
+      return { ...prev, unreadCount: nextUnreadCount };
+    });
+  }, []);
+
+  const applyMessagesReceiptUpdate = useCallback(({ chatId, messageIds, userId, fieldName, timestampField, timestampValue = null }) => {
+    const normalizedChatId = String(chatId || '').trim();
+    const normalizedMessageIds = Array.isArray(messageIds)
+      ? new Set(messageIds.map((value) => String(value || '').trim()).filter(Boolean))
+      : new Set();
+    const normalizedUserId = String(userId || '').trim();
+
+    if (!normalizedChatId || normalizedMessageIds.size === 0 || !normalizedUserId) return;
+
+    setMessages((prev) => {
+      if (selectedChatRef.current?._id !== normalizedChatId) return prev;
+
+      let changed = false;
+      const nextMessages = prev.map((message) => {
+        if (!normalizedMessageIds.has(String(message?._id || '').trim())) {
+          return message;
+        }
+
+        const updatedMessage = appendReceiptEntries(message, fieldName, normalizedUserId, timestampField, timestampValue);
+        if (updatedMessage !== message) {
+          changed = true;
+        }
+        return updatedMessage;
+      });
+
+      return changed ? nextMessages : prev;
+    });
+  }, []);
+
+  const markChatMessagesAsRead = useCallback((chatId, messageIds = null) => {
+    const normalizedChatId = String(chatId || '').trim();
+    if (!normalizedChatId || !socketRef.current || !currentUserIdRef.current) return;
+    if (!isDocumentVisibleAndFocused()) return;
+
+    const candidateIds = Array.isArray(messageIds) && messageIds.length > 0
+      ? messageIds
+      : messagesRef.current
+        .filter((message) => {
+          if (String(message?.chat || normalizedChatId).trim() !== normalizedChatId) return false;
+          const senderId = String(message?.sender?._id || message?.sender || '').trim();
+          if (!senderId || senderId === String(currentUserIdRef.current)) return false;
+          const alreadyReadBy = extractReceiptUserIds(message?.readBy, 'user');
+          return !alreadyReadBy.includes(String(currentUserIdRef.current));
+        })
+        .map((message) => String(message?._id || '').trim())
+        .filter(Boolean);
+
+    if (candidateIds.length === 0) {
+      updateChatUnreadCount(normalizedChatId, () => 0);
+      dispatchUnreadRefresh();
+      resetMessageAttention();
+      return;
+    }
+
+    socketRef.current.emit('messages:read', {
+      chatId: normalizedChatId,
+      messageIds: candidateIds
+    });
+
+    updateChatUnreadCount(normalizedChatId, () => 0);
+    dispatchUnreadRefresh();
+    resetMessageAttention();
+  }, [dispatchUnreadRefresh, resetMessageAttention, updateChatUnreadCount]);
 
   const fetchChats = useCallback(async () => {
     if (!token) {
@@ -339,6 +518,11 @@ function ChatPageInner({
       }
 
       setMessages(mergedMessages);
+      if (selectedChatRef.current?._id === chatId && isDocumentVisibleAndFocused()) {
+        updateChatUnreadCount(chatId, () => 0);
+        dispatchUnreadRefresh();
+        resetMessageAttention();
+      }
     } catch (error) {
       console.error('[ChatPage] Failed to fetch messages:', error);
       if (messagesRequestIdRef.current !== requestId || selectedChatRef.current?._id !== chatId) {
@@ -346,7 +530,7 @@ function ChatPageInner({
       }
       setMessages([]);
     }
-  }, [token]);
+  }, [token, updateChatUnreadCount, dispatchUnreadRefresh, resetMessageAttention]);
 
   const syncChatLastMessage = useCallback((chatId, message, { promoteToTop = false } = {}) => {
     if (!chatId || !message) return;
@@ -380,6 +564,10 @@ function ChatPageInner({
   const applyIncomingMessage = useCallback((chatId, message) => {
     if (!chatId || !message?._id) return;
 
+    const senderId = String(message?.sender?._id || message?.sender || '').trim();
+    const isOwnMessage = senderId && senderId === String(currentUserIdRef.current || '').trim();
+    const isSelectedVisibleChat = selectedChatRef.current?._id === chatId && isDocumentVisibleAndFocused();
+
     syncChatLastMessage(chatId, message, { promoteToTop: true });
     setMessages((prev) => {
       if (selectedChatRef.current?._id !== chatId) {
@@ -400,7 +588,21 @@ function ChatPageInner({
 
       return nextMessages;
     });
-  }, [syncChatLastMessage]);
+
+    if (isOwnMessage) {
+      return;
+    }
+
+    if (isSelectedVisibleChat) {
+      markChatMessagesAsRead(chatId, [message._id]);
+      return;
+    }
+
+    updateChatUnreadCount(chatId, (count) => count + 1);
+    dispatchUnreadRefresh();
+    registerIncomingMessageAttention();
+    playNotificationTone({ key: 'message', minIntervalMs: MESSAGE_SOUND_DEBOUNCE_MS });
+  }, [syncChatLastMessage, markChatMessagesAsRead, updateChatUnreadCount, dispatchUnreadRefresh, registerIncomingMessageAttention]);
 
   const applyUpdatedMessage = useCallback((chatId, message) => {
     if (!chatId || !message?._id) return;
@@ -793,6 +995,39 @@ function ChatPageInner({
       applyUpdatedMessage(chatId, message);
     });
 
+    socket.on('messages:delivered', ({ chatId, userId, messageIds }) => {
+      applyMessagesReceiptUpdate({
+        chatId,
+        messageIds,
+        userId,
+        fieldName: 'deliveredTo',
+        timestampField: 'deliveredAt'
+      });
+    });
+
+    socket.on('messages:read', ({ chatId, userId, messageIds }) => {
+      applyMessagesReceiptUpdate({
+        chatId,
+        messageIds,
+        userId,
+        fieldName: 'deliveredTo',
+        timestampField: 'deliveredAt'
+      });
+      applyMessagesReceiptUpdate({
+        chatId,
+        messageIds,
+        userId,
+        fieldName: 'readBy',
+        timestampField: 'readAt'
+      });
+
+      if (String(userId || '').trim() === String(currentUserIdRef.current || '').trim()) {
+        updateChatUnreadCount(chatId, () => 0);
+        dispatchUnreadRefresh();
+        resetMessageAttention();
+      }
+    });
+
     // Индикатор печати
     socket.on('typing:update', ({ chatId, userId, userName, isTyping }) => {
       setTypingUsers(prev => {
@@ -1001,6 +1236,8 @@ function ChatPageInner({
         return;
       }
 
+      playIncomingCallTone();
+
       // Ищем чат для отображения
       const chat = chatsRef.current.find(c => c._id === incomingChatId);
 
@@ -1140,6 +1377,8 @@ function ChatPageInner({
         return;
       }
 
+      playIncomingCallTone();
+
       setGroupCallState('incoming');
       setGroupCallData({
         callId,
@@ -1246,7 +1485,7 @@ function ChatPageInner({
       economyProbeTimersRef.current = [];
       socket.disconnect();
     };
-  }, [token, showEarn, applyDeletedMessage, applyIncomingMessage, applyUpdatedMessage, fetchChats, fetchMessagesForChat, shouldHandlePrivateCallEvent, applyUserPresenceUpdate]); // showEarn stable callback from provider
+  }, [token, showEarn, applyDeletedMessage, applyIncomingMessage, applyUpdatedMessage, fetchChats, fetchMessagesForChat, shouldHandlePrivateCallEvent, applyUserPresenceUpdate, applyMessagesReceiptUpdate, updateChatUnreadCount, dispatchUnreadRefresh, resetMessageAttention]); // showEarn stable callback from provider
 
   useEffect(() => {
     if (!token) return;
@@ -1268,6 +1507,45 @@ function ChatPageInner({
     };
   }, [token, handlePushOpen]);
 
+  useEffect(() => () => {
+    stopTitleBlink();
+  }, [stopTitleBlink]);
+
+  useEffect(() => {
+    const selectedChatId = String(selectedChat?._id || '').trim();
+    if (!selectedChatId) return;
+    if (!isDocumentVisibleAndFocused()) return;
+
+    markChatMessagesAsRead(selectedChatId);
+  }, [selectedChat?._id, markChatMessagesAsRead]);
+
+  useEffect(() => {
+    const handleVisibilityOrFocus = () => {
+      if (!isDocumentVisibleAndFocused()) return;
+      resetMessageAttention();
+      const selectedChatId = String(selectedChatRef.current?._id || '').trim();
+      if (selectedChatId) {
+        markChatMessagesAsRead(selectedChatId);
+      }
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('focus', handleVisibilityOrFocus);
+    }
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    }
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('focus', handleVisibilityOrFocus);
+      }
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      }
+    };
+  }, [markChatMessagesAsRead, resetMessageAttention]);
+
   // Загрузка сообщений при выборе чата
   useEffect(() => {
     if (!token || !selectedChat) {
@@ -1285,6 +1563,7 @@ function ChatPageInner({
 
   const handleSelectChat = (chat) => {
     setSelectedChat(chat);
+    resetMessageAttention();
   };
 
   const handleCreateChat = async (userId) => {

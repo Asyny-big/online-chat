@@ -1,5 +1,6 @@
 let audioContextInstance = null;
 let unlockListenersAttached = false;
+const lastToneAtByKey = new Map();
 
 function getAudioContext() {
   if (typeof window === 'undefined') return null;
@@ -22,35 +23,20 @@ function tryResumeAudioContext() {
   }
 }
 
-export function initNotificationSound() {
-  if (typeof window === 'undefined' || unlockListenersAttached) return;
+function canPlayTone(key, minIntervalMs) {
+  const now = Date.now();
+  const normalizedKey = String(key || 'default');
+  const lastPlayedAt = Number(lastToneAtByKey.get(normalizedKey) || 0);
 
-  unlockListenersAttached = true;
+  if (minIntervalMs > 0 && now - lastPlayedAt < minIntervalMs) {
+    return false;
+  }
 
-  const unlock = () => {
-    tryResumeAudioContext();
-    const ctx = getAudioContext();
-    if (ctx && ctx.state === 'running') {
-      window.removeEventListener('pointerdown', unlock, true);
-      window.removeEventListener('keydown', unlock, true);
-      window.removeEventListener('touchstart', unlock, true);
-    }
-  };
-
-  window.addEventListener('pointerdown', unlock, true);
-  window.addEventListener('keydown', unlock, true);
-  window.addEventListener('touchstart', unlock, true);
+  lastToneAtByKey.set(normalizedKey, now);
+  return true;
 }
 
-export function playNotificationTone() {
-  const ctx = getAudioContext();
-  if (!ctx) return;
-
-  if (ctx.state === 'suspended') {
-    ctx.resume().catch(() => {});
-  }
-  if (ctx.state !== 'running') return;
-
+function playMessageTone(ctx) {
   const now = ctx.currentTime;
   const gain = ctx.createGain();
   gain.connect(ctx.destination);
@@ -73,4 +59,81 @@ export function playNotificationTone() {
   oscTwo.connect(gain);
   oscTwo.start(now + 0.09);
   oscTwo.stop(now + 0.18);
+}
+
+function playIncomingCallSynth(ctx) {
+  const now = ctx.currentTime;
+  const gain = ctx.createGain();
+  gain.connect(ctx.destination);
+
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(0.085, now + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.85);
+
+  const noteOffsets = [0, 0.22, 0.44];
+  const frequencies = [740, 988, 740];
+
+  noteOffsets.forEach((offset, index) => {
+    const osc = ctx.createOscillator();
+    osc.type = index % 2 === 0 ? 'triangle' : 'sine';
+    osc.frequency.setValueAtTime(frequencies[index], now + offset);
+    osc.connect(gain);
+    osc.start(now + offset);
+    osc.stop(now + offset + 0.16);
+  });
+}
+
+export function initNotificationSound() {
+  if (typeof window === 'undefined' || unlockListenersAttached) return;
+
+  unlockListenersAttached = true;
+
+  const unlock = () => {
+    tryResumeAudioContext();
+    const ctx = getAudioContext();
+    if (ctx && ctx.state === 'running') {
+      window.removeEventListener('pointerdown', unlock, true);
+      window.removeEventListener('keydown', unlock, true);
+      window.removeEventListener('touchstart', unlock, true);
+    }
+  };
+
+  window.addEventListener('pointerdown', unlock, true);
+  window.addEventListener('keydown', unlock, true);
+  window.addEventListener('touchstart', unlock, true);
+}
+
+export function playNotificationTone(options = {}) {
+  const {
+    key = 'message',
+    minIntervalMs = 900,
+    variant = 'message'
+  } = options;
+
+  if (!canPlayTone(key, minIntervalMs)) return false;
+
+  const ctx = getAudioContext();
+  if (!ctx) return false;
+
+  if (ctx.state === 'suspended') {
+    ctx.resume().catch(() => {});
+  }
+  if (ctx.state !== 'running') return false;
+
+  if (variant === 'incoming-call') {
+    playIncomingCallSynth(ctx);
+  } else {
+    playMessageTone(ctx);
+  }
+
+  return true;
+}
+
+export function playIncomingCallTone(options = {}) {
+  return playNotificationTone({
+    key: 'incoming-call',
+    minIntervalMs: 2500,
+    variant: 'incoming-call',
+    ...options
+  });
 }

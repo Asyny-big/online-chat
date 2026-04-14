@@ -74,6 +74,7 @@ function App() {
     initNotificationSound();
 
     let cancelled = false;
+    let manualRefreshTimerId = null;
 
     const refreshUnreadBadges = async () => {
       try {
@@ -121,8 +122,9 @@ function App() {
         if (unreadInitializedRef.current) {
           const hasNewNotifications = nextCounts.notifications > prevUnreadRef.current.notifications;
           const hasNewMessages = nextCounts.messages > prevUnreadRef.current.messages;
-          if (hasNewNotifications || hasNewMessages) {
-            playNotificationTone();
+          const currentRouteKey = resolveRouteKey(window.location.hash || route);
+          if (hasNewNotifications || (hasNewMessages && currentRouteKey !== 'messages')) {
+            playNotificationTone({ key: 'app-unread', minIntervalMs: 1500 });
           }
         } else {
           unreadInitializedRef.current = true;
@@ -145,7 +147,12 @@ function App() {
     };
 
     const handleManualRefresh = () => {
-      void refreshUnreadBadges();
+      if (manualRefreshTimerId) {
+        clearTimeout(manualRefreshTimerId);
+      }
+      manualRefreshTimerId = setTimeout(() => {
+        void refreshUnreadBadges();
+      }, 250);
     };
 
     window.addEventListener('focus', handleFocus);
@@ -153,6 +160,9 @@ function App() {
 
     return () => {
       cancelled = true;
+      if (manualRefreshTimerId) {
+        clearTimeout(manualRefreshTimerId);
+      }
       clearInterval(intervalId);
       window.removeEventListener('focus', handleFocus);
       window.removeEventListener(UNREAD_BADGES_REFRESH_EVENT, handleManualRefresh);

@@ -14,6 +14,10 @@ const {
 } = require('../social/services/notificationService');
 const { buildLastMessagePayload } = require('../services/messageStateService');
 const {
+  markMessagesDelivered,
+  markMessagesRead
+} = require('../services/messageReceiptService');
+const {
   createAppFacade,
   ensureSupportChatForUser,
   emitChatCreatedToUser,
@@ -415,6 +419,30 @@ async function forceLeaveUserFromCall({ io, userId, call, notificationService, s
 
 module.exports = function (io) {
   const notificationService = new NotificationService({ userSockets, io });
+
+  function getLiveSocketIdsForUser(candidateUserId) {
+    const key = String(candidateUserId || '').trim();
+    if (!key) return [];
+
+    const sockets = userSockets.get(key);
+    if (!sockets || sockets.size === 0) return [];
+
+    const liveSocketIds = [];
+    sockets.forEach((socketId) => {
+      if (io.sockets?.sockets?.get?.(socketId)) {
+        liveSocketIds.push(socketId);
+      } else {
+        sockets.delete(socketId);
+      }
+    });
+
+    if (sockets.size === 0) {
+      userSockets.delete(key);
+    }
+
+    return liveSocketIds;
+  }
+
   // Авторизация сокетов
   io.use(async (socket, next) => {
     try {
@@ -470,7 +498,7 @@ io.on('connection', async (socket) => {
     const ensuredSupportChat = await ensureSupportChatForUser({ app: appFacade, userId });
 
     // Присоединение к чатам
-    const userChats = await Chat.find({ 'participants.user': userId }).select('_id');
+    const userChats = await Chat.find({ 'participants.user': userId }).select('_id type');
     userChats.forEach(chat => {
       socket.join(`chat:${chat._id}`);
     });
@@ -485,6 +513,22 @@ io.on('connection', async (socket) => {
           chat: ensuredSupportChat.chat
         });
       }
+    }
+
+    const privateChatIds = userChats
+      .filter((chat) => String(chat?.type || '').trim() === 'private')
+      .map((chat) => String(chat._id || '').trim())
+      .filter(Boolean);
+    if (privateChatIds.length > 0) {
+      Promise.resolve(
+        markMessagesDelivered({
+          io,
+          userId,
+          chatIds: privateChatIds
+        })
+      ).catch((error) => {
+        console.warn('[Socket] delivery sync failed:', error?.message || error);
+      });
     }
 
     broadcastUserStatus(io, userId, 'online', null);
@@ -595,6 +639,10 @@ io.on('connection', async (socket) => {
           return callback?.({ error: 'Нет доступа к чату' });
         }
 
+        const recipientIds = (chat?.participants || [])
+          .map((participant) => participant?.user?.toString?.() || participant?.user?._id?.toString?.())
+          .filter((participantId) => participantId && participantId !== userId);
+
         if (messageType === 'text' && !normalizedText && !hasAttachment) {
           return callback?.({ error: 'Нельзя отправить пустое сообщение' });
         }
@@ -624,6 +672,29 @@ io.on('connection', async (socket) => {
         });
 
         await message.populate('sender', 'name phone avatarUrl');
+
+        if (chat.type === 'private' && recipientIds.length === 1) {
+          const recipientUserId = recipientIds[0];
+          const liveRecipientSockets = getLiveSocketIdsForUser(recipientUserId);
+          if (liveRecipientSockets.length > 0) {
+            const deliveredAt = new Date();
+            await Message.updateOne(
+              {
+                _id: message._id,
+                'deliveredTo.user': { $ne: recipientUserId }
+              },
+              {
+                $push: {
+                  deliveredTo: {
+                    user: recipientUserId,
+                    deliveredAt
+                  }
+                }
+              }
+            );
+            message.deliveredTo = [{ user: recipientUserId, deliveredAt }];
+          }
+        }
 
         chat.lastMessage = {
           text: normalizedText || (
@@ -677,10 +748,6 @@ io.on('connection', async (socket) => {
         }
 
         Promise.resolve().then(async () => {
-          const recipientIds = (chat?.participants || [])
-            .map((participant) => participant?.user?.toString?.() || participant?.user?._id?.toString?.())
-            .filter((participantId) => participantId && participantId !== userId);
-
           if (!recipientIds.length) return;
 
           createBulkNotifications({
@@ -801,30 +868,12 @@ io.on('connection', async (socket) => {
         : [];
       if (normalizedMessageIds.length === 0) return;
 
-      const readAt = new Date();
-      await Message.updateMany(
-        {
-          chat: chat._id,
-          _id: { $in: normalizedMessageIds },
-          'readBy.user': { $ne: userId }
-        },
-        { $push: { readBy: { user: userId, readAt } } }
-      );
-
-      const updatedMessageIds = await Message.find(
-        {
-          chat: chat._id,
-          _id: { $in: normalizedMessageIds },
-          readBy: { $elemMatch: { user: userId, readAt } }
-        }
-      )
-        .select('_id')
-        .lean();
-
-      const validMessageIds = updatedMessageIds.map((message) => String(message._id));
-      if (validMessageIds.length === 0) return;
-
-      io.to(`chat:${chatId}`).emit('messages:read', { chatId, userId, messageIds: validMessageIds });
+      await markMessagesRead({
+        io,
+        userId,
+        chatId: chat._id,
+        messageIds: normalizedMessageIds
+      });
     });
 
     // === ЗВОНКИ ===

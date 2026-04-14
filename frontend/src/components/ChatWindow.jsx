@@ -499,6 +499,8 @@ function ChatWindow({
                 message={msg}
                 isMine={isMine}
                 token={token}
+                chat={chat}
+                currentUserId={currentUserId}
                 onEdit={isMine ? (nextText) => onEditMessage?.(msg._id, nextText) : null}
                 onDelete={isMine ? () => onDeleteMessage?.(msg._id) : null}
               />
@@ -712,6 +714,18 @@ function ChatWindow({
             font-size: 10px; margin-top: 4px; opacity: 0.7;
             display: flex; align-items: center; gap: 8px;
         }
+        .message-status {
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: -0.04em;
+            opacity: 0.9;
+        }
+        .message-status.delivered {
+            color: rgba(255, 255, 255, 0.82);
+        }
+        .message-status.read {
+            color: #60a5fa;
+        }
         
         /* Media */
         .media-wrapper { max-width: 280px; border-radius: 12px; overflow: hidden; margin-top: 4px; }
@@ -913,7 +927,41 @@ function resolveAudioMimeType(attachment, sourceUrl) {
   return '';
 }
 
-function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
+function extractReceiptUserIds(entries) {
+  if (!Array.isArray(entries)) return [];
+  return entries
+    .map((entry) => String(entry?.user?._id || entry?.user || '').trim())
+    .filter(Boolean);
+}
+
+function resolveOutgoingMessageStatus(message, recipientUserId) {
+  const normalizedRecipientUserId = String(recipientUserId || '').trim();
+  if (!normalizedRecipientUserId) return 'sent';
+
+  const readByUserIds = extractReceiptUserIds(message?.readBy);
+  if (readByUserIds.includes(normalizedRecipientUserId)) {
+    return 'read';
+  }
+
+  const deliveredToUserIds = extractReceiptUserIds(message?.deliveredTo);
+  if (deliveredToUserIds.includes(normalizedRecipientUserId)) {
+    return 'delivered';
+  }
+
+  return 'sent';
+}
+
+function getMessageStatusMeta(status) {
+  if (status === 'read') {
+    return { icon: '✓✓', label: 'Прочитано' };
+  }
+  if (status === 'delivered') {
+    return { icon: '✓✓', label: 'Доставлено' };
+  }
+  return { icon: '✓', label: 'Отправлено' };
+}
+
+function MessageBubble({ message, isMine, onEdit, onDelete, token, chat, currentUserId }) {
   const [showMenu, setShowMenu] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -960,6 +1008,27 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
   const canEdit = Boolean(onEdit) && !deleted && type === 'text';
   const canDelete = Boolean(onDelete) && !deleted;
   const canManage = canEdit || canDelete;
+  const recipientUserId = String(
+    chat?.peerUserId
+      || chat?.participants?.find((participant) => {
+        const participantUserId = String(participant?.user?._id || participant?.user || '').trim();
+        return participantUserId && participantUserId !== String(currentUserId || '').trim();
+      })?.user?._id
+      || chat?.participants?.find((participant) => {
+        const participantUserId = String(participant?.user?._id || participant?.user || '').trim();
+        return participantUserId && participantUserId !== String(currentUserId || '').trim();
+      })?.user
+      || ''
+  ).trim();
+  const shouldShowStatus = Boolean(
+    isMine
+    && !deleted
+    && chat?.type === 'private'
+    && chat?.isAiChat !== true
+    && recipientUserId
+  );
+  const messageStatus = shouldShowStatus ? resolveOutgoingMessageStatus(message, recipientUserId) : '';
+  const messageStatusMeta = shouldShowStatus ? getMessageStatusMeta(messageStatus) : null;
 
   const normalizeFilename = (name) => {
     if (!name) return '';
@@ -1304,6 +1373,15 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token }) {
         <div className="message-time" title={timeTitle || undefined}>
           {!deleted && edited && !isEditing && <span className="message-edited">{editedLabel}</span>}
           {time}
+          {messageStatusMeta && (
+            <span
+              className={`message-status ${messageStatus}`}
+              title={messageStatusMeta.label}
+              aria-label={messageStatusMeta.label}
+            >
+              {messageStatusMeta.icon}
+            </span>
+          )}
           {isMine && canManage && !isEditing && (
             <button
               type="button"
