@@ -366,7 +366,11 @@ router.post('/group', async (req, res) => {
 router.get('/:chatId', checkChatAccess, async (req, res) => {
   try {
     await req.chat.populate('participants.user', 'name phone avatarUrl status lastSeen');
-    res.json(req.chat);
+    res.json(formatChatForUser({
+      app: req.app,
+      chat: req.chat,
+      viewerUserId: req.userId
+    }));
   } catch (error) {
     console.error('Get chat error:', error);
     res.status(500).json({ error: 'Ошибка получения чата' });

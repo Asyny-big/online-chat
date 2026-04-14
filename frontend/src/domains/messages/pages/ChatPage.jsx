@@ -48,6 +48,55 @@ function isSupportChat(chat) {
   );
 }
 
+function normalizePresenceStatus(status) {
+  return String(status || '').trim().toLowerCase() === 'online' ? 'online' : 'offline';
+}
+
+function getChatPeerUserId(chat, viewerUserId = '') {
+  const explicitPeerUserId = String(chat?.peerUserId || '').trim();
+  if (explicitPeerUserId) return explicitPeerUserId;
+  if (!chat || chat.type !== 'private') return '';
+
+  const participantIds = Array.isArray(chat.participants)
+    ? chat.participants.map(extractParticipantUserId).filter(Boolean)
+    : [];
+  const normalizedViewerUserId = String(viewerUserId || '').trim();
+
+  if (!normalizedViewerUserId) {
+    return participantIds[0] || '';
+  }
+
+  return participantIds.find((id) => id !== normalizedViewerUserId) || '';
+}
+
+function applyPresenceToChat(chat, { userId, status, lastSeen, viewerUserId }) {
+  if (!chat || chat.type !== 'private' || isSupportChat(chat)) return chat;
+
+  const peerUserId = getChatPeerUserId(chat, viewerUserId);
+  if (!peerUserId || peerUserId !== String(userId || '').trim()) {
+    return chat;
+  }
+
+  const normalizedStatus = normalizePresenceStatus(status);
+  const nextLastSeen = normalizedStatus === 'offline'
+    ? (lastSeen || chat.displayLastSeen || null)
+    : (chat.displayLastSeen || lastSeen || null);
+
+  if (
+    normalizePresenceStatus(chat.displayStatus) === normalizedStatus
+    && (chat.displayLastSeen || null) === nextLastSeen
+  ) {
+    return chat;
+  }
+
+  return {
+    ...chat,
+    peerUserId,
+    displayStatus: normalizedStatus,
+    displayLastSeen: nextLastSeen
+  };
+}
+
 const DELETED_MESSAGE_TEXT = '\u0421\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u0435 \u0443\u0434\u0430\u043b\u0435\u043d\u043e';
 const DEFAULT_PRIVATE_USER_NAME = '\u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044c';
 const DEFAULT_GROUP_CHAT_NAME = '\u0413\u0440\u0443\u043f\u043f\u043e\u0432\u043e\u0439 \u0447\u0430\u0442';
@@ -406,6 +455,28 @@ function ChatPageInner({
       return prev.filter((item) => item._id !== messageId);
     });
   }, [applyUpdatedMessage]);
+
+  const applyUserPresenceUpdate = useCallback(({ userId, status, lastSeen }) => {
+    const normalizedUserId = String(userId || '').trim();
+    if (!normalizedUserId) return;
+
+    setChats((prev) => prev.map((chat) => applyPresenceToChat(chat, {
+      userId: normalizedUserId,
+      status,
+      lastSeen: lastSeen || null,
+      viewerUserId: currentUserIdRef.current
+    })));
+
+    setSelectedChat((prev) => {
+      const nextChat = applyPresenceToChat(prev, {
+        userId: normalizedUserId,
+        status,
+        lastSeen: lastSeen || null,
+        viewerUserId: currentUserIdRef.current
+      });
+      return nextChat === prev ? prev : nextChat;
+    });
+  }, []);
 
   useEffect(() => {
     const target = pendingPrivateChatTarget;
@@ -1139,6 +1210,10 @@ function ChatPageInner({
       }));
     });
 
+    socket.on('user:status', ({ userId, status, lastSeen }) => {
+      applyUserPresenceUpdate({ userId, status, lastSeen });
+    });
+
     socket.on('wallet:update', (payload) => {
       const detail = payload && typeof payload === 'object' ? payload : {};
       if (typeof window !== 'undefined') {
@@ -1171,7 +1246,7 @@ function ChatPageInner({
       economyProbeTimersRef.current = [];
       socket.disconnect();
     };
-  }, [token, showEarn, applyDeletedMessage, applyIncomingMessage, applyUpdatedMessage, fetchChats, fetchMessagesForChat, shouldHandlePrivateCallEvent]); // showEarn stable callback from provider
+  }, [token, showEarn, applyDeletedMessage, applyIncomingMessage, applyUpdatedMessage, fetchChats, fetchMessagesForChat, shouldHandlePrivateCallEvent, applyUserPresenceUpdate]); // showEarn stable callback from provider
 
   useEffect(() => {
     if (!token) return;

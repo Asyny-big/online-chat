@@ -27,6 +27,7 @@ function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
         const hasActiveGroupCall = chat.activeGroupCall !== null && chat.activeGroupCall !== undefined;
         const displayName = chat.displayName || chat.name || 'Чат';
         const lastMsg = chat.lastMessage;
+        const isOnline = !isGroupChat && String(chat.displayStatus || '').trim().toLowerCase() === 'online';
 
         let lastMessageText = 'Нет сообщений';
         if (lastMsg) {
@@ -57,6 +58,9 @@ function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
                   initial
                 )}
               </div>
+              {!isGroupChat && (
+                <div className={`presence-badge ${isOnline ? 'online' : 'offline'}`} aria-hidden="true" />
+              )}
               {(hasIncomingCall || hasActiveGroupCall) && (
                 <div className="call-indicator-badge">
                   <span className="indicator-dot"></span>
@@ -66,6 +70,11 @@ function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
             <div className="chat-item-info">
               <div className="chat-item-row">
                 <span className="chat-item-name">{displayName}</span>
+                {!isGroupChat && (
+                  <span className={`presence-text ${isOnline ? 'online' : 'offline'}`}>
+                    {isOnline ? 'в сети' : 'не в сети'}
+                  </span>
+                )}
                 {isGroupChat && (
                   <span className="group-badge">👥</span>
                 )}
@@ -206,6 +215,21 @@ function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
             animation: pulse-dot 1s infinite;
         }
 
+        .presence-badge {
+            position: absolute;
+            right: -1px;
+            bottom: -1px;
+            width: 13px;
+            height: 13px;
+            border-radius: 50%;
+            border: 2px solid var(--bg-secondary);
+            background: rgba(148, 163, 184, 0.9);
+        }
+
+        .presence-badge.online {
+            background: #22c55e;
+        }
+
         .indicator-dot {
             width: 6px;
             height: 6px;
@@ -233,6 +257,19 @@ function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
         
         .chat-item.active .chat-item-name {
             color: white;
+        }
+
+        .presence-text {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .presence-text.online {
+            color: #4ade80;
+        }
+
+        .chat-item.active .presence-text {
+            color: rgba(255, 255, 255, 0.8);
         }
 
         .group-badge {

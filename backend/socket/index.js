@@ -34,9 +34,11 @@ const {
 } = require('../services/runtimeDiagnostics');
 
 const userSockets = new Map();
+const pendingOfflineTransitions = new Map();
 const activeCalls = new Map();
 const activeGroupCalls = new Map(); // chatId -> { callId, type, participants:Set<userId> }
 const activeGroupCallStreams = new Map(); // callId -> Map<userId, streamId>
+const OFFLINE_GRACE_MS = 5000;
 const CONTROL_PERMISSION_SIGNAL_TYPES = new Set([
   'control-request',
   'control-grant',
@@ -100,6 +102,17 @@ function clearActiveControlSession(entry) {
 function normalizeIsoDateString(value) {
   const next = new Date(value || '');
   return Number.isNaN(next.getTime()) ? null : next.toISOString();
+}
+
+function clearPendingOfflineTransition(userId) {
+  const key = String(userId || '').trim();
+  if (!key) return;
+
+  const timer = pendingOfflineTransitions.get(key);
+  if (!timer) return;
+
+  clearTimeout(timer);
+  pendingOfflineTransitions.delete(key);
 }
 
 function getValidatedActiveControlSession(entry) {
@@ -441,6 +454,7 @@ io.on('connection', async (socket) => {
     console.log(`User connected: ${userId}, socket: ${socket.id}`);
     recordSocketConnect(userId);
     socket.join(`user:${userId}`);
+    clearPendingOfflineTransition(userId);
 
     // Регистрация сокета
     if (!userSockets.has(userId)) {
@@ -473,7 +487,7 @@ io.on('connection', async (socket) => {
       }
     }
 
-    broadcastUserStatus(io, userId, 'online');
+    broadcastUserStatus(io, userId, 'online', null);
     Promise.resolve(
       syncActiveCallsForUser({
         app: appFacade,
@@ -1651,12 +1665,30 @@ io.on('connection', async (socket) => {
             console.error('[Socket] disconnect cleanup error:', err);
           }
 
-          await User.findByIdAndUpdate(userId, {
-            status: 'offline',
-            lastSeen: new Date()
-          });
+          clearPendingOfflineTransition(userId);
+          const offlineTimer = setTimeout(async () => {
+            pendingOfflineTransitions.delete(userId);
 
-          broadcastUserStatus(io, userId, 'offline');
+            const aliveSockets = userSockets.get(userId);
+            if (aliveSockets && aliveSockets.size > 0) {
+              return;
+            }
+
+            const offlineAt = new Date();
+
+            try {
+              await User.findByIdAndUpdate(userId, {
+                status: 'offline',
+                lastSeen: offlineAt
+              });
+
+              await broadcastUserStatus(io, userId, 'offline', offlineAt);
+            } catch (error) {
+              console.error('[Socket] offline transition error:', error);
+            }
+          }, OFFLINE_GRACE_MS);
+
+          pendingOfflineTransitions.set(userId, offlineTimer);
         }
       }
 
@@ -1670,7 +1702,7 @@ io.on('connection', async (socket) => {
   });
 
   // Рассылка статуса
-  async function broadcastUserStatus(io, odst, status) {
+  async function broadcastUserStatus(io, odst, status, lastSeen = null) {
     try {
       const userChats = await Chat.find({ 'participants.user': odst }).select('participants');
       const contactIds = new Set();
@@ -1691,7 +1723,7 @@ io.on('connection', async (socket) => {
             io.to(socketId).emit('user:status', {
               userId: odst,
               status,
-              lastSeen: status === 'offline' ? new Date() : null
+              lastSeen: status === 'offline' ? lastSeen : null
             });
           });
         }

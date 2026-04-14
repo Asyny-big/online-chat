@@ -6,6 +6,49 @@ import { API_URL } from '@/config';
 import { DuckIcon, MessageIcon, PlusIcon, SearchIcon } from '@/shared/ui/Icons';
 import { getPreferredPlayableAudioMimeType } from '@/utils/audioFormats';
 
+function parsePresenceDate(value) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatPresenceText(status, lastSeen) {
+  if (String(status || '').trim().toLowerCase() === 'online') {
+    return 'в сети';
+  }
+
+  const date = parsePresenceDate(lastSeen);
+  if (!date) return 'не в сети';
+
+  const now = new Date();
+  const isSameDay = (
+    date.getFullYear() === now.getFullYear()
+    && date.getMonth() === now.getMonth()
+    && date.getDate() === now.getDate()
+  );
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const isYesterday = (
+    date.getFullYear() === yesterday.getFullYear()
+    && date.getMonth() === yesterday.getMonth()
+    && date.getDate() === yesterday.getDate()
+  );
+  const timeText = date.toLocaleTimeString('ru-RU', {
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+
+  if (isSameDay) return `был(а) в сети сегодня в ${timeText}`;
+  if (isYesterday) return `был(а) в сети вчера в ${timeText}`;
+
+  return `был(а) в сети ${date.toLocaleString('ru-RU', {
+    day: 'numeric',
+    month: 'long',
+    hour: '2-digit',
+    minute: '2-digit'
+  })}`;
+}
+
 function ChatWindow({
   token,
   chat,
@@ -266,6 +309,10 @@ function ChatWindow({
   const participantCount = chat.participants?.length || 0;
   const hasIncomingCall = incomingCall && incomingCall.chatId === chat._id;
   const hasIncomingGroupCall = incomingGroupCall && incomingGroupCall.chatId === chat._id;
+  const isOnline = String(chat.displayStatus || '').trim().toLowerCase() === 'online';
+  const presenceText = !isGroupChat && !isAiChat
+    ? formatPresenceText(chat.displayStatus, chat.displayLastSeen)
+    : '';
 
   return (
     <div className="chat-window-container">
@@ -349,11 +396,21 @@ function ChatWindow({
           <div className={`chat-avatar ${isGroupChat ? 'group' : ''}`}>
             {isGroupChat ? '👥' : displayName.charAt(0).toUpperCase()}
           </div>
-          <div>
-            <h3 className="chat-name">{displayName}</h3>
+          <div className="header-meta">
+            <div className="chat-name-row">
+              <h3 className="chat-name">{displayName}</h3>
+              {!isGroupChat && !isAiChat && (
+                <span className={`presence-dot ${isOnline ? 'online' : 'offline'}`} aria-hidden="true" />
+              )}
+            </div>
             {isGroupChat && (
               <div className="participant-count">
                 {participantCount} участников
+              </div>
+            )}
+            {!isGroupChat && !isAiChat && typingList.length === 0 && (
+              <div className={`chat-presence ${isOnline ? 'online' : 'offline'}`}>
+                {presenceText}
               </div>
             )}
             {typingList.length > 0 && (
@@ -543,7 +600,9 @@ function ChatWindow({
             flex-shrink: 0;
         }
 
-        .header-info { display: flex; align-items: center; gap: 12px; }
+        .header-info { display: flex; align-items: center; gap: 12px; min-width: 0; }
+        .header-meta { min-width: 0; }
+        .chat-name-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
         
         .back-btn {
             width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;
@@ -560,7 +619,13 @@ function ChatWindow({
         .chat-avatar.group { background: linear-gradient(135deg, #a855f7, #7e22ce); }
 
         .chat-name { margin: 0; fontSize: 16px; font-weight: 700; color: var(--text-primary); }
+        .presence-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.45); }
+        .presence-dot.online { background: #22c55e; }
+        .presence-dot.offline { background: rgba(148, 163, 184, 0.75); }
         .participant-count { fontSize: 12px; color: var(--text-secondary); margin-top: 2px; }
+        .chat-presence { fontSize: 12px; margin-top: 2px; }
+        .chat-presence.online { color: #4ade80; }
+        .chat-presence.offline { color: var(--text-secondary); }
         .typing-indicator { fontSize: 12px; color: var(--accent); margin-top: 2px; }
         .typing-dots { animation: blink 1s infinite; }
 
