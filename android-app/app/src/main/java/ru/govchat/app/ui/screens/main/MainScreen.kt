@@ -1,6 +1,7 @@
 ﻿package ru.govchat.app.ui.screens.main
 
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
@@ -54,6 +55,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.DisposableEffect
@@ -111,6 +113,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -149,10 +152,15 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -165,6 +173,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.media3.common.Player
 import androidx.media3.ui.PlayerView
 import androidx.compose.ui.zIndex
 import io.livekit.android.room.participant.RemoteParticipant
@@ -200,6 +209,7 @@ import ru.govchat.app.core.call.CallUiPhase
 import ru.govchat.app.core.call.CallUiState
 import ru.govchat.app.core.call.CallVideoTrack
 import ru.govchat.app.core.file.GovChatAttachmentDownloader
+import ru.govchat.app.core.media.MediaCacheManager
 import ru.govchat.app.core.notification.CallNotificationManager
 import ru.govchat.app.core.permission.GovChatPermissionFeature
 import ru.govchat.app.core.permission.rememberGovChatPermissionFlow
@@ -2529,6 +2539,7 @@ private fun ChatContent(
     }
     var imagePreviewStartIndex by remember(chat.id) { mutableIntStateOf(-1) }
     var expandedVideoNoteState by remember(chat.id) { mutableStateOf<ExpandedVideoNoteUiState?>(null) }
+    var expandedVideoAttachmentState by remember(chat.id) { mutableStateOf<ExpandedVideoAttachmentUiState?>(null) }
     val videoNoteBounds = remember(chat.id) { mutableStateMapOf<String, Rect>() }
     val listState = rememberLazyListState()
     val playbackCoordinator = remember(chat.id) {
@@ -2550,14 +2561,15 @@ private fun ChatContent(
         }
     }
 
-    BackHandler(enabled = expandedVideoNoteState == null && imagePreviewStartIndex >= 0) {
+    BackHandler(enabled = expandedVideoAttachmentState == null && expandedVideoNoteState == null && imagePreviewStartIndex >= 0) {
         imagePreviewStartIndex = -1
     }
-    BackHandler(enabled = expandedVideoNoteState == null && imagePreviewStartIndex < 0 && showParticipantsDialog) {
+    BackHandler(enabled = expandedVideoAttachmentState == null && expandedVideoNoteState == null && imagePreviewStartIndex < 0 && showParticipantsDialog) {
         showParticipantsDialog = false
     }
     BackHandler(
-        enabled = expandedVideoNoteState == null &&
+        enabled = expandedVideoAttachmentState == null &&
+            expandedVideoNoteState == null &&
             imagePreviewStartIndex < 0 &&
             !showParticipantsDialog &&
             selectedMediaUris.isNotEmpty()
@@ -2830,6 +2842,11 @@ private fun ChatContent(
                         )
                     }
                 },
+                onVideoAttachmentClick = { message ->
+                    playbackCoordinator.stop { activePlaybackMessageId = it }
+                    videoNotePlayerManager.enterIdle(resetToStart = false)
+                    expandedVideoAttachmentState = ExpandedVideoAttachmentUiState(message = message)
+                },
                 onAttachmentClick = { message, type, attachment ->
                     if (type == MessageType.Image && !attachment?.url.isNullOrBlank()) {
                         val previewIndex = imageMessages.indexOfFirst { it.id == message.id }
@@ -3087,6 +3104,23 @@ private fun ChatContent(
                     .zIndex(20f)
             )
         }
+
+        val expandedVideoAttachment = expandedVideoAttachmentState
+        if (expandedVideoAttachment != null) {
+            VideoAttachmentDialog(
+                state = expandedVideoAttachment,
+                onDismiss = { expandedVideoAttachmentState = null },
+                onDownloadClick = {
+                    onAttachmentClick(
+                        expandedVideoAttachment.message.type,
+                        expandedVideoAttachment.message.attachment
+                    )
+                },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .zIndex(20f)
+            )
+        }
     }
 
     if (imagePreviewStartIndex >= 0 && imageMessages.isNotEmpty()) {
@@ -3118,6 +3152,7 @@ private fun ChatMessagesList(
     onActivePlaybackChanged: (String?) -> Unit,
     onVideoNoteBoundsChanged: (String, Rect) -> Unit,
     onVideoNoteClick: (ChatMessage) -> Unit,
+    onVideoAttachmentClick: (ChatMessage) -> Unit,
     onAttachmentClick: (ChatMessage, MessageType, MessageAttachment?) -> Unit,
     onMessageLongPress: (ChatMessage) -> Unit,
     modifier: Modifier = Modifier
@@ -3272,6 +3307,7 @@ private fun ChatMessagesList(
                     onActivePlaybackChanged = onActivePlaybackChanged,
                     onVideoNoteBoundsChanged = onVideoNoteBoundsChanged,
                     onVideoNoteClick = onVideoNoteClick,
+                    onVideoAttachmentClick = onVideoAttachmentClick,
                     onAttachmentClick = { type, attachment ->
                         onAttachmentClick(message, type, attachment)
                     }
@@ -4724,6 +4760,7 @@ private fun MessageBubble(
     onActivePlaybackChanged: (String?) -> Unit,
     onVideoNoteBoundsChanged: (String, Rect) -> Unit,
     onVideoNoteClick: (ChatMessage) -> Unit,
+    onVideoAttachmentClick: (ChatMessage) -> Unit,
     onAttachmentClick: (MessageType, MessageAttachment?) -> Unit
 ) {
     val alignment = if (isMine) Alignment.End else Alignment.Start
@@ -4780,6 +4817,7 @@ private fun MessageBubble(
                     onActivePlaybackChanged = onActivePlaybackChanged,
                     onVideoNoteBoundsChanged = onVideoNoteBoundsChanged,
                     onVideoNoteClick = onVideoNoteClick,
+                    onVideoAttachmentClick = onVideoAttachmentClick,
                     onAttachmentClick = { onAttachmentClick(message.type, message.attachment) }
                 )
 
@@ -4843,13 +4881,14 @@ private fun MessageBody(
     onActivePlaybackChanged: (String?) -> Unit,
     onVideoNoteBoundsChanged: (String, Rect) -> Unit,
     onVideoNoteClick: (ChatMessage) -> Unit,
+    onVideoAttachmentClick: (ChatMessage) -> Unit,
     onAttachmentClick: () -> Unit
 ) {
     if (message.deleted) {
-        Text(
+        MessageTextContent(
             text = "Сообщение удалено",
             color = Color(0xFFD1D5DB),
-            fontStyle = FontStyle.Italic
+            style = MaterialTheme.typography.bodyMedium.copy(fontStyle = FontStyle.Italic)
         )
         return
     }
@@ -4868,20 +4907,17 @@ private fun MessageBody(
                 )
             }
             if (message.text.isNotBlank()) {
-                Text(text = message.text, color = Color.White)
+                Spacer(modifier = Modifier.height(6.dp))
+                MessageTextContent(text = message.text, color = Color.White)
             }
         }
 
         MessageType.Video -> {
-            AttachmentLink(
-                title = message.attachment?.originalName?.ifBlank { "Видео" } ?: "Видео",
-                subtitle = "Скачать видео",
-                onClick = onAttachmentClick
+            VideoAttachmentCard(
+                message = message,
+                onOpen = { onVideoAttachmentClick(message) },
+                onDownloadClick = onAttachmentClick
             )
-            if (message.text.isNotBlank()) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(text = message.text, color = Color.White)
-            }
         }
 
         MessageType.VideoNote -> {
@@ -4902,7 +4938,7 @@ private fun MessageBody(
                 playbackCoordinator = playbackCoordinator,
                 isActive = activePlaybackMessageId == message.id,
                 onActivePlaybackChanged = onActivePlaybackChanged,
-                onFallbackClick = onAttachmentClick
+                onDownloadClick = onAttachmentClick
             )
         }
 
@@ -4912,25 +4948,33 @@ private fun MessageBody(
                 playbackCoordinator = playbackCoordinator,
                 isActive = activePlaybackMessageId == message.id,
                 onActivePlaybackChanged = onActivePlaybackChanged,
-                onFallbackClick = onAttachmentClick
+                onDownloadClick = onAttachmentClick
             )
         }
 
         MessageType.File -> {
             val attachment = message.attachment
-            AttachmentLink(
-                title = attachment?.originalName?.ifBlank { "Файл" } ?: "Файл",
-                subtitle = attachment?.sizeBytes?.toReadableSize() ?: "Скачать",
-                onClick = onAttachmentClick
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                AttachmentLink(
+                    title = attachment?.originalName?.ifBlank { "Файл" } ?: "Файл",
+                    subtitle = attachment?.sizeBytes?.toReadableSize() ?: "Скачать",
+                    onClick = onAttachmentClick
+                )
+                if (message.text.isNotBlank()) {
+                    MessageTextContent(text = message.text, color = Color.White)
+                }
+            }
         }
 
         MessageType.System -> {
-            Text(text = message.text.ifBlank { "Системное сообщение" }, color = Color(0xFFE2E8F0))
+            MessageTextContent(
+                text = message.text.ifBlank { "Системное сообщение" },
+                color = Color(0xFFE2E8F0)
+            )
         }
 
         MessageType.Text -> {
-            Text(text = message.text, color = Color.White)
+            MessageTextContent(text = message.text, color = Color.White)
         }
     }
 }
@@ -4941,25 +4985,45 @@ private fun VoiceMessageBody(
     playbackCoordinator: PlaybackCoordinator,
     isActive: Boolean,
     onActivePlaybackChanged: (String?) -> Unit,
-    onFallbackClick: () -> Unit
+    onDownloadClick: () -> Unit
 ) {
+    val context = LocalContext.current
     val audioUrl = resolveMediaUrl(message.attachment?.url)
     val resolvedDurationMs = rememberResolvedMediaDuration(
         initialDurationMs = message.attachment?.durationMs,
         mediaUrl = audioUrl
     )
+    val playbackUiState by playbackCoordinator.uiState.collectAsState()
     if (audioUrl == null) {
         AttachmentLink(
             title = "Голосовое сообщение",
             subtitle = "Скачать аудио",
-            onClick = onFallbackClick
+            onClick = onDownloadClick
         )
         return
     }
-    val isPlaying = isActive
 
-    val waveformBars = remember(message.id) {
-        listOf(5.dp, 9.dp, 7.dp, 12.dp, 8.dp, 14.dp, 10.dp, 12.dp, 8.dp, 6.dp, 11.dp, 9.dp)
+    LaunchedEffect(audioUrl) {
+        MediaCacheManager.prefetch(context.applicationContext, audioUrl)
+    }
+
+    val isCurrentMessage = isActive && playbackUiState.activeMessageId == message.id
+    val isPlaying = isCurrentMessage && playbackUiState.isPlaying
+    val isBuffering = isCurrentMessage && playbackUiState.isBuffering
+    val lastErrorText = if (playbackUiState.errorMessageId == message.id) playbackUiState.errorMessage else null
+    val currentDurationMs = when {
+        isCurrentMessage && playbackUiState.durationMs > 0L -> playbackUiState.durationMs
+        else -> resolvedDurationMs
+    } ?: 0L
+    val currentPositionMs = if (isCurrentMessage) {
+        playbackUiState.positionMs.coerceAtMost(currentDurationMs.coerceAtLeast(0L))
+    } else {
+        0L
+    }
+    val progress = if (currentDurationMs > 0L) {
+        (currentPositionMs.toFloat() / currentDurationMs.toFloat()).coerceIn(0f, 1f)
+    } else {
+        0f
     }
 
     Surface(
@@ -4967,62 +5031,230 @@ private fun VoiceMessageBody(
         shape = RoundedCornerShape(12.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onFallbackClick() }
+            .clickable {
+                playbackCoordinator.toggle(
+                    messageId = message.id,
+                    url = audioUrl,
+                    onActiveChanged = onActivePlaybackChanged,
+                    onError = {}
+                )
+            }
     ) {
-        Row(
+        Column(
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Surface(
-                shape = CircleShape,
-                color = Color(0xFF5EB5F7),
-                modifier = Modifier
-                    .size(34.dp)
-                    .clickable {
-                        playbackCoordinator.toggle(
-                            messageId = message.id,
-                            url = audioUrl,
-                            onActiveChanged = onActivePlaybackChanged,
-                            onError = onFallbackClick
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = Color(0xFF5EB5F7),
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clickable {
+                            playbackCoordinator.toggle(
+                                messageId = message.id,
+                                url = audioUrl,
+                                onActiveChanged = onActivePlaybackChanged,
+                                onError = {}
+                            )
+                        }
+                ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                        if (isBuffering) {
+                            CircularProgressIndicator(
+                                color = Color.White,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        } else {
+                            Icon(
+                                imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                                contentDescription = if (isPlaying) "Пауза" else "Воспроизвести",
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.size(10.dp))
+
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    MessageTextContent(
+                        text = message.attachment?.originalName?.ifBlank { "Аудиофайл" } ?: "Аудиофайл",
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium)
+                    )
+                    LinearProgressIndicator(
+                        progress = progress,
+                        color = Color(0xFF5EB5F7),
+                        trackColor = Color(0x335E7D96),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(4.dp)
+                            .clip(RoundedCornerShape(999.dp))
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (isBuffering) "Буферизация..." else formatMediaDuration(currentPositionMs),
+                            color = Color(0xFFD6E4F5),
+                            fontSize = 12.sp
+                        )
+                        Text(
+                            text = formatMediaDuration(currentDurationMs),
+                            color = Color(0xFFD6E4F5),
+                            fontSize = 12.sp
                         )
                     }
-            ) {
-                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                    Icon(
-                        imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                        contentDescription = if (isPlaying) "Пауза" else "Воспроизвести",
-                        tint = Color.White,
-                        modifier = Modifier.size(16.dp)
-                    )
+                }
+
+                Spacer(modifier = Modifier.size(10.dp))
+
+                TextButton(onClick = onDownloadClick) {
+                    Text("Скачать", color = Color(0xFF9ED7FF))
                 }
             }
 
-            Spacer(modifier = Modifier.size(8.dp))
+            if (lastErrorText != null) {
+                Text(
+                    text = lastErrorText,
+                    color = Color(0xFFFCA5A5),
+                    fontSize = 12.sp
+                )
+            }
 
-            Row(
-                modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                verticalAlignment = Alignment.Bottom
-            ) {
-                waveformBars.forEach { height ->
-                    Box(
-                        modifier = Modifier
-                            .width(3.dp)
-                            .height(height)
-                            .clip(RoundedCornerShape(2.dp))
-                            .background(
-                                if (isPlaying) Color(0xFF9ED7FF) else Color(0xFF6B7D8E)
+            if (message.text.isNotBlank()) {
+                MessageTextContent(
+                    text = message.text,
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun VideoAttachmentCard(
+    message: ChatMessage,
+    onOpen: () -> Unit,
+    onDownloadClick: () -> Unit
+) {
+    val context = LocalContext.current
+    val videoUrl = resolveMediaUrl(message.attachment?.url)
+    val thumbnailUrl = resolveMediaUrl(message.attachment?.thumbnailUrl)
+    val durationMs = rememberResolvedMediaDuration(
+        initialDurationMs = message.attachment?.durationMs,
+        mediaUrl = videoUrl
+    )
+
+    LaunchedEffect(videoUrl) {
+        if (videoUrl != null) {
+            MediaCacheManager.prefetch(context.applicationContext, videoUrl)
+        }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Surface(
+            color = Color(0x33000000),
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable {
+                    if (videoUrl != null) onOpen() else onDownloadClick()
+                }
+        ) {
+            Column {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(188.dp)
+                        .background(Color(0xFF0F172A)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (thumbnailUrl != null) {
+                        AsyncImage(
+                            model = rememberImageRequest(
+                                data = thumbnailUrl,
+                                downsamplePx = 960
+                            ),
+                            imageLoader = rememberGovChatImageLoader(),
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color(0x26000000))
+                        )
+                    }
+
+                    Surface(
+                        color = Color(0xAA0F172A),
+                        shape = CircleShape,
+                        modifier = Modifier.size(54.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                            Icon(
+                                imageVector = Icons.Filled.PlayArrow,
+                                contentDescription = "Смотреть видео",
+                                tint = Color.White,
+                                modifier = Modifier.size(28.dp)
                             )
-                    )
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            text = message.attachment?.originalName?.ifBlank { "Видео" } ?: "Видео",
+                            color = Color.White,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = buildString {
+                                append(formatMediaDuration(durationMs))
+                                message.attachment?.sizeBytes?.toReadableSize()?.let { size ->
+                                    if (size.isNotBlank()) {
+                                        append(" • ")
+                                        append(size)
+                                    }
+                                }
+                            },
+                            color = Color(0xFF94A3B8),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+
+                    TextButton(onClick = onDownloadClick) {
+                        Text("Скачать", color = Color(0xFF9ED7FF))
+                    }
                 }
             }
+        }
 
-            Spacer(modifier = Modifier.size(8.dp))
-            Text(
-                text = formatMediaDuration(resolvedDurationMs),
-                color = Color(0xFFD6E4F5),
-                fontSize = 12.sp
-            )
+        if (message.text.isNotBlank()) {
+            MessageTextContent(text = message.text, color = Color.White)
         }
     }
 }
@@ -5307,6 +5539,10 @@ private data class ExpandedVideoNoteUiState(
     val sourceBounds: Rect?
 )
 
+private data class ExpandedVideoAttachmentUiState(
+    val message: ChatMessage
+)
+
 private fun lerpFloat(start: Float, end: Float, fraction: Float): Float {
     return start + (end - start) * fraction.coerceIn(0f, 1f)
 }
@@ -5335,6 +5571,219 @@ private fun AvatarBubble(
 }
 
 @Composable
+private fun MessageTextContent(
+    text: String,
+    color: Color,
+    modifier: Modifier = Modifier,
+    style: TextStyle = MaterialTheme.typography.bodyMedium
+) {
+    val context = LocalContext.current
+    val parts = remember(text) { parseMessageTextParts(text) }
+    val hasLinks = remember(parts) { parts.any { !it.url.isNullOrBlank() } }
+
+    if (!hasLinks) {
+        Text(
+            text = text,
+            color = color,
+            style = style,
+            modifier = modifier
+        )
+        return
+    }
+
+    val annotated = remember(parts, color) {
+        buildAnnotatedString {
+            parts.forEach { part ->
+                val url = part.url
+                if (url.isNullOrBlank()) {
+                    append(part.text)
+                } else {
+                    pushStringAnnotation(tag = "url", annotation = url)
+                    pushStyle(
+                        SpanStyle(
+                            color = Color(0xFF8FD3FF),
+                            textDecoration = TextDecoration.Underline
+                        )
+                    )
+                    append(part.text)
+                    pop()
+                    pop()
+                }
+            }
+        }
+    }
+
+    ClickableText(
+        text = annotated,
+        modifier = modifier,
+        style = style.copy(color = color),
+        onClick = { offset ->
+            annotated.getStringAnnotations(tag = "url", start = offset, end = offset)
+                .firstOrNull()
+                ?.let { annotation -> openExternalLink(context, annotation.item) }
+        }
+    )
+}
+
+@Composable
+private fun VideoAttachmentDialog(
+    state: ExpandedVideoAttachmentUiState,
+    onDismiss: () -> Unit,
+    onDownloadClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val videoUrl = resolveMediaUrl(state.message.attachment?.url)
+    if (videoUrl == null) {
+        LaunchedEffect(state.message.id) { onDismiss() }
+        return
+    }
+
+    var isBuffering by remember(videoUrl) { mutableStateOf(true) }
+    var errorMessage by remember(videoUrl) { mutableStateOf<String?>(null) }
+    val player = remember(videoUrl) {
+        MediaCacheManager.createPlayer(context.applicationContext).apply {
+            repeatMode = Player.REPEAT_MODE_OFF
+            playWhenReady = true
+        }
+    }
+
+    DisposableEffect(player, videoUrl) {
+        MediaCacheManager.prefetch(context.applicationContext, videoUrl)
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                isBuffering = playbackState == Player.STATE_BUFFERING || playbackState == Player.STATE_IDLE
+            }
+
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                isBuffering = false
+                errorMessage = error.message ?: "Не удалось открыть видео"
+            }
+        }
+
+        player.addListener(listener)
+        player.setMediaItem(MediaCacheManager.mediaItem(videoUrl))
+        player.prepare()
+
+        onDispose {
+            player.removeListener(listener)
+            runCatching { player.release() }
+        }
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .background(Color(0xE6000000))
+                .padding(16.dp)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = Color(0xFF0F172A),
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .fillMaxWidth()
+            ) {
+                Column {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color.Black)
+                            .aspectRatio(16f / 9f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        AndroidView(
+                            factory = { viewContext ->
+                                PlayerView(viewContext).apply {
+                                    useController = true
+                                    this.player = player
+                                    layoutParams = android.view.ViewGroup.LayoutParams(
+                                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                                        android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                                    )
+                                }
+                            },
+                            update = { playerView ->
+                                playerView.player = player
+                            },
+                            onRelease = { playerView ->
+                                playerView.player = null
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
+
+                        if (isBuffering) {
+                            CircularProgressIndicator(color = Color.White)
+                        }
+
+                        if (errorMessage != null) {
+                            Surface(
+                                color = Color(0xCC111827),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text(
+                                    text = errorMessage!!,
+                                    color = Color(0xFFFCA5A5),
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Text(
+                                text = state.message.attachment?.originalName?.ifBlank { "Видео" } ?: "Видео",
+                                color = Color.White,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = state.message.attachment?.sizeBytes?.toReadableSize()
+                                    ?: formatMediaDuration(state.message.attachment?.durationMs),
+                                color = Color(0xFF94A3B8),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+
+                        TextButton(onClick = onDownloadClick) {
+                            Text("Скачать", color = Color(0xFF9ED7FF))
+                        }
+                    }
+                }
+            }
+
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .statusBarsPadding()
+                    .background(Color(0xAA0F172A), CircleShape)
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Close,
+                    contentDescription = "Закрыть",
+                    tint = Color.White
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun AttachmentLink(
     title: String,
     subtitle: String,
@@ -5359,6 +5808,20 @@ private fun AttachmentLink(
                 color = Color(0xFF94A3B8),
                 style = MaterialTheme.typography.bodySmall
             )
+        }
+    }
+}
+
+private fun openExternalLink(context: Context, url: String) {
+    if (url.isBlank()) return
+    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    runCatching {
+        ContextCompat.startActivity(context, intent, null)
+    }.onFailure {
+        if (it is ActivityNotFoundException) {
+            Toast.makeText(context, "Не удалось открыть ссылку", Toast.LENGTH_SHORT).show()
         }
     }
 }

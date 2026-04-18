@@ -4,6 +4,7 @@ import MessageInput from './MessageInput';
 import MediaViewerModal from './MediaViewerModal';
 import { API_URL } from '@/config';
 import { DuckIcon, MessageIcon, PlusIcon, SearchIcon } from '@/shared/ui/Icons';
+import { parseMessageTextParts } from '@/shared/lib/messageLinks';
 import { getPreferredPlayableAudioMimeType } from '@/utils/audioFormats';
 
 function parsePresenceDate(value) {
@@ -709,6 +710,13 @@ function ChatWindow({
 
         .sender-name { font-size: 12px; font-weight: 700; color: var(--accent); margin-bottom: 4px; }
         .text-content { font-size: 15px; line-height: 1.5; white-space: pre-wrap; }
+        .message-link {
+            color: #8fd3ff;
+            text-decoration: underline;
+            text-underline-offset: 2px;
+            word-break: break-word;
+        }
+        .message-link:hover { color: #d7efff; }
         
         .message-time {
             font-size: 10px; margin-top: 4px; opacity: 0.7;
@@ -731,7 +739,7 @@ function ChatWindow({
         .media-wrapper { max-width: 280px; border-radius: 12px; overflow: hidden; margin-top: 4px; }
         .image-preview { width: 100%; height: auto; display: block; cursor: pointer; }
         .video-preview { width: 100%; height: auto; display: block; border-radius: 12px; }
-        .media-caption { margin-top: 6px; font-size: 14px; }
+        .media-caption { margin-top: 6px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
 
         .audio-wrapper { display: flex; align-items: center; gap: 8px; min-width: 200px; padding: 4px 0; }
         .audio-icon { font-size: 20px; }
@@ -959,6 +967,30 @@ function getMessageStatusMeta(status) {
     return { icon: '✓✓', label: 'Доставлено' };
   }
   return { icon: '✓', label: 'Отправлено' };
+}
+
+function MessageText({ text, className = 'text-content' }) {
+  const parts = useMemo(() => parseMessageTextParts(text), [text]);
+
+  return (
+    <div className={className}>
+      {parts.map((part, index) => (
+        part.type === 'link' && part.href
+          ? (
+            <a
+              key={`${part.href}-${index}`}
+              href={part.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="message-link"
+            >
+              {part.text}
+            </a>
+          )
+          : <React.Fragment key={`text-${index}`}>{part.text}</React.Fragment>
+      ))}
+    </div>
+  );
 }
 
 function MessageBubble({ message, isMine, onEdit, onDelete, token, chat, currentUserId }) {
@@ -1225,7 +1257,7 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token, chat, current
               className="image-preview"
               onClick={() => window.open(resolveMessageMediaUrl(attachment?.url), '_blank')}
             />
-            {text && <div className="media-caption">{text}</div>}
+            {text && <MessageText text={text} className="media-caption" />}
           </div>
         );
       case 'video':
@@ -1238,7 +1270,7 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token, chat, current
               className="videoPreview" // Keeping inline style for now or add class
               style={{ width: '100%', height: 'auto', borderRadius: '12px' }}
             />
-            {text && <div className="media-caption">{text}</div>}
+            {text && <MessageText text={text} className="media-caption" />}
           </div>
         );
       case 'audio':
@@ -1337,7 +1369,7 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token, chat, current
                 cursor: 'pointer'
               }}
             />
-            {text && <div className="media-caption">{text}</div>}
+            {text && <MessageText text={text} className="media-caption" />}
           </div>
         );
       case 'file':
@@ -1352,7 +1384,7 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token, chat, current
           </button>
         );
       default:
-        return <div className="text-content">{text}</div>;
+        return <MessageText text={text} className="text-content" />;
     }
   };
 

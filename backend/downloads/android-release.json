@@ -4,13 +4,13 @@
   "minSupportedVersion": "1.0",
   "minSupportedVersionCode": 1,
   "forceUpdate": false,
-  "apkFile": "xfaret.apk",
-  "apkSha256": "c84bb0cd9e47cdcd67669ec7f967e57239b295132b3cda7ffcd28c674d66a71c",
+  "apkFile": "Monstr.apk",
+  "apkSha256": "c4e92b54b7e3b3e9860b3d57c8877534c363b60f6143ce114b8b8f15ca928589",
   "signingCertSha256": [
     "cf75eb6b4475ca93be8b8dd976a89045d2c6f749bde0cac21031fc88302fb5ea"
   ],
   "changelog": [
-    "Тестовая сборка для проверки in-app update.",
-    "Иконка приложения полностью изменена: новый персонаж в стиле UFO."
+    "Обновлена Android-сборка для in-app update.",
+    "Актуализированы метаданные релиза и контрольная сумма APK."
   ]
 }
