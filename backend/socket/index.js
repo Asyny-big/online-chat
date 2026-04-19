@@ -29,6 +29,7 @@ const {
   rememberAiUserMessage
 } = require('../services/aiChatService');
 const { startPrivateCallFlow, syncActiveCallsForUser } = require('../services/callOrchestrator');
+const { handleLocationResponse } = require('../services/locationRequestService');
 const {
   recordCallMetric,
   recordDroppedRealtimeEvent,
@@ -469,6 +470,11 @@ module.exports = function (io) {
 
       socket.userId = user._id.toString();
       socket.user = user;
+      socket.data.platform = String(socket.handshake.auth.platform || '').trim().toLowerCase();
+      socket.data.supportsOnDemandLocation = socket.handshake.auth.supportsOnDemandLocation === true
+        || socket.handshake.auth.supportsOnDemandLocation === 'true';
+      socket.platform = socket.data.platform;
+      socket.supportsOnDemandLocation = socket.data.supportsOnDemandLocation;
       next();
     } catch (error) {
       next(new Error('INVALID_TOKEN'));
@@ -645,6 +651,10 @@ io.on('connection', async (socket) => {
 
         if (messageType === 'text' && !normalizedText && !hasAttachment) {
           return callback?.({ error: 'Нельзя отправить пустое сообщение' });
+        }
+
+        if (messageType === 'location') {
+          return callback?.({ error: 'Location messages can only be created by location request flow' });
         }
 
         if (normalizedText.length > 10000) {
@@ -877,6 +887,24 @@ io.on('connection', async (socket) => {
     });
 
     // === ЗВОНКИ ===
+
+    socket.on('location:response', async (payload) => {
+      try {
+        await handleLocationResponse({
+          io,
+          socket,
+          userId,
+          payload
+        });
+      } catch (error) {
+        console.error('location:response error:', error);
+        socket.emit('location:response:ack', {
+          success: false,
+          requestId: String(payload?.requestId || ''),
+          code: 'LOCATION_RESPONSE_FAILED'
+        });
+      }
+    });
 
     socket.on('call:start', async ({ chatId, type = 'video' }, callback) => {
       try {

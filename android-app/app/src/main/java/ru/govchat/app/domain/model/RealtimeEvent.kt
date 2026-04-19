@@ -6,6 +6,13 @@ sealed interface RealtimeEvent {
     data class UserStatusChanged(val userId: String, val status: String) : RealtimeEvent
     data class MessageCreated(val chatId: String, val message: ChatMessage) : RealtimeEvent
     data class MessageUpdated(val chatId: String, val message: ChatMessage) : RealtimeEvent
+    data class LocationFetchRequested(
+        val requestId: String,
+        val chatId: String,
+        val requesterUserId: String,
+        val requesterName: String,
+        val expiresAt: String
+    ) : RealtimeEvent
     data class MessagesRead(
         val chatId: String,
         val userId: String,

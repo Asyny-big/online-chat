@@ -6,6 +6,7 @@ import ru.govchat.app.domain.model.ChatMessage
 import ru.govchat.app.domain.model.ChatPreview
 import ru.govchat.app.domain.model.ChatType
 import ru.govchat.app.domain.model.MessageAttachment
+import ru.govchat.app.domain.model.MessageLocation
 import ru.govchat.app.domain.model.MessageType
 import java.time.Instant
 
@@ -48,6 +49,7 @@ internal fun JSONObject.toSocketMessage(chatIdHint: String = ""): ChatMessage? {
     }
 
     val readByIds = parseReadByIds(optJSONArray("readBy"))
+    val location = optJSONObject("location")?.toSocketLocation(createdAtFallback = optString("createdAt"))
 
     return ChatMessage(
         id = messageId,
@@ -57,6 +59,7 @@ internal fun JSONObject.toSocketMessage(chatIdHint: String = ""): ChatMessage? {
         type = optString("type", "text").toSocketMessageType(),
         text = optString("text"),
         attachment = attachment,
+        location = location,
         readByUserIds = readByIds,
         createdAtMillis = optString("createdAt").toEpochMillisOrZero(),
         updatedAtMillis = optString("updatedAt").toEpochMillisOrZero().takeIf { it > 0L },
@@ -84,6 +87,7 @@ internal fun JSONObject.toSocketChatPreview(): ChatPreview? {
         "audio" -> "🎤 Голосовое сообщение"
         "image" -> "📷 Изображение"
         "video" -> "🎥 Видео"
+        "location" -> "Местоположение"
         "file" -> "📎 Файл"
         else -> lastMessage?.optString("text").takeIf { !it.isNullOrBlank() } ?: "Нет сообщений"
     }
@@ -151,6 +155,21 @@ private fun parseReadByIds(readBy: JSONArray?): Set<String> {
     return result
 }
 
+private fun JSONObject.toSocketLocation(createdAtFallback: String): MessageLocation? {
+    val latitude = optDouble("latitude", Double.NaN)
+    val longitude = optDouble("longitude", Double.NaN)
+    if (!latitude.isFinite() || !longitude.isFinite()) return null
+    if (latitude !in -90.0..90.0 || longitude !in -180.0..180.0) return null
+
+    return MessageLocation(
+        latitude = latitude,
+        longitude = longitude,
+        accuracyMeters = optDouble("accuracyMeters", 0.0),
+        capturedAtMillis = optString("capturedAt").ifBlank { createdAtFallback }.toEpochMillisOrZero(),
+        provider = optString("provider").takeIf { it.isNotBlank() }
+    )
+}
+
 private fun parseDeletedForIds(deletedFor: JSONArray?): Set<String> {
     if (deletedFor == null) return emptySet()
     val result = LinkedHashSet<String>()
@@ -174,6 +193,7 @@ private fun String.toSocketMessageType(): MessageType {
         "audio" -> MessageType.Audio
         "voice" -> MessageType.Voice
         "video_note" -> MessageType.VideoNote
+        "location" -> MessageType.Location
         "file" -> MessageType.File
         "system" -> MessageType.System
         else -> MessageType.Text

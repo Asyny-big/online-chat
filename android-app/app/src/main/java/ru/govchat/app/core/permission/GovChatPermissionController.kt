@@ -20,6 +20,10 @@ class GovChatPermissionController(
         return when (feature) {
             GovChatPermissionFeature.Camera -> listOf(Manifest.permission.CAMERA)
             GovChatPermissionFeature.Microphone -> listOf(Manifest.permission.RECORD_AUDIO)
+            GovChatPermissionFeature.Location -> listOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            )
             GovChatPermissionFeature.MediaRead -> {
                 if (sdkInt >= Build.VERSION_CODES.TIRAMISU) {
                     listOf(

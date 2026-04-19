@@ -86,6 +86,7 @@ dependencies {
         exclude(group = "org.json", module = "json")
     }
     implementation(libs.firebase.messaging)
+    implementation(libs.play.services.location)
     implementation(libs.google.webrtc)
     implementation(libs.livekit.android)
     implementation(libs.ktor.client.okhttp)

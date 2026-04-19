@@ -8,6 +8,7 @@ data class ChatMessage(
     val type: MessageType,
     val text: String,
     val attachment: MessageAttachment?,
+    val location: MessageLocation? = null,
     val readByUserIds: Set<String>,
     val createdAtMillis: Long,
     val updatedAtMillis: Long? = null,
@@ -17,6 +18,14 @@ data class ChatMessage(
     val deleted: Boolean = false,
     val deletedForUserIds: Set<String> = emptySet(),
     val deliveryStatus: MessageDeliveryStatus = MessageDeliveryStatus.Delivered
+)
+
+data class MessageLocation(
+    val latitude: Double,
+    val longitude: Double,
+    val accuracyMeters: Double,
+    val capturedAtMillis: Long,
+    val provider: String? = null
 )
 
 data class MessageAttachment(
@@ -35,6 +44,7 @@ enum class MessageType {
     Audio,
     Voice,
     VideoNote,
+    Location,
     File,
     System
 }

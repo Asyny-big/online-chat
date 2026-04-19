@@ -32,6 +32,8 @@ import ru.govchat.app.core.call.CallAudioRoute
 import ru.govchat.app.core.call.CallManager
 import ru.govchat.app.core.call.CallUiPhase
 import ru.govchat.app.core.call.CallUiState
+import ru.govchat.app.core.location.LocationFailure
+import ru.govchat.app.core.location.OnDemandLocationClient
 import ru.govchat.app.core.media.TempMediaStore
 import ru.govchat.app.core.notification.CallNotificationManager
 import ru.govchat.app.core.notification.IncomingCallManagerEvent
@@ -110,6 +112,7 @@ class MainViewModel(
 
     private val applicationContext = appContext.applicationContext
     private val tempMediaStore = TempMediaStore(applicationContext)
+    private val locationClient = OnDemandLocationClient(applicationContext)
     private val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val mutableState = MutableStateFlow(MainUiState(isLoadingChats = true))
     val state: StateFlow<MainUiState> = mutableState.asStateFlow()
@@ -674,6 +677,39 @@ class MainViewModel(
         viewModelScope.launch {
             logoutUseCase()
             mutableState.update { it.copy(sessionExpired = true) }
+        }
+    }
+
+    fun requestPeerLocation() {
+        val chat = mutableState.value.selectedChat ?: return
+        val targetUserId = chat.peerUserId.orEmpty()
+        if (chat.type != ChatType.PRIVATE || chat.isAiChat || targetUserId.isBlank()) {
+            mutableState.update { it.copy(errorMessage = "Геолокацию можно запросить только в личном чате") }
+            return
+        }
+
+        viewModelScope.launch {
+            val result = chatRepository.requestLocation(chatId = chat.id, targetUserId = targetUserId)
+            mutableState.update {
+                it.copy(
+                    errorMessage = result.exceptionOrNull()?.message ?: "Запрос местоположения отправлен"
+                )
+            }
+        }
+    }
+
+    fun setPeerLocationPermission(enabled: Boolean) {
+        val chat = mutableState.value.selectedChat ?: return
+        val allowedUserId = chat.peerUserId.orEmpty()
+        if (chat.type != ChatType.PRIVATE || chat.isAiChat || allowedUserId.isBlank()) return
+
+        viewModelScope.launch {
+            chatRepository.setLocationPermission(allowedUserId = allowedUserId, enabled = enabled)
+                .onFailure { error ->
+                    mutableState.update {
+                        it.copy(errorMessage = error.message ?: "Не удалось обновить доступ к геолокации")
+                    }
+                }
         }
     }
 
@@ -1481,6 +1517,10 @@ class MainViewModel(
 
                 is RealtimeEvent.MessageUpdated -> {
                     applyMessageMutation(normalizeDeliveryStatus(event.message))
+                }
+
+                is RealtimeEvent.LocationFetchRequested -> {
+                    handleLocationFetchRequested(event)
                 }
 
                 is RealtimeEvent.UserStatusChanged -> {
@@ -2482,6 +2522,40 @@ class MainViewModel(
         }
     }
 
+    private fun handleLocationFetchRequested(event: RealtimeEvent.LocationFetchRequested) {
+        viewModelScope.launch {
+            mutableState.update {
+                it.copy(errorMessage = "${event.requesterName.ifBlank { "Контакт" }} запросил местоположение")
+            }
+
+            val result = locationClient.getCurrentLocation()
+            result
+                .onSuccess { location ->
+                    chatRepository.respondToLocationRequest(
+                        requestId = event.requestId,
+                        location = location
+                    )
+                }
+                .onFailure { error ->
+                    val code = (error as? LocationFailure)?.code ?: "DEVICE_LOCATION_UNAVAILABLE"
+                    chatRepository.failLocationRequest(
+                        requestId = event.requestId,
+                        code = code
+                    )
+                    mutableState.update { current ->
+                        current.copy(
+                            errorMessage = when (code) {
+                                "DEVICE_LOCATION_PERMISSION_DENIED" -> "Нет разрешения Android на геолокацию"
+                                "DEVICE_LOCATION_DISABLED" -> "Геолокация выключена на устройстве"
+                                "DEVICE_LOCATION_LOW_ACCURACY" -> "Не удалось получить точное местоположение"
+                                else -> "Не удалось получить местоположение"
+                            }
+                        )
+                    }
+                }
+        }
+    }
+
     private fun updateChatWithMessage(chatId: String, message: ChatMessage, moveToTop: Boolean = true) {
         mutableState.update { current ->
             val index = current.chats.indexOfFirst { it.id == chatId }
@@ -2955,6 +3029,7 @@ private fun ChatMessage.toChatSubtitle(): String {
         MessageType.Audio -> "РЎР‚РЎСџР вЂ№Р’В¤ Р В РІР‚СљР В РЎвЂўР В Р’В»Р В РЎвЂўР РЋР С“Р В РЎвЂўР В Р вЂ Р В РЎвЂўР В Р’Вµ Р РЋР С“Р В РЎвЂўР В РЎвЂўР В Р’В±Р РЋРІР‚В°Р В Р’ВµР В Р вЂ¦Р В РЎвЂР В Р’Вµ"
         MessageType.Image -> "РЎР‚РЎСџРІР‚СљР’В· Р В Р’ВР В Р’В·Р В РЎвЂўР В Р’В±Р РЋР вЂљР В Р’В°Р В Р’В¶Р В Р’ВµР В Р вЂ¦Р В РЎвЂР В Р’Вµ"
         MessageType.Video -> "РЎР‚РЎСџР вЂ№РўС’ Р В РІР‚в„ўР В РЎвЂР В РўвЂР В Р’ВµР В РЎвЂў"
+        MessageType.Location -> "Местоположение"
         MessageType.File -> "РЎР‚РЎСџРІР‚СљР вЂ№ Р В Р’В¤Р В Р’В°Р В РІвЂћвЂ“Р В Р’В»"
         MessageType.System -> text.ifBlank { "Р В Р Р‹Р В РЎвЂР РЋР С“Р РЋРІР‚С™Р В Р’ВµР В РЎВР В Р вЂ¦Р В РЎвЂўР В Р’Вµ Р РЋР С“Р В РЎвЂўР В РЎвЂўР В Р’В±Р РЋРІР‚В°Р В Р’ВµР В Р вЂ¦Р В РЎвЂР В Р’Вµ" }
         MessageType.Text -> text.ifBlank { "Р В Р Р‹Р В РЎвЂўР В РЎвЂўР В Р’В±Р РЋРІР‚В°Р В Р’ВµР В Р вЂ¦Р В РЎвЂР В Р’Вµ" }

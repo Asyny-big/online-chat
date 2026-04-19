@@ -128,6 +128,7 @@ class GovChatAttachmentDownloader(
             MessageType.Audio -> "audio"
             MessageType.Voice -> "voice"
             MessageType.VideoNote -> "video_note"
+            MessageType.Location -> "location"
             MessageType.File -> "file"
             MessageType.System -> "system"
             MessageType.Text -> "message"

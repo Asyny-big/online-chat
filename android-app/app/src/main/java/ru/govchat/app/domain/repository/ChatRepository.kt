@@ -10,6 +10,7 @@ import ru.govchat.app.domain.model.GroupCallStartResult
 import ru.govchat.app.domain.model.RealtimeEvent
 import ru.govchat.app.domain.model.UserProfile
 import ru.govchat.app.domain.model.WebRtcConfig
+import ru.govchat.app.core.location.DeviceLocation
 
 interface ChatRepository {
     suspend fun loadDialogs(): Result<List<ChatPreview>>
@@ -57,6 +58,10 @@ interface ChatRepository {
     fun startTyping(chatId: String)
     fun stopTyping(chatId: String)
     suspend fun joinChat(chatId: String)
+    suspend fun requestLocation(chatId: String, targetUserId: String): Result<Unit>
+    suspend fun setLocationPermission(allowedUserId: String, enabled: Boolean): Result<Unit>
+    fun respondToLocationRequest(requestId: String, location: DeviceLocation)
+    fun failLocationRequest(requestId: String, code: String)
     suspend fun connectRealtime()
     suspend fun disconnectRealtime()
     fun observeRealtimeEvents(): Flow<RealtimeEvent>

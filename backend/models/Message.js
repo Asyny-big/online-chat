@@ -14,7 +14,7 @@ const messageSchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ['text', 'file', 'audio', 'image', 'video', 'voice', 'video_note', 'system'],
+    enum: ['text', 'file', 'audio', 'image', 'video', 'voice', 'video_note', 'location', 'system'],
     default: 'text'
   },
   text: {
@@ -54,6 +54,18 @@ const messageSchema = new mongoose.Schema({
     durationMs: Number,
     thumbnailUrl: String,
     previewUrl: String
+  },
+  location: {
+    latitude: Number,
+    longitude: Number,
+    accuracyMeters: Number,
+    altitudeMeters: Number,
+    headingDegrees: Number,
+    speedMetersPerSecond: Number,
+    provider: String,
+    capturedAt: Date,
+    requestId: String,
+    requestedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }
   },
   deliveredTo: [{
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },

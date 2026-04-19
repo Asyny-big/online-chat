@@ -14,6 +14,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import org.json.JSONArray
 import org.json.JSONObject
+import ru.govchat.app.core.location.DeviceLocation
 import ru.govchat.app.domain.model.CallControlSessionSummary
 import ru.govchat.app.domain.model.CallJoinParticipant
 import ru.govchat.app.domain.model.GroupCallStartResult
@@ -43,7 +44,13 @@ class SocketGateway(
         val options = IO.Options.builder()
             .setTransports(arrayOf(WebSocket.NAME, Polling.NAME))
             .setReconnection(true)
-            .setAuth(mapOf("token" to token))
+            .setAuth(
+                mapOf(
+                    "token" to token,
+                    "platform" to "android",
+                    "supportsOnDemandLocation" to "true"
+                )
+            )
             .build()
 
         val nextSocket = IO.socket(baseUrl, options)
@@ -105,6 +112,23 @@ class SocketGateway(
                 RealtimeEvent.MessageUpdated(
                     chatId = chatId.ifBlank { message.chatId },
                     message = message
+                )
+            )
+        }
+
+        socket.on("location:fetch") { args ->
+            val payload = args.firstOrNull() as? JSONObject ?: return@on
+            val requestId = payload.optString("requestId")
+            val chatId = payload.optString("chatId")
+            val requester = payload.optJSONObject("requester")
+            if (requestId.isBlank() || chatId.isBlank()) return@on
+            emit(
+                RealtimeEvent.LocationFetchRequested(
+                    requestId = requestId,
+                    chatId = chatId,
+                    requesterUserId = requester?.optString("_id").orEmpty(),
+                    requesterName = requester?.optString("name").orEmpty(),
+                    expiresAt = payload.optString("expiresAt")
                 )
             )
         }
@@ -482,6 +506,33 @@ class SocketGateway(
             .put("messageIds", JSONArray(uniqueIds))
 
         socket?.emit("messages:read", payload)
+    }
+
+    fun respondToLocationRequest(requestId: String, location: DeviceLocation) {
+        val payload = JSONObject()
+            .put("requestId", requestId)
+            .put("success", true)
+            .put(
+                "location",
+                JSONObject()
+                    .put("latitude", location.latitude)
+                    .put("longitude", location.longitude)
+                    .put("accuracyMeters", location.accuracyMeters)
+                    .put("provider", location.provider)
+                    .put("capturedAt", location.capturedAt)
+            )
+        location.altitudeMeters?.let { payload.getJSONObject("location").put("altitudeMeters", it) }
+        location.headingDegrees?.let { payload.getJSONObject("location").put("headingDegrees", it) }
+        location.speedMetersPerSecond?.let { payload.getJSONObject("location").put("speedMetersPerSecond", it) }
+        socket?.emit("location:response", payload)
+    }
+
+    fun failLocationRequest(requestId: String, code: String) {
+        val payload = JSONObject()
+            .put("requestId", requestId)
+            .put("success", false)
+            .put("code", code)
+        socket?.emit("location:response", payload)
     }
 
     suspend fun joinChat(chatId: String) {

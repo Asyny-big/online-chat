@@ -59,7 +59,7 @@ const chatSchema = new mongoose.Schema({
     senderId: mongoose.Schema.Types.ObjectId,
     senderName: String,
     createdAt: Date,
-    type: { type: String, enum: ['text', 'file', 'audio', 'image', 'video', 'voice', 'video_note', 'system'] }
+    type: { type: String, enum: ['text', 'file', 'audio', 'image', 'video', 'voice', 'video_note', 'location', 'system'] }
   },
   // Для приватных чатов: уникальный ключ из двух userId
   privateKey: {

@@ -13,6 +13,7 @@ import ru.govchat.app.domain.model.ChatMessage
 import ru.govchat.app.domain.model.ChatPreview
 import ru.govchat.app.domain.model.ChatType
 import ru.govchat.app.domain.model.MessageAttachment
+import ru.govchat.app.domain.model.MessageLocation
 import ru.govchat.app.domain.model.MessageType
 import ru.govchat.app.domain.model.UserProfile
 import ru.govchat.app.domain.model.WebRtcConfig
@@ -82,6 +83,7 @@ fun MessageDto.toDomain(chatIdFallback: String): ChatMessage {
         type = type.toMessageType(),
         text = text,
         attachment = attachment.toDomain(),
+        location = location.toDomain(createdAtFallback = createdAt),
         readByUserIds = readBy,
         createdAtMillis = createdAt.toEpochMillisOrZero(),
         updatedAtMillis = updatedAt.toEpochMillisOrZero().takeIf { it > 0L },
@@ -109,6 +111,7 @@ private fun ru.govchat.app.core.network.LastMessageDto?.toDisplayText(): String 
         "audio" -> "🎤 Голосовое сообщение"
         "image" -> "📷 Изображение"
         "video" -> "🎥 Видео"
+        "location" -> "Местоположение"
         "file" -> "📎 Файл"
         else -> text?.takeIf { it.isNotBlank() } ?: "Сообщение"
     }
@@ -149,6 +152,20 @@ private fun AttachmentDto?.toDomain(): MessageAttachment? {
         sizeBytes = source.size,
         durationMs = source.durationMs ?: source.durationSeconds?.times(1000),
         thumbnailUrl = thumbnailUrl
+    )
+}
+
+private fun ru.govchat.app.core.network.LocationPayloadDto?.toDomain(createdAtFallback: String?): MessageLocation? {
+    val source = this ?: return null
+    val latitude = source.latitude ?: return null
+    val longitude = source.longitude ?: return null
+    if (latitude !in -90.0..90.0 || longitude !in -180.0..180.0) return null
+    return MessageLocation(
+        latitude = latitude,
+        longitude = longitude,
+        accuracyMeters = source.accuracyMeters ?: 0.0,
+        capturedAtMillis = (source.capturedAt ?: createdAtFallback).toEpochMillisOrZero(),
+        provider = source.provider?.takeIf { it.isNotBlank() }
     )
 }
 
@@ -196,6 +213,7 @@ fun String.toMessageType(): MessageType {
         "audio" -> MessageType.Audio
         "voice" -> MessageType.Voice
         "video_note" -> MessageType.VideoNote
+        "location" -> MessageType.Location
         "file" -> MessageType.File
         "system" -> MessageType.System
         else -> MessageType.Text

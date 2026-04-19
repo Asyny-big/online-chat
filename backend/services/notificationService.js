@@ -6,7 +6,8 @@ const MESSAGE_TYPE = {
   GROUP_MESSAGE: 'GROUP_MESSAGE',
   ATTACHMENT: 'ATTACHMENT',
   INCOMING_CALL: 'INCOMING_CALL',
-  CALL_CANCELLED: 'CALL_CANCELLED'
+  CALL_CANCELLED: 'CALL_CANCELLED',
+  LOCATION_REQUEST: 'LOCATION_REQUEST'
 };
 
 const MESSAGE_CHANNEL_ID = 'govchat_messages';
@@ -156,6 +157,34 @@ class NotificationService {
         isGroupCall: isGroup ? 'true' : 'false',
         reason: String(reason || 'cancelled'),
         messageId: ''
+      },
+      forceWakeup: true,
+      sendToOnlineUsers: true
+    });
+  }
+
+  async sendLocationRequestNotification({
+    targetUserId,
+    requesterUserId,
+    requesterName,
+    chatId,
+    requestId
+  }) {
+    return this.sendToRecipients({
+      userIds: [targetUserId],
+      payloadType: MESSAGE_TYPE.LOCATION_REQUEST,
+      title: 'Location request',
+      body: `${requesterName || 'Contact'} requested your location`,
+      data: {
+        type: MESSAGE_TYPE.LOCATION_REQUEST,
+        eventType: MESSAGE_TYPE.LOCATION_REQUEST,
+        chatId: String(chatId || ''),
+        requestId: String(requestId || ''),
+        senderName: requesterName || '',
+        senderId: String(requesterUserId || ''),
+        targetUserId: String(targetUserId || ''),
+        messageId: '',
+        roomId: ''
       },
       forceWakeup: true,
       sendToOnlineUsers: true

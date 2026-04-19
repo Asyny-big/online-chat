@@ -16,6 +16,9 @@ import ru.govchat.app.core.network.UriUploadRequestBody
 import ru.govchat.app.core.network.CreateGroupChatRequest
 import ru.govchat.app.core.network.EditMessageRequest
 import ru.govchat.app.core.storage.SessionStorage
+import ru.govchat.app.core.location.DeviceLocation
+import ru.govchat.app.core.network.LocationPermissionUpdateRequest
+import ru.govchat.app.core.network.LocationRequestCreateRequest
 import ru.govchat.app.data.mapper.toDomain
 import ru.govchat.app.data.mapper.toParticipantsDomain
 import ru.govchat.app.domain.model.AttachmentType
@@ -370,6 +373,36 @@ class ChatRepositoryImpl(
 
     override suspend fun joinChat(chatId: String) {
         socketGateway.joinChat(chatId = chatId)
+    }
+
+    override suspend fun requestLocation(chatId: String, targetUserId: String): Result<Unit> {
+        return runAuthorized {
+            api.requestLocation(
+                LocationRequestCreateRequest(
+                    chatId = chatId,
+                    targetUserId = targetUserId
+                )
+            )
+            Unit
+        }
+    }
+
+    override suspend fun setLocationPermission(allowedUserId: String, enabled: Boolean): Result<Unit> {
+        return runAuthorized {
+            api.setLocationPermission(
+                allowedUserId = allowedUserId,
+                request = LocationPermissionUpdateRequest(enabled = enabled)
+            )
+            Unit
+        }
+    }
+
+    override fun respondToLocationRequest(requestId: String, location: DeviceLocation) {
+        socketGateway.respondToLocationRequest(requestId = requestId, location = location)
+    }
+
+    override fun failLocationRequest(requestId: String, code: String) {
+        socketGateway.failLocationRequest(requestId = requestId, code = code)
     }
 
     override suspend fun connectRealtime() {

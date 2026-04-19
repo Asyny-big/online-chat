@@ -24,6 +24,9 @@ function buildLastMessageText(message) {
   if (messageType === 'video') {
     return '🎥 Видео';
   }
+  if (messageType === 'location') {
+    return 'Location';
+  }
   if (messageType === 'file') {
     return '📎 Файл';
   }

@@ -58,6 +58,10 @@ function ChatWindow({
   currentUserId,
   onStartCall,
   onStartGroupCall,
+  onRequestLocation,
+  locationPermission,
+  locationRequestPending,
+  onSetLocationPermission,
   typingUsers,
   incomingCall,
   incomingGroupCall,
@@ -433,6 +437,14 @@ function ChatWindow({
               <button onClick={() => onStartCall?.('video')} className="header-action-btn" title="Видеозвонок">
                 🎥
               </button>
+              <button
+                onClick={() => onRequestLocation?.()}
+                className="header-action-btn"
+                title="Запросить местоположение"
+                disabled={locationRequestPending || locationPermission?.canRequestTarget !== true}
+              >
+                📍
+              </button>
             </>
           )}
           {isGroupChat && !isAiChat && (
@@ -460,6 +472,19 @@ function ChatWindow({
             </button>
             {showChatMenu && (
               <div className="chat-menu">
+                {!isGroupChat && !isAiChat && (
+                  <button
+                    onClick={() => {
+                      setShowChatMenu(false);
+                      onSetLocationPermission?.(locationPermission?.targetCanRequestMe !== true);
+                    }}
+                    className="chat-menu-item"
+                  >
+                    {locationPermission?.targetCanRequestMe === true
+                      ? 'Запретить запросы геолокации'
+                      : 'Разрешить запросы геолокации'}
+                  </button>
+                )}
                 <button
                   onClick={() => {
                     setShowChatMenu(false);
@@ -783,6 +808,37 @@ function ChatWindow({
           font-size: 20px; line-height: 1;
         }
 
+        .location-card {
+          display: block;
+          width: min(280px, 70vw);
+          overflow: hidden;
+          border-radius: 12px;
+          color: inherit;
+          text-decoration: none;
+          background: rgba(15, 23, 42, 0.28);
+          border: 1px solid rgba(255, 255, 255, 0.16);
+        }
+        .location-map {
+          width: 100%;
+          height: 150px;
+          display: block;
+          border: 0;
+          pointer-events: none;
+          background: #dbeafe;
+        }
+        .location-meta {
+          display: grid;
+          gap: 2px;
+          padding: 9px 10px;
+          font-size: 12px;
+        }
+        .location-meta strong {
+          font-size: 14px;
+        }
+        .location-meta span {
+          opacity: 0.78;
+        }
+
         /* File */
         .file-link {
             display: flex; align-items: center; gap: 10px; padding: 10px;
@@ -967,6 +1023,46 @@ function getMessageStatusMeta(status) {
     return { icon: '✓✓', label: 'Доставлено' };
   }
   return { icon: '✓', label: 'Отправлено' };
+}
+
+function getLocationPayload(message) {
+  const location = message?.location;
+  const latitude = Number(location?.latitude);
+  const longitude = Number(location?.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+
+  return {
+    latitude,
+    longitude,
+    accuracyMeters: Number(location?.accuracyMeters || 0),
+    capturedAt: location?.capturedAt || message?.createdAt
+  };
+}
+
+function formatLocationUpdatedAt(value) {
+  const date = parseMessageDate(value);
+  if (!date) return '';
+  const seconds = Math.max(0, Math.round((Date.now() - date.getTime()) / 1000));
+  if (seconds < 60) return `обновлено ${seconds} сек назад`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `обновлено ${minutes} мин назад`;
+  return `обновлено ${formatMessageTime(value)}`;
+}
+
+function buildOpenStreetMapEmbedUrl(location) {
+  const delta = 0.004;
+  const bbox = [
+    location.longitude - delta,
+    location.latitude - delta,
+    location.longitude + delta,
+    location.latitude + delta
+  ].join(',');
+  const marker = `${location.latitude},${location.longitude}`;
+  return `https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent(bbox)}&layer=mapnik&marker=${encodeURIComponent(marker)}`;
+}
+
+function buildMapUrl(location) {
+  return `https://www.openstreetmap.org/?mlat=${location.latitude}&mlon=${location.longitude}#map=17/${location.latitude}/${location.longitude}`;
 }
 
 function MessageText({ text, className = 'text-content' }) {
@@ -1372,6 +1468,32 @@ function MessageBubble({ message, isMine, onEdit, onDelete, token, chat, current
             {text && <MessageText text={text} className="media-caption" />}
           </div>
         );
+      case 'location': {
+        const location = getLocationPayload(message);
+        if (!location) return <MessageText text="Местоположение недоступно" className="text-content" />;
+        return (
+          <a
+            className="location-card"
+            href={buildMapUrl(location)}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <iframe
+              title="Местоположение"
+              src={buildOpenStreetMapEmbedUrl(location)}
+              className="location-map"
+              loading="lazy"
+            />
+            <div className="location-meta">
+              <strong>Местоположение</strong>
+              <span>
+                {formatLocationUpdatedAt(location.capturedAt)}
+                {location.accuracyMeters > 0 ? ` · точность ${Math.round(location.accuracyMeters)} м` : ''}
+              </span>
+            </div>
+          </a>
+        );
+      }
       case 'file':
         return (
           <button type="button" onClick={downloadAttachment} className="file-link">

@@ -22,6 +22,7 @@ webrtcSdk = "137.7151.05"
 livekit = "2.21.0"
 ktor = "2.3.11"
 googleServices = "4.4.2"
+playServicesLocation = "21.3.0"
 coil = "2.7.0"
 camerax = "1.4.2"
 media3 = "1.5.1"
@@ -60,6 +61,7 @@ moshi-core = { group = "com.squareup.moshi", name = "moshi", version.ref = "mosh
 moshi-kotlin = { group = "com.squareup.moshi", name = "moshi-kotlin", version.ref = "moshi" }
 socket-io-client = { group = "io.socket", name = "socket.io-client", version.ref = "socketIo" }
 firebase-messaging = { group = "com.google.firebase", name = "firebase-messaging", version.ref = "firebaseMessaging" }
+play-services-location = { group = "com.google.android.gms", name = "play-services-location", version.ref = "playServicesLocation" }
 google-webrtc = { group = "io.github.webrtc-sdk", name = "android", version.ref = "webrtcSdk" }
 livekit-android = { group = "io.livekit", name = "livekit-android", version.ref = "livekit" }
 ktor-client-okhttp = { group = "io.ktor", name = "ktor-client-okhttp", version.ref = "ktor" }

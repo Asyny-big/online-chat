@@ -91,6 +91,7 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.BluetoothAudio
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Headset
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.PhoneInTalk
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -263,6 +264,8 @@ fun MainScreen(
     onLoadOlderMessages: () -> Unit,
     onStartCall: (String) -> Unit,
     onStartGroupCall: (String) -> Unit,
+    onRequestLocation: () -> Unit,
+    onSetLocationPermission: (Boolean) -> Unit,
     onConfirmJoinExistingGroupCall: () -> Unit,
     onDismissExistingGroupCallPrompt: () -> Unit,
     onAcceptIncomingCall: () -> Unit,
@@ -633,6 +636,8 @@ fun MainScreen(
                                 onStartGroupCall(type)
                             }
                         },
+                        onRequestLocation = onRequestLocation,
+                        onSetLocationPermission = onSetLocationPermission,
                         onAttachmentClick = { type, attachment ->
                             if (attachment == null) return@ChatContent
                             downloader.download(type, attachment)
@@ -2525,6 +2530,8 @@ private fun ChatContent(
     onLoadOlderMessages: () -> Unit,
     onStartCall: (String) -> Unit,
     onStartGroupCall: (String) -> Unit,
+    onRequestLocation: () -> Unit,
+    onSetLocationPermission: (Boolean) -> Unit,
     onAttachmentClick: (MessageType, MessageAttachment?) -> Unit
 ) {
     val chat = state.selectedChat ?: return
@@ -2721,6 +2728,17 @@ private fun ChatContent(
                             Icon(
                                 imageVector = Icons.Filled.Videocam,
                                 contentDescription = "Видео",
+                                tint = Color(0xFF8296AC),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        IconButton(
+                            onClick = onRequestLocation,
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.LocationOn,
+                                contentDescription = "Запросить местоположение",
                                 tint = Color(0xFF8296AC),
                                 modifier = Modifier.size(20.dp)
                             )
@@ -4966,6 +4984,10 @@ private fun MessageBody(
             }
         }
 
+        MessageType.Location -> {
+            LocationMessageBody(message = message)
+        }
+
         MessageType.System -> {
             MessageTextContent(
                 text = message.text.ifBlank { "Системное сообщение" },
@@ -4975,6 +4997,76 @@ private fun MessageBody(
 
         MessageType.Text -> {
             MessageTextContent(text = message.text, color = Color.White)
+        }
+    }
+}
+
+@Composable
+private fun LocationMessageBody(message: ChatMessage) {
+    val context = LocalContext.current
+    val location = message.location
+    if (location == null) {
+        MessageTextContent(text = "Местоположение недоступно", color = Color.White)
+        return
+    }
+
+    val updatedAt = if (location.capturedAtMillis > 0L) {
+        "обновлено ${formatTime(location.capturedAtMillis)}"
+    } else {
+        "местоположение"
+    }
+    val accuracy = if (location.accuracyMeters > 0.0) {
+        "точность ${location.accuracyMeters.toInt()} м"
+    } else {
+        ""
+    }
+
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = Color(0xFF0F3A4A),
+        modifier = Modifier
+            .widthIn(min = 220.dp, max = 280.dp)
+            .clickable {
+                val uri = Uri.parse("geo:${location.latitude},${location.longitude}?q=${location.latitude},${location.longitude}")
+                val intent = Intent(Intent.ACTION_VIEW, uri)
+                runCatching { context.startActivity(intent) }
+                    .onFailure {
+                        val webUri = Uri.parse("https://www.openstreetmap.org/?mlat=${location.latitude}&mlon=${location.longitude}#map=17/${location.latitude}/${location.longitude}")
+                        context.startActivity(Intent(Intent.ACTION_VIEW, webUri))
+                    }
+            }
+    ) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(118.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(Color(0xFF8DD3C7), Color(0xFF256D85))
+                        )
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.LocationOn,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(40.dp)
+                )
+            }
+            Text(
+                text = "Местоположение",
+                color = Color.White,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = listOf(updatedAt, accuracy).filter { it.isNotBlank() }.joinToString(" · "),
+                color = Color(0xCCFFFFFF),
+                fontSize = 12.sp
+            )
         }
     }
 }
@@ -6087,12 +6179,14 @@ private fun PermissionDeniedDialog(
     val title = when (prompt.feature) {
         GovChatPermissionFeature.Camera -> "Нужен доступ к камере"
         GovChatPermissionFeature.Microphone -> "Нужен доступ к микрофону"
+        GovChatPermissionFeature.Location -> "Нужен доступ к геолокации"
         GovChatPermissionFeature.MediaRead -> "Нужен доступ к файлам"
         GovChatPermissionFeature.Notifications -> "Нужны уведомления"
     }
     val message = when (prompt.feature) {
         GovChatPermissionFeature.Camera -> "Без разрешения камеры нельзя отправлять фото и видео."
         GovChatPermissionFeature.Microphone -> "Без разрешения микрофона недоступны голосовые и звонки."
+        GovChatPermissionFeature.Location -> "Без доступа к геолокации нельзя отвечать на запросы местоположения."
         GovChatPermissionFeature.MediaRead -> "Без доступа к медиа нельзя отправлять и скачивать вложения."
         GovChatPermissionFeature.Notifications -> "Без уведомлений вы можете пропустить важные сообщения."
     }

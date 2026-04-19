@@ -10,6 +10,7 @@ import retrofit2.http.Multipart
 import retrofit2.http.POST
 import retrofit2.http.Part
 import retrofit2.http.Path
+import retrofit2.http.PUT
 import retrofit2.http.Query
 
 interface GovChatApi {
@@ -79,6 +80,22 @@ interface GovChatApi {
 
     @POST("chats/group")
     suspend fun createGroupChat(@Body request: CreateGroupChatRequest): ChatDto
+
+    @GET("location/permissions/{targetUserId}")
+    suspend fun getLocationPermissionStatus(
+        @Path("targetUserId") targetUserId: String
+    ): LocationPermissionStatusDto
+
+    @PUT("location/permissions/{allowedUserId}")
+    suspend fun setLocationPermission(
+        @Path("allowedUserId") allowedUserId: String,
+        @Body request: LocationPermissionUpdateRequest
+    ): LocationPermissionUpdateResponse
+
+    @POST("location/requests")
+    suspend fun requestLocation(
+        @Body request: LocationRequestCreateRequest
+    ): LocationRequestCreateResponse
 }
 
 data class LoginRequest(
@@ -146,6 +163,7 @@ data class MessageDto(
     val type: String = "text",
     val text: String = "",
     val attachment: AttachmentDto? = null,
+    val location: LocationPayloadDto? = null,
     val readBy: List<ReadByDto> = emptyList(),
     val edited: Boolean = false,
     val editedAt: String? = null,
@@ -154,6 +172,18 @@ data class MessageDto(
     val createdAt: String? = null,
     val updatedAt: String? = null,
     val revision: Int = 0
+)
+
+data class LocationPayloadDto(
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val accuracyMeters: Double? = null,
+    val altitudeMeters: Double? = null,
+    val headingDegrees: Double? = null,
+    val speedMetersPerSecond: Double? = null,
+    val provider: String? = null,
+    val capturedAt: String? = null,
+    val requestId: String? = null
 )
 
 data class MessageSenderDto(
@@ -238,6 +268,34 @@ data class CreateGroupChatRequest(
     val name: String,
     val participantPhones: List<String> = emptyList(),
     val participantIds: List<String> = emptyList()
+)
+
+data class LocationPermissionStatusDto(
+    val targetUserId: String,
+    val canRequestTarget: Boolean = false,
+    val targetCanRequestMe: Boolean = false,
+    val rateLimitSeconds: Int = 60,
+    val requestTtlSeconds: Int = 45
+)
+
+data class LocationPermissionUpdateRequest(
+    val enabled: Boolean
+)
+
+data class LocationPermissionUpdateResponse(
+    val success: Boolean = false,
+    val enabled: Boolean = false
+)
+
+data class LocationRequestCreateRequest(
+    val chatId: String,
+    val targetUserId: String
+)
+
+data class LocationRequestCreateResponse(
+    val success: Boolean = false,
+    val requestId: String? = null,
+    val expiresAt: String? = null
 )
 
 data class AndroidAppUpdateDto(

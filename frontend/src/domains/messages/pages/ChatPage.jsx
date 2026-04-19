@@ -199,7 +199,9 @@ function buildChatLastMessage(message) {
     _id: message._id || message.messageId,
     messageId: getMessageIdentity(message),
     type: message.deleted ? 'text' : message.type,
-    text: message.deleted ? DELETED_MESSAGE_TEXT : (message.text || '')
+    text: message.deleted
+      ? DELETED_MESSAGE_TEXT
+      : (message.type === 'location' ? 'Местоположение' : (message.text || ''))
   };
 }
 
@@ -251,6 +253,8 @@ function ChatPageInner({
   const [messages, setMessages] = useState([]);
   const [currentUserId, setCurrentUserId] = useState(null);
   const [typingUsers, setTypingUsers] = useState([]);
+  const [locationPermission, setLocationPermission] = useState(null);
+  const [locationRequestPending, setLocationRequestPending] = useState(false);
 
   // Состояние звонка (для 1-to-1)
   const [callState, setCallState] = useState('idle'); // idle | incoming | outgoing | active
@@ -658,6 +662,67 @@ function ChatPageInner({
     });
   }, [applyUpdatedMessage]);
 
+  const fetchLocationPermission = useCallback(async (chat = selectedChatRef.current) => {
+    const targetUserId = getChatPeerUserId(chat, currentUserIdRef.current);
+    if (!token || !chat || chat.type !== 'private' || !targetUserId || chat.isAiChat === true) {
+      setLocationPermission(null);
+      return null;
+    }
+
+    try {
+      const response = await axios.get(`${API_URL}/location/permissions/${targetUserId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setLocationPermission(response.data || null);
+      return response.data || null;
+    } catch (error) {
+      console.warn('[Location] permission fetch failed:', error?.response?.data || error);
+      setLocationPermission(null);
+      return null;
+    }
+  }, [token]);
+
+  const handleSetLocationPermission = useCallback(async (enabled) => {
+    const chat = selectedChatRef.current;
+    const targetUserId = getChatPeerUserId(chat, currentUserIdRef.current);
+    if (!token || !targetUserId) return;
+
+    try {
+      const response = await axios.put(
+        `${API_URL}/location/permissions/${targetUserId}`,
+        { enabled },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setLocationPermission((current) => ({
+        ...(current || {}),
+        targetUserId,
+        targetCanRequestMe: response.data?.enabled === true
+      }));
+    } catch (error) {
+      console.error('[Location] permission update failed:', error);
+      alert(error.response?.data?.error || 'Не удалось обновить доступ к геолокации');
+    }
+  }, [token]);
+
+  const handleRequestLocation = useCallback(async () => {
+    const chat = selectedChatRef.current;
+    const targetUserId = getChatPeerUserId(chat, currentUserIdRef.current);
+    if (!token || !chat?._id || !targetUserId) return;
+
+    setLocationRequestPending(true);
+    try {
+      await axios.post(
+        `${API_URL}/location/requests`,
+        { chatId: chat._id, targetUserId },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+    } catch (error) {
+      console.error('[Location] request failed:', error);
+      alert(error.response?.data?.error || 'Не удалось запросить местоположение');
+      setLocationRequestPending(false);
+    }
+  }, [token]);
+
   const applyUserPresenceUpdate = useCallback(({ userId, status, lastSeen }) => {
     const normalizedUserId = String(userId || '').trim();
     if (!normalizedUserId) return;
@@ -1029,6 +1094,23 @@ function ChatPageInner({
     });
 
     // Индикатор печати
+    socket.on('location:request:started', () => {
+      setLocationRequestPending(true);
+    });
+
+    socket.on('location:request:completed', () => {
+      setLocationRequestPending(false);
+    });
+
+    socket.on('location:request:failed', (payload = {}) => {
+      setLocationRequestPending(false);
+      alert(payload.error || payload.code || 'Не удалось получить местоположение');
+    });
+
+    socket.on('location:permission-updated', () => {
+      void fetchLocationPermission(selectedChatRef.current);
+    });
+
     socket.on('typing:update', ({ chatId, userId, userName, isTyping }) => {
       setTypingUsers(prev => {
         if (isTyping) {
@@ -1485,7 +1567,7 @@ function ChatPageInner({
       economyProbeTimersRef.current = [];
       socket.disconnect();
     };
-  }, [token, showEarn, applyDeletedMessage, applyIncomingMessage, applyUpdatedMessage, fetchChats, fetchMessagesForChat, shouldHandlePrivateCallEvent, applyUserPresenceUpdate, applyMessagesReceiptUpdate, updateChatUnreadCount, dispatchUnreadRefresh, resetMessageAttention]); // showEarn stable callback from provider
+  }, [token, showEarn, applyDeletedMessage, applyIncomingMessage, applyUpdatedMessage, fetchChats, fetchMessagesForChat, fetchLocationPermission, shouldHandlePrivateCallEvent, applyUserPresenceUpdate, applyMessagesReceiptUpdate, updateChatUnreadCount, dispatchUnreadRefresh, resetMessageAttention]); // showEarn stable callback from provider
 
   useEffect(() => {
     if (!token) return;
@@ -1550,16 +1632,18 @@ function ChatPageInner({
   useEffect(() => {
     if (!token || !selectedChat) {
       setMessages([]);
+      setLocationPermission(null);
       return;
     }
 
     void fetchMessagesForChat(selectedChat._id);
+    void fetchLocationPermission(selectedChat);
 
     // Присоединение к комнате чата
     if (socketRef.current) {
       socketRef.current.emit('chat:join', { chatId: selectedChat._id });
     }
-  }, [token, selectedChat, fetchMessagesForChat]);
+  }, [token, selectedChat, fetchMessagesForChat, fetchLocationPermission]);
 
   const handleSelectChat = (chat) => {
     setSelectedChat(chat);
@@ -1892,6 +1976,10 @@ function ChatPageInner({
           currentUserId={currentUserId}
           onStartCall={handleStartCall}
           onStartGroupCall={handleStartGroupCall}
+          onRequestLocation={handleRequestLocation}
+          locationPermission={locationPermission}
+          locationRequestPending={locationRequestPending}
+          onSetLocationPermission={handleSetLocationPermission}
           typingUsers={typingUsers}
           incomingCall={incomingCallData}
           incomingGroupCall={groupCallState === 'incoming' ? groupCallData : null}
