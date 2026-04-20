@@ -4,7 +4,9 @@ import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.ContextWrapper
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.MediaMetadataRetriever
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
@@ -300,6 +302,7 @@ fun MainScreen(
     onOpenChatFromCallHistory: (String) -> Unit,
     onDeleteCallHistoryEntries: (List<String>) -> Unit,
     onClearCallHistory: () -> Unit,
+    onToggleLocationAutoReply: (Boolean) -> Unit,
     appUpdateState: AppUpdateUiState,
     onStartAppUpdate: () -> Unit,
     onPostponeAppUpdate: () -> Unit,
@@ -634,6 +637,7 @@ fun MainScreen(
                         onOpenChatFromCallHistory = onOpenChatFromCallHistory,
                         onDeleteCallHistoryEntries = onDeleteCallHistoryEntries,
                         onClearCallHistory = onClearCallHistory,
+                        onToggleLocationAutoReply = onToggleLocationAutoReply,
                         appUpdateState = appUpdateState,
                         onStartAppUpdate = onStartAppUpdate,
                         onPostponeAppUpdate = onPostponeAppUpdate,
@@ -980,6 +984,7 @@ private fun ChatsListContent(
     onOpenChatFromCallHistory: (String) -> Unit,
     onDeleteCallHistoryEntries: (List<String>) -> Unit,
     onClearCallHistory: () -> Unit,
+    onToggleLocationAutoReply: (Boolean) -> Unit,
     appUpdateState: AppUpdateUiState,
     onStartAppUpdate: () -> Unit,
     onPostponeAppUpdate: () -> Unit,
@@ -1171,6 +1176,7 @@ private fun ChatsListContent(
                     state = state,
                     onLogout = onLogout,
                     onRefreshProfile = onRefreshProfile,
+                    onToggleLocationAutoReply = onToggleLocationAutoReply,
                     appUpdateState = appUpdateState,
                     onStartAppUpdate = onStartAppUpdate,
                     onPostponeAppUpdate = onPostponeAppUpdate,
@@ -1563,6 +1569,7 @@ private fun ProfileTabContent(
     state: MainUiState,
     onLogout: () -> Unit,
     onRefreshProfile: () -> Unit,
+    onToggleLocationAutoReply: (Boolean) -> Unit,
     appUpdateState: AppUpdateUiState,
     onStartAppUpdate: () -> Unit,
     onPostponeAppUpdate: () -> Unit,
@@ -1570,6 +1577,14 @@ private fun ProfileTabContent(
 ) {
     val profile = state.userProfile
     var showLogoutConfirm by remember { mutableStateOf(false) }
+    var showLocationOnboarding by remember { mutableStateOf(false) }
+
+    if (showLocationOnboarding) {
+        LocationOnboardingDialog(
+            onDismiss = { showLocationOnboarding = false },
+            onSuccess = { onToggleLocationAutoReply(true) }
+        )
+    }
 
     Column(
         modifier = Modifier
@@ -1668,6 +1683,62 @@ private fun ProfileTabContent(
                     title = "Телефон",
                     value = profile?.phone ?: "—"
                 )
+                Divider(
+                    modifier = Modifier.padding(start = 56.dp),
+                    color = Color(0xFF1D2E3D),
+                    thickness = 0.5.dp
+                )
+                // Location Auto Reply toggle
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { 
+                            if (!state.locationAutoReplyEnabled) {
+                                showLocationOnboarding = true
+                            } else {
+                                onToggleLocationAutoReply(false)
+                            }
+                        }
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.LocationOn,
+                        contentDescription = null,
+                        tint = Color(0xFF8296AC),
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Авто-ответ на геолокацию",
+                            color = Color.White,
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Отправлять местоположение по запросу",
+                            color = Color(0xFF8296AC),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    androidx.compose.material3.Switch(
+                        checked = state.locationAutoReplyEnabled,
+                        onCheckedChange = { isChecked ->
+                            if (isChecked) {
+                                showLocationOnboarding = true
+                            } else {
+                                onToggleLocationAutoReply(false)
+                            }
+                        },
+                        colors = androidx.compose.material3.SwitchDefaults.colors(
+                            checkedThumbColor = Color(0xFF1E2C3A),
+                            checkedTrackColor = Color(0xFF5EB5F7),
+                            uncheckedThumbColor = Color(0xFF8296AC),
+                            uncheckedTrackColor = Color(0xFF131A22)
+                        )
+                    )
+                }
             }
         }
 
@@ -6522,4 +6593,150 @@ private fun Long.toReadableSize(): String {
     if (this < 1024L) return "$this Б"
     if (this < 1024L * 1024L) return String.format(java.util.Locale.US, "%.1f КБ", this / 1024f)
     return String.format(java.util.Locale.US, "%.1f МБ", this / (1024f * 1024f))
+}
+
+@Composable
+private fun LocationOnboardingDialog(
+    onDismiss: () -> Unit,
+    onSuccess: () -> Unit
+) {
+    val context = LocalContext.current
+    var step by remember { mutableStateOf(1) } // 1: Explain -> Foreground, 2: Background Explain -> Background, 3: Settings/Success
+
+    val backgroundPermissionLauncher = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        step = 3
+    }
+
+    val foregroundPermissionsLauncher = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val granted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+                      permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (granted) {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                step = 2
+            } else {
+                step = 3
+            }
+        } else {
+            step = 3
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "Авто-ответ на геолокацию",
+                color = Color.White,
+                style = MaterialTheme.typography.titleMedium
+            )
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                if (step == 1) {
+                    Text(
+                        text = "Чтобы приложение могло автоматически отправлять ваше местоположение по запросу, " +
+                               "ему требуется доступ к вашей геолокации.",
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                } else if (step == 2) {
+                    Text(
+                        text = "Для работы в фоновом режиме (даже когда приложение закрыто), " +
+                               "пожалуйста, выберите опцию \"Разрешать всегда\" для доступа к геолокации.",
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                } else if (step == 3) {
+                    val foregroundGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                    val backgroundGranted = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                        ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED
+                    } else true
+                    val locationEnabled = (context.getSystemService(Context.LOCATION_SERVICE) as? android.location.LocationManager)?.isLocationEnabled == true
+                    val batteryIgnored = (context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager)?.isIgnoringBatteryOptimizations(context.packageName) == true
+
+                    Text(
+                        text = "Статус настройки:",
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Доступ к геолокации: ${if (foregroundGranted) "✔" else "❌"}", color = Color.White)
+                    Text("Разрешать всегда: ${if (backgroundGranted) "✔" else "❌"}", color = Color.White)
+                    Text("Геолокация включена (GPS): ${if (locationEnabled) "✔" else "❌"}", color = Color.White)
+                    Text("Батарея без ограничений: ${if (batteryIgnored) "✔" else "❌"}", color = Color.White)
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "Откройте настройки, чтобы проверить и выдать нужные разрешения. Ваше местоположение будет отправляться автоматически.",
+                        color = Color.Gray,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            if (step == 1) {
+                TextButton(onClick = {
+                    foregroundPermissionsLauncher.launch(
+                        arrayOf(
+                            Manifest.permission.ACCESS_FINE_LOCATION,
+                            Manifest.permission.ACCESS_COARSE_LOCATION
+                        )
+                    )
+                }) {
+                    Text("Далее", color = Color(0xFF5EB5F7))
+                }
+            } else if (step == 2) {
+                TextButton(onClick = {
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                        backgroundPermissionLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                    }
+                }) {
+                    Text("Разрешить", color = Color(0xFF5EB5F7))
+                }
+            } else {
+                TextButton(onClick = {
+                    onSuccess()
+                    onDismiss()
+                }) {
+                    Text("Готово", color = Color(0xFF5EB5F7))
+                }
+            }
+        },
+        dismissButton = {
+            if (step == 3) {
+                Column(horizontalAlignment = Alignment.End) {
+                    TextButton(onClick = {
+                        val intent = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                            data = Uri.fromParts("package", context.packageName, null)
+                        }
+                        context.startActivity(intent)
+                    }) {
+                        Text("Настройки приложения", color = Color(0xFF5EB5F7))
+                    }
+                    TextButton(onClick = {
+                        val intent = Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+                        context.startActivity(intent)
+                    }) {
+                        Text("Настройки геолокации", color = Color(0xFF5EB5F7))
+                    }
+                    TextButton(onClick = {
+                        val intent = Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                        context.startActivity(intent)
+                    }) {
+                        Text("Настройки батареи", color = Color(0xFF5EB5F7))
+                    }
+                }
+            } else {
+                TextButton(onClick = onDismiss) {
+                    Text("Отмена", color = Color.Gray)
+                }
+            }
+        },
+        containerColor = Color(0xFF131A22)
+    )
 }

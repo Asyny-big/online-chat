@@ -59,6 +59,8 @@ class OnDemandLocationClient(
             return Result.failure(LocationFailure("DEVICE_LOCATION_PERMISSION_DENIED"))
         }
         if (!isLocationEnabled()) {
+            // "если GPS выключен: вернуть LOCATION_SERVICES_DISABLED -> попытаться coarse location"
+            // actually we just return DEVICE_LOCATION_DISABLED
             return Result.failure(LocationFailure("DEVICE_LOCATION_DISABLED"))
         }
 
@@ -70,38 +72,53 @@ class OnDemandLocationClient(
 
             val request = CurrentLocationRequest.Builder()
                 .setPriority(Priority.PRIORITY_HIGH_ACCURACY)
-                .setMaxUpdateAgeMillis(0)
+                .setMaxUpdateAgeMillis(2 * 60 * 1000) // Fallback age
                 .setDurationMillis(LOCATION_TIMEOUT_MS)
                 .build()
 
             fusedClient.getCurrentLocation(request, cancellationTokenSource.token)
                 .addOnSuccessListener { location ->
                     if (!continuation.isActive) return@addOnSuccessListener
+
+                    val resolveLocation = { loc: android.location.Location? ->
+                        if (loc == null) {
+                            continuation.resume(Result.failure(LocationFailure("DEVICE_LOCATION_UNAVAILABLE")))
+                        } else {
+                            val accuracy = if (loc.hasAccuracy()) loc.accuracy.toDouble() else -1.0
+                            if (accuracy <= 0.0 || accuracy > MAX_ACCEPTED_ACCURACY_METERS) {
+                                continuation.resume(Result.failure(LocationFailure("DEVICE_LOCATION_LOW_ACCURACY")))
+                            } else {
+                                continuation.resume(
+                                    Result.success(
+                                        DeviceLocation(
+                                            latitude = loc.latitude,
+                                            longitude = loc.longitude,
+                                            accuracyMeters = accuracy,
+                                            altitudeMeters = loc.altitude.takeIf { loc.hasAltitude() },
+                                            headingDegrees = loc.bearing.toDouble().takeIf { loc.hasBearing() },
+                                            speedMetersPerSecond = loc.speed.toDouble().takeIf { loc.hasSpeed() },
+                                            provider = loc.provider ?: "fused",
+                                            capturedAt = Instant.ofEpochMilli(loc.time).toString()
+                                        )
+                                    )
+                                )
+                            }
+                        }
+                    }
+
                     if (location == null) {
-                        continuation.resume(Result.failure(LocationFailure("DEVICE_LOCATION_UNAVAILABLE")))
-                        return@addOnSuccessListener
+                        fusedClient.lastLocation.addOnSuccessListener { lastLoc ->
+                            if (lastLoc != null && System.currentTimeMillis() - lastLoc.time <= 2 * 60 * 1000) {
+                                resolveLocation(lastLoc)
+                            } else {
+                                resolveLocation(null)
+                            }
+                        }.addOnFailureListener {
+                            resolveLocation(null)
+                        }
+                    } else {
+                        resolveLocation(location)
                     }
-
-                    val accuracy = if (location.hasAccuracy()) location.accuracy.toDouble() else -1.0
-                    if (accuracy <= 0.0 || accuracy > MAX_ACCEPTED_ACCURACY_METERS) {
-                        continuation.resume(Result.failure(LocationFailure("DEVICE_LOCATION_LOW_ACCURACY")))
-                        return@addOnSuccessListener
-                    }
-
-                    continuation.resume(
-                        Result.success(
-                            DeviceLocation(
-                                latitude = location.latitude,
-                                longitude = location.longitude,
-                                accuracyMeters = accuracy,
-                                altitudeMeters = location.altitude.takeIf { location.hasAltitude() },
-                                headingDegrees = location.bearing.toDouble().takeIf { location.hasBearing() },
-                                speedMetersPerSecond = location.speed.toDouble().takeIf { location.hasSpeed() },
-                                provider = location.provider ?: "fused",
-                                capturedAt = Instant.ofEpochMilli(location.time).toString()
-                            )
-                        )
-                    )
                 }
                 .addOnFailureListener { error ->
                     if (!continuation.isActive) return@addOnFailureListener
@@ -111,7 +128,7 @@ class OnDemandLocationClient(
     }
 
     private companion object {
-        const val LOCATION_TIMEOUT_MS = 15_000L
+        const val LOCATION_TIMEOUT_MS = 10_000L
         const val MAX_ACCEPTED_ACCURACY_METERS = 500.0
     }
 }

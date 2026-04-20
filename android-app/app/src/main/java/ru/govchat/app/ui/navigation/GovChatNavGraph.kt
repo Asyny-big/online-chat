@@ -123,7 +123,8 @@ fun GovChatNavGraph(
                     messagesDiskCache = container.chatMessagesCacheStorage,
                     callHistoryRepository = container.callHistoryRepository,
                     chatRepository = container.chatRepository,
-                    authRepository = container.authRepository
+                    authRepository = container.authRepository,
+                    sessionStorage = container.sessionStorage
                 )
             )
             val state = viewModel.state.collectAsStateWithLifecycle().value
@@ -217,6 +218,7 @@ fun GovChatNavGraph(
                 onOpenChatFromCallHistory = viewModel::openChatFromCallHistory,
                 onDeleteCallHistoryEntries = viewModel::deleteCallHistoryEntries,
                 onClearCallHistory = viewModel::clearCallHistory,
+                onToggleLocationAutoReply = viewModel::toggleLocationAutoReply,
                 appUpdateState = appUpdateState,
                 onStartAppUpdate = onStartAppUpdate,
                 onPostponeAppUpdate = onPostponeAppUpdate,

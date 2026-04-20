@@ -75,12 +75,8 @@ class LocationRequestForegroundService : Service() {
         val chatRepository = container.chatRepository
 
         try {
-            val requesterAllowed = chatRepository.canPeerRequestLocation(requesterUserId).getOrElse { error ->
-                Log.w(TAG, "Failed to resolve peer location permission for requester=$requesterUserId", error)
-                false
-            }
-
-            if (!requesterAllowed) {
+            val autoReplyEnabled = container.sessionStorage.getLocationAutoReplyEnabled()
+            if (!autoReplyEnabled) {
                 showActionNotification(
                     title = "Запрос геолокации",
                     text = "$requesterName запрашивает ваше местоположение. Откройте приложение и подтвердите доступ.",

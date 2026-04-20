@@ -40,6 +40,7 @@ import ru.govchat.app.core.notification.IncomingCallManagerEvent
 import ru.govchat.app.core.notification.NotificationCommand
 import ru.govchat.app.core.notification.NotificationIntents
 import ru.govchat.app.core.storage.ChatMessagesCacheStorage
+import ru.govchat.app.core.storage.SessionStorage
 import ru.govchat.app.core.ui.viewModelFactory
 import ru.govchat.app.domain.model.AttachmentType
 import ru.govchat.app.domain.model.CallHistoryDraft
@@ -107,7 +108,8 @@ class MainViewModel(
     private val messagesDiskCache: ChatMessagesCacheStorage,
     private val callHistoryRepository: CallHistoryRepository,
     private val chatRepository: ChatRepository,
-    private val authRepository: AuthRepository
+    private val authRepository: AuthRepository,
+    private val sessionStorage: SessionStorage
 ) : ViewModel() {
 
     private val applicationContext = appContext.applicationContext
@@ -205,6 +207,11 @@ class MainViewModel(
         }
         viewModelScope.launch {
             observeSession()
+        }
+        viewModelScope.launch {
+            sessionStorage.locationAutoReplyEnabledFlow.collect { enabled ->
+                mutableState.update { it.copy(locationAutoReplyEnabled = enabled) }
+            }
         }
 
         viewModelScope.launch {
@@ -710,6 +717,12 @@ class MainViewModel(
                         it.copy(errorMessage = error.message ?: "Не удалось обновить доступ к геолокации")
                     }
                 }
+        }
+    }
+
+    fun toggleLocationAutoReply(enabled: Boolean) {
+        viewModelScope.launch {
+            sessionStorage.setLocationAutoReplyEnabled(enabled)
         }
     }
 
@@ -2606,13 +2619,9 @@ class MainViewModel(
     private fun handleLocationFetchRequested(event: RealtimeEvent.LocationFetchRequested) {
         Log.d(TAG, "location request received requestId=${event.requestId}, chatId=${event.chatId}, requester=${event.requesterUserId}")
         viewModelScope.launch {
-            val requesterAlreadyAllowed = chatRepository.canPeerRequestLocation(event.requesterUserId)
-                .getOrElse { error ->
-                    Log.w(TAG, "failed to resolve location permission status for requester=${event.requesterUserId}", error)
-                    false
-                }
+            val autoReplyEnabled = sessionStorage.getLocationAutoReplyEnabled()
 
-            if (requesterAlreadyAllowed && locationClient.hasLocationPermission()) {
+            if (autoReplyEnabled && locationClient.hasLocationPermission()) {
                 executeLocationFetch(
                     requestId = event.requestId,
                     requesterName = event.requesterName
@@ -2628,7 +2637,7 @@ class MainViewModel(
                         requesterUserId = event.requesterUserId,
                         requesterName = event.requesterName,
                         expiresAt = event.expiresAt,
-                        awaitingSystemPermission = requesterAlreadyAllowed
+                        awaitingSystemPermission = autoReplyEnabled
                     ),
                     errorMessage = "${event.requesterName.ifBlank { "Контакт" }} запросил доступ к вашему местоположению"
                 )
@@ -3094,7 +3103,8 @@ class MainViewModel(
             messagesDiskCache: ChatMessagesCacheStorage,
             callHistoryRepository: CallHistoryRepository,
             chatRepository: ChatRepository,
-            authRepository: AuthRepository
+            authRepository: AuthRepository,
+            sessionStorage: SessionStorage
         ) = viewModelFactory {
             MainViewModel(
                 appContext = appContext,
@@ -3121,7 +3131,8 @@ class MainViewModel(
                 messagesDiskCache = messagesDiskCache,
                 callHistoryRepository = callHistoryRepository,
                 chatRepository = chatRepository,
-                authRepository = authRepository
+                authRepository = authRepository,
+                sessionStorage = sessionStorage
             )
         }
     }

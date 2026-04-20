@@ -24,6 +24,7 @@ data class MainUiState(
     val activeCall: ActiveCallUi? = null,
     val existingGroupCallPrompt: ExistingGroupCallPromptUi? = null,
     val pendingLocationRequest: PendingLocationRequestUi? = null,
+    val locationAutoReplyEnabled: Boolean = false,
     val isCallActionInProgress: Boolean = false,
     val callErrorMessage: String? = null,
     val errorMessage: String? = null,

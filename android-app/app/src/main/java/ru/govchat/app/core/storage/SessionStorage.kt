@@ -39,6 +39,7 @@ class SessionStorage(
         val userId = stringPreferencesKey("user_id")
         val pendingFcmToken = stringPreferencesKey("pending_fcm_token")
         val currentFcmToken = stringPreferencesKey("current_fcm_token")
+        val locationAutoReplyEnabled = androidx.datastore.preferences.core.booleanPreferencesKey("location_auto_reply_enabled")
     }
 
     private val tokenState = MutableStateFlow<String?>(null)
@@ -53,6 +54,23 @@ class SessionStorage(
         }
         .map { it[Keys.jwtToken] }
         .distinctUntilChanged()
+
+    val locationAutoReplyEnabledFlow = appContext.sessionDataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { it[Keys.locationAutoReplyEnabled] ?: false }
+        .distinctUntilChanged()
+
+    suspend fun getLocationAutoReplyEnabled(): Boolean {
+        return appContext.sessionDataStore.data
+            .map { it[Keys.locationAutoReplyEnabled] ?: false }
+            .first()
+    }
+
+    suspend fun setLocationAutoReplyEnabled(enabled: Boolean) {
+        appContext.sessionDataStore.edit { preferences ->
+            preferences[Keys.locationAutoReplyEnabled] = enabled
+        }
+    }
 
     init {
         applicationScope.launch {

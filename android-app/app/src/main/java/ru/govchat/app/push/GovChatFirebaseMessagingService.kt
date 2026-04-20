@@ -99,15 +99,22 @@ class GovChatFirebaseMessagingService : FirebaseMessagingService() {
                     return
                 }
 
-                LocationRequestForegroundService.start(
-                    context = this,
-                    requestId = requestId,
-                    requesterUserId = requesterUserId,
-                    requesterName = requesterName,
-                    chatId = chatId
-                )
-                Log.i(TAG, "Location request background service started traceId=${pushTraceId.ifBlank { "n/a" }} requestId=$requestId")
-            }
+                serviceScope.launch {
+                    val autoReplyEnabled = (application as GovChatApp).container.sessionStorage.getLocationAutoReplyEnabled()
+                    if (autoReplyEnabled) {
+                        LocationRequestForegroundService.start(
+                            context = applicationContext,
+                            requestId = requestId,
+                            requesterUserId = requesterUserId,
+                            requesterName = requesterName,
+                            chatId = chatId
+                        )
+                        Log.i(TAG, "Location request background service started traceId=${pushTraceId.ifBlank { "n/a" }} requestId=$requestId")
+                    } else {
+                        Log.i(TAG, "Location auto reply is disabled, ignoring location request push requestId=$requestId")
+                    }
+                }
+                }
 
             isCallCancellationEvent -> {
                 val callId = payload.read("callId", "call_id", "roomId", "room_id")
