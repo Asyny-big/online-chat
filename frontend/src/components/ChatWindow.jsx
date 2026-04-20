@@ -7,6 +7,37 @@ import { DuckIcon, MessageIcon, PlusIcon, SearchIcon } from '@/shared/ui/Icons';
 import { parseMessageTextParts } from '@/shared/lib/messageLinks';
 import { getPreferredPlayableAudioMimeType } from '@/utils/audioFormats';
 
+function getLocationActionTitle(locationPermission, locationRequestPending) {
+  if (locationRequestPending) {
+    return 'Запрос уже отправлен. Дождитесь ответа пользователя';
+  }
+  if (!locationPermission) {
+    return 'Статус геолокации ещё загружается';
+  }
+  if (locationPermission.requestAllowed === true) {
+    return 'Запросить местоположение';
+  }
+
+  const code = String(locationPermission.requestDisabledReason || '').trim().toUpperCase();
+  if (code === 'LOCATION_PERMISSION_DENIED') {
+    return 'Пользователь не разрешил доступ к геолокации';
+  }
+  if (code === 'LOCATION_TARGET_OFFLINE') {
+    return 'Пользователь оффлайн или Android-клиент недоступен';
+  }
+  if (code === 'LOCATION_REQUEST_CONFLICT') {
+    return 'Запрос уже отправлен. Дождитесь ответа пользователя';
+  }
+  if (code === 'LOCATION_RATE_LIMIT') {
+    const retryAfterSeconds = Number(locationPermission.retryAfterSeconds || 0);
+    return retryAfterSeconds > 0
+      ? `Подождите перед следующим запросом (${retryAfterSeconds} сек.)`
+      : 'Подождите перед следующим запросом';
+  }
+
+  return String(locationPermission.requestDisabledMessage || '').trim() || 'Запросить местоположение';
+}
+
 function parsePresenceDate(value) {
   if (!value) return null;
   const parsed = new Date(value);
@@ -318,6 +349,10 @@ function ChatWindow({
   const presenceText = !isGroupChat && !isAiChat
     ? formatPresenceText(chat.displayStatus, chat.displayLastSeen)
     : '';
+  const locationActionTitle = getLocationActionTitle(locationPermission, locationRequestPending);
+  const showLocationStatusHint = !isGroupChat && !isAiChat
+    && Boolean(locationActionTitle)
+    && locationActionTitle !== 'Запросить местоположение';
 
   return (
     <div className="chat-window-container">
@@ -424,6 +459,11 @@ function ChatWindow({
               </div>
             )}
           </div>
+          {showLocationStatusHint && (
+            <div className="chat-location-hint" title={locationActionTitle}>
+              {locationActionTitle}
+            </div>
+          )}
         </div>
         <div
           className="header-actions"
@@ -440,8 +480,8 @@ function ChatWindow({
               <button
                 onClick={() => onRequestLocation?.()}
                 className="header-action-btn"
-                title="Запросить местоположение"
-                disabled={locationRequestPending || locationPermission?.canRequestTarget !== true}
+                title={locationActionTitle}
+                disabled={locationRequestPending}
               >
                 📍
               </button>
@@ -655,6 +695,13 @@ function ChatWindow({
         .chat-presence.online { color: #4ade80; }
         .chat-presence.offline { color: var(--text-secondary); }
         .typing-indicator { fontSize: 12px; color: var(--accent); margin-top: 2px; }
+        .chat-location-hint {
+            max-width: 260px;
+            font-size: 12px;
+            line-height: 1.35;
+            color: #fbbf24;
+            text-align: right;
+        }
         .typing-dots { animation: blink 1s infinite; }
 
         .header-actions { display: flex; gap: 8px; align-items: center; }

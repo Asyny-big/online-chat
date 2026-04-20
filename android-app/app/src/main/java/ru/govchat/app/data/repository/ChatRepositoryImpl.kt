@@ -15,6 +15,7 @@ import ru.govchat.app.core.network.SocketGateway
 import ru.govchat.app.core.network.UriUploadRequestBody
 import ru.govchat.app.core.network.CreateGroupChatRequest
 import ru.govchat.app.core.network.EditMessageRequest
+import ru.govchat.app.core.network.extractApiErrorInfo
 import ru.govchat.app.core.storage.SessionStorage
 import ru.govchat.app.core.location.DeviceLocation
 import ru.govchat.app.core.network.LocationPermissionUpdateRequest
@@ -384,6 +385,8 @@ class ChatRepositoryImpl(
                 )
             )
             Unit
+        }.recoverCatching { error ->
+            throw translateLocationRequestError(error)
         }
     }
 
@@ -394,6 +397,8 @@ class ChatRepositoryImpl(
                 request = LocationPermissionUpdateRequest(enabled = enabled)
             )
             Unit
+        }.recoverCatching { error ->
+            throw translateLocationPermissionError(error)
         }
     }
 
@@ -570,6 +575,25 @@ class ChatRepositoryImpl(
         val mimeType: String?,
         val sizeBytes: Long?
     )
+
+    private fun translateLocationRequestError(error: Throwable): Throwable {
+        if (error !is HttpException) return error
+        val info = error.extractApiErrorInfo()
+        val message = when (info.code) {
+            "LOCATION_PERMISSION_DENIED" -> "Пользователь не разрешил доступ к геолокации"
+            "LOCATION_TARGET_OFFLINE" -> "Пользователь оффлайн или Android-клиент недоступен"
+            "LOCATION_REQUEST_CONFLICT" -> "Запрос уже отправлен. Дождитесь ответа пользователя"
+            "LOCATION_RATE_LIMIT" -> "Подождите перед следующим запросом"
+            else -> info.message
+        }
+        return IllegalStateException(message ?: "Не удалось запросить местоположение")
+    }
+
+    private fun translateLocationPermissionError(error: Throwable): Throwable {
+        if (error !is HttpException) return error
+        val info = error.extractApiErrorInfo()
+        return IllegalStateException(info.message ?: "Не удалось обновить доступ к геолокации")
+    }
 
     private companion object {
         const val MAX_ATTACHMENT_SIZE_BYTES = 100L * 1024L * 1024L

@@ -12,6 +12,13 @@ const MAX_ACCEPTED_ACCURACY_METERS = Number(process.env.LOCATION_MAX_ACCURACY_ME
 const pendingRequests = new Map();
 const lastRequestAtByPair = new Map();
 
+const LOCATION_FAILURES = {
+  LOCATION_PERMISSION_DENIED: 'Location access is not granted',
+  LOCATION_TARGET_OFFLINE: 'Target user has no online Android client',
+  LOCATION_REQUEST_CONFLICT: 'Location request is already pending',
+  LOCATION_RATE_LIMIT: 'Too many location requests'
+};
+
 function normalizeId(value) {
   return String(value || '').trim();
 }
@@ -33,6 +40,13 @@ function cleanupPendingRequest(requestId, reason = 'expired') {
   if (!entry) return null;
   if (entry.timeout) clearTimeout(entry.timeout);
   pendingRequests.delete(requestId);
+  console.info('[Location] request cleanup', {
+    requestId,
+    reason,
+    chatId: entry.chatId,
+    requesterUserId: entry.requesterUserId,
+    targetUserId: entry.targetUserId
+  });
   if (reason === 'expired') {
     entry.io.to(`user:${entry.requesterUserId}`).emit('location:request:failed', {
       requestId,
@@ -84,6 +98,80 @@ function findPendingPair(requesterUserId, targetUserId) {
     }
   }
   return null;
+}
+
+function mapDeviceFailureCode(rawCode) {
+  const code = normalizeId(rawCode);
+  switch (code) {
+    case 'DEVICE_LOCATION_PERMISSION_DENIED':
+      return 'LOCATION_PERMISSION_DENIED';
+    case 'DEVICE_LOCATION_DISABLED':
+      return 'LOCATION_SERVICES_DISABLED';
+    case 'DEVICE_LOCATION_LOW_ACCURACY':
+      return 'LOCATION_ACCURACY_TOO_LOW';
+    case 'DEVICE_LOCATION_UNAVAILABLE':
+      return 'LOCATION_UNAVAILABLE';
+    default:
+      return code || 'LOCATION_UNAVAILABLE';
+  }
+}
+
+function buildRequestFailure(status, code, extra = {}) {
+  return {
+    ok: false,
+    status,
+    body: {
+      error: extra.error || LOCATION_FAILURES[code] || code,
+      code,
+      ...extra
+    }
+  };
+}
+
+async function getLocationRequestAvailability({
+  io,
+  userSockets,
+  requesterUserId,
+  targetUserId
+}) {
+  const requester = normalizeId(requesterUserId);
+  const target = normalizeId(targetUserId);
+  const permission = await LocationPermission.findOne({
+    ownerUser: target,
+    allowedUser: requester,
+    enabled: true,
+    revokedAt: null
+  }).lean();
+
+  const existingPending = findPendingPair(requester, target);
+  const pairKey = makePairKey(requester, target);
+  const previousRequestAt = lastRequestAtByPair.get(pairKey) || 0;
+  const retryAfterMs = previousRequestAt + LOCATION_REQUEST_RATE_LIMIT_MS - Date.now();
+  const targetSocketIds = getLiveAndroidSocketIdsForUser({ io, userSockets, userId: target });
+
+  let requestDisabledReason = '';
+  if (!permission) {
+    requestDisabledReason = 'LOCATION_PERMISSION_DENIED';
+  } else if (existingPending) {
+    requestDisabledReason = 'LOCATION_REQUEST_CONFLICT';
+  } else if (retryAfterMs > 0) {
+    requestDisabledReason = 'LOCATION_RATE_LIMIT';
+  } else if (targetSocketIds.length === 0) {
+    requestDisabledReason = 'LOCATION_TARGET_OFFLINE';
+  }
+
+  return {
+    canRequestTarget: Boolean(permission),
+    targetAvailable: targetSocketIds.length > 0,
+    targetSocketCount: targetSocketIds.length,
+    hasPendingRequest: Boolean(existingPending),
+    pendingRequestId: existingPending?.requestId || null,
+    pendingExpiresAt: existingPending?.expiresAt || null,
+    retryAfterSeconds: retryAfterMs > 0 ? Math.ceil(retryAfterMs / 1000) : 0,
+    requestAllowed: !requestDisabledReason,
+    requestDisabledReason: requestDisabledReason || null,
+    requestDisabledMessage: requestDisabledReason ? (LOCATION_FAILURES[requestDisabledReason] || requestDisabledReason) : null
+  };
 }
 
 function validateLocationPayload(location) {
@@ -152,65 +240,66 @@ async function startLocationRequest({
     };
   }
 
-  const permission = await LocationPermission.findOne({
-    ownerUser: targetUserId,
-    allowedUser: requesterUserId,
-    enabled: true,
-    revokedAt: null
-  }).lean();
-  if (!permission) {
-    return {
-      ok: false,
-      status: 403,
-      body: { error: 'Location access is not granted', code: 'LOCATION_ACCESS_DENIED' }
-    };
+  const availability = await getLocationRequestAvailability({
+    io,
+    userSockets,
+    requesterUserId,
+    targetUserId
+  });
+
+  if (!availability.canRequestTarget) {
+    console.warn('[Location] request rejected', {
+      reason: 'permission_denied',
+      chatId,
+      requesterUserId,
+      targetUserId
+    });
+    return buildRequestFailure(403, 'LOCATION_PERMISSION_DENIED');
   }
 
-  const existingPending = findPendingPair(requesterUserId, targetUserId);
-  if (existingPending) {
-    return {
-      ok: false,
-      status: 409,
-      body: {
-        error: 'Location request is already pending',
-        code: 'LOCATION_REQUEST_PENDING',
-        requestId: existingPending.requestId,
-        expiresAt: existingPending.expiresAt
-      }
-    };
+  if (availability.hasPendingRequest) {
+    console.warn('[Location] request rejected', {
+      reason: 'conflict',
+      chatId,
+      requesterUserId,
+      targetUserId,
+      requestId: availability.pendingRequestId,
+      expiresAt: availability.pendingExpiresAt
+    });
+    return buildRequestFailure(409, 'LOCATION_REQUEST_CONFLICT', {
+      requestId: availability.pendingRequestId,
+      expiresAt: availability.pendingExpiresAt
+    });
   }
 
-  const pairKey = makePairKey(requesterUserId, targetUserId);
-  const previousRequestAt = lastRequestAtByPair.get(pairKey) || 0;
-  const retryAfterMs = previousRequestAt + LOCATION_REQUEST_RATE_LIMIT_MS - Date.now();
-  if (retryAfterMs > 0) {
-    return {
-      ok: false,
-      status: 429,
-      body: {
-        error: 'Too many location requests',
-        code: 'LOCATION_RATE_LIMITED',
-        retryAfterSeconds: Math.ceil(retryAfterMs / 1000)
-      }
-    };
+  if (availability.retryAfterSeconds > 0) {
+    console.warn('[Location] request rejected', {
+      reason: 'rate_limit',
+      chatId,
+      requesterUserId,
+      targetUserId,
+      retryAfterSeconds: availability.retryAfterSeconds
+    });
+    return buildRequestFailure(429, 'LOCATION_RATE_LIMIT', {
+      retryAfterSeconds: availability.retryAfterSeconds
+    });
   }
 
-  const targetSocketIds = getLiveAndroidSocketIdsForUser({ io, userSockets, userId: targetUserId });
-  if (targetSocketIds.length === 0) {
-    return {
-      ok: false,
-      status: 409,
-      body: {
-        error: 'Target user has no online Android client',
-        code: 'LOCATION_TARGET_UNAVAILABLE'
-      }
-    };
+  if (!availability.targetAvailable) {
+    console.warn('[Location] request rejected', {
+      reason: 'target_offline',
+      chatId,
+      requesterUserId,
+      targetUserId
+    });
+    return buildRequestFailure(409, 'LOCATION_TARGET_OFFLINE');
   }
 
   const requestId = crypto.randomUUID();
   const now = new Date();
   const expiresAt = new Date(now.getTime() + LOCATION_REQUEST_TTL_MS).toISOString();
   const requesterName = requesterUser?.name || 'Contact';
+  const pairKey = makePairKey(requesterUserId, targetUserId);
 
   const entry = {
     requestId,
@@ -224,6 +313,14 @@ async function startLocationRequest({
   };
   pendingRequests.set(requestId, entry);
   lastRequestAtByPair.set(pairKey, now.getTime());
+  console.info('[Location] request created', {
+    requestId,
+    chatId,
+    requesterUserId,
+    targetUserId,
+    expiresAt,
+    targetSocketCount: availability.targetSocketCount
+  });
 
   await LocationPermission.updateOne(
     { ownerUser: targetUserId, allowedUser: requesterUserId },
@@ -243,7 +340,13 @@ async function startLocationRequest({
     expiresAt,
     requestedAt: now.toISOString()
   };
+  const targetSocketIds = getLiveAndroidSocketIdsForUser({ io, userSockets, userId: targetUserId });
   targetSocketIds.forEach((socketId) => {
+    console.info('[Location] request emitted', {
+      requestId,
+      socketId,
+      targetUserId
+    });
     io.to(socketId).emit('location:fetch', fetchPayload);
   });
 
@@ -275,6 +378,12 @@ async function startLocationRequest({
 
 async function handleLocationResponse({ io, socket, userId, payload }) {
   const requestId = normalizeId(payload?.requestId);
+  console.info('[Location] response received', {
+    requestId,
+    responderUserId: normalizeId(userId),
+    success: payload?.success !== false,
+    code: payload?.code || payload?.reason || null
+  });
   if (!requestId) {
     socket.emit('location:response:ack', {
       success: false,
@@ -304,7 +413,14 @@ async function handleLocationResponse({ io, socket, userId, payload }) {
 
   if (payload?.success === false) {
     cleanupPendingRequest(requestId, 'failed');
-    const code = normalizeId(payload?.code || payload?.reason || 'LOCATION_UNAVAILABLE').slice(0, 80);
+    const code = mapDeviceFailureCode(payload?.code || payload?.reason).slice(0, 80);
+    console.warn('[Location] response failed', {
+      requestId,
+      chatId: entry.chatId,
+      requesterUserId: entry.requesterUserId,
+      targetUserId: entry.targetUserId,
+      code
+    });
     io.to(`user:${entry.requesterUserId}`).emit('location:request:failed', {
       requestId,
       chatId: entry.chatId,
@@ -319,6 +435,13 @@ async function handleLocationResponse({ io, socket, userId, payload }) {
   const validation = validateLocationPayload(payload?.location || payload);
   if (!validation.ok) {
     cleanupPendingRequest(requestId, 'failed');
+    console.warn('[Location] response validation failed', {
+      requestId,
+      chatId: entry.chatId,
+      requesterUserId: entry.requesterUserId,
+      targetUserId: entry.targetUserId,
+      code: validation.code
+    });
     io.to(`user:${entry.requesterUserId}`).emit('location:request:failed', {
       requestId,
       chatId: entry.chatId,
@@ -331,6 +454,12 @@ async function handleLocationResponse({ io, socket, userId, payload }) {
   }
 
   cleanupPendingRequest(requestId, 'completed');
+  console.info('[Location] response accepted', {
+    requestId,
+    chatId: entry.chatId,
+    requesterUserId: entry.requesterUserId,
+    targetUserId: entry.targetUserId
+  });
 
   const message = await Message.create({
     chat: entry.chatId,
@@ -380,6 +509,8 @@ async function handleLocationResponse({ io, socket, userId, payload }) {
 module.exports = {
   LOCATION_REQUEST_RATE_LIMIT_MS,
   LOCATION_REQUEST_TTL_MS,
+  findPendingPair,
+  getLocationRequestAvailability,
   getParticipantUserId,
   getLiveAndroidSocketIdsForUser,
   startLocationRequest,

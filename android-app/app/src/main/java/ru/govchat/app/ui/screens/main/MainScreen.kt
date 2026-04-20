@@ -266,6 +266,8 @@ fun MainScreen(
     onStartGroupCall: (String) -> Unit,
     onRequestLocation: () -> Unit,
     onSetLocationPermission: (Boolean) -> Unit,
+    onApprovePendingLocationRequestPermission: () -> Unit,
+    onRejectPendingLocationRequestPermission: (Boolean) -> Unit,
     onConfirmJoinExistingGroupCall: () -> Unit,
     onDismissExistingGroupCallPrompt: () -> Unit,
     onAcceptIncomingCall: () -> Unit,
@@ -406,6 +408,26 @@ fun MainScreen(
             listOf(GovChatPermissionFeature.Camera, GovChatPermissionFeature.Microphone),
             onGranted
         )
+    }
+    val requestPendingLocationPermission = {
+        permissionFlow.request(GovChatPermissionFeature.Location) { result ->
+            if (result.granted) {
+                onApprovePendingLocationRequestPermission()
+            } else {
+                onRejectPendingLocationRequestPermission(result.permanentlyDenied)
+                permissionPrompt = PermissionPrompt(
+                    feature = GovChatPermissionFeature.Location,
+                    permanentlyDenied = result.permanentlyDenied,
+                    onGranted = onApprovePendingLocationRequestPermission
+                )
+            }
+        }
+    }
+
+    LaunchedEffect(state.pendingLocationRequest?.requestId) {
+        if (state.pendingLocationRequest != null) {
+            requestPendingLocationPermission()
+        }
     }
 
     val mediaProjectionManager = remember(context) {

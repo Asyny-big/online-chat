@@ -1,5 +1,6 @@
 package ru.govchat.app.core.network
 
+import android.util.Log
 import io.socket.client.IO
 import io.socket.client.Ack
 import io.socket.client.Socket
@@ -122,6 +123,7 @@ class SocketGateway(
             val chatId = payload.optString("chatId")
             val requester = payload.optJSONObject("requester")
             if (requestId.isBlank() || chatId.isBlank()) return@on
+            Log.d(TAG, "location:fetch received requestId=$requestId chatId=$chatId requester=${requester?.optString("_id").orEmpty()}")
             emit(
                 RealtimeEvent.LocationFetchRequested(
                     requestId = requestId,
@@ -131,6 +133,18 @@ class SocketGateway(
                     expiresAt = payload.optString("expiresAt")
                 )
             )
+        }
+
+        socket.on("location:response:ack") { args ->
+            val payload = args.firstOrNull() as? JSONObject ?: return@on
+            val requestId = payload.optString("requestId")
+            val success = payload.optBoolean("success")
+            val code = payload.optString("code")
+            if (success) {
+                Log.d(TAG, "location:response ack success requestId=$requestId")
+            } else {
+                Log.w(TAG, "location:response ack failed requestId=$requestId code=$code")
+            }
         }
 
         socket.on("messages:read") { args ->
@@ -509,6 +523,7 @@ class SocketGateway(
     }
 
     fun respondToLocationRequest(requestId: String, location: DeviceLocation) {
+        Log.d(TAG, "location:response emit success requestId=$requestId")
         val payload = JSONObject()
             .put("requestId", requestId)
             .put("success", true)
@@ -528,6 +543,7 @@ class SocketGateway(
     }
 
     fun failLocationRequest(requestId: String, code: String) {
+        Log.w(TAG, "location:response emit failure requestId=$requestId code=$code")
         val payload = JSONObject()
             .put("requestId", requestId)
             .put("success", false)
@@ -942,5 +958,6 @@ class SocketGateway(
 
     private companion object {
         const val SEND_ACK_TIMEOUT_MS = 15_000L
+        const val TAG = "SocketGateway"
     }
 }

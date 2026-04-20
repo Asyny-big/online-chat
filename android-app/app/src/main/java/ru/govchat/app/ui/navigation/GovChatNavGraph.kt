@@ -183,6 +183,8 @@ fun GovChatNavGraph(
                 onStartGroupCall = viewModel::startGroupCall,
                 onRequestLocation = viewModel::requestPeerLocation,
                 onSetLocationPermission = viewModel::setPeerLocationPermission,
+                onApprovePendingLocationRequestPermission = viewModel::approvePendingLocationRequestPermission,
+                onRejectPendingLocationRequestPermission = viewModel::rejectPendingLocationRequestPermission,
                 onConfirmJoinExistingGroupCall = viewModel::confirmJoinExistingGroupCall,
                 onDismissExistingGroupCallPrompt = viewModel::dismissExistingGroupCallPrompt,
                 onAcceptIncomingCall = viewModel::acceptIncomingCall,

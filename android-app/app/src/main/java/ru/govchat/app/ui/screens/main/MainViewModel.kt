@@ -713,6 +713,34 @@ class MainViewModel(
         }
     }
 
+    fun approvePendingLocationRequestPermission() {
+        val pending = mutableState.value.pendingLocationRequest ?: return
+        mutableState.update { it.copy(pendingLocationRequest = null) }
+        executeLocationFetch(
+            requestId = pending.requestId,
+            requesterName = pending.requesterName
+        )
+    }
+
+    fun rejectPendingLocationRequestPermission(permanentlyDenied: Boolean) {
+        val pending = mutableState.value.pendingLocationRequest ?: return
+        mutableState.update {
+            it.copy(
+                pendingLocationRequest = null,
+                errorMessage = if (permanentlyDenied) {
+                    "Разрешите доступ к геолокации в настройках, чтобы отправлять своё местоположение"
+                } else {
+                    "Разрешите доступ к геолокации, чтобы отправлять своё местоположение"
+                }
+            )
+        }
+        Log.w(TAG, "location permission denied for requestId=${pending.requestId}, permanentlyDenied=$permanentlyDenied")
+        chatRepository.failLocationRequest(
+            requestId = pending.requestId,
+            code = "LOCATION_PERMISSION_DENIED"
+        )
+    }
+
     fun startCall(type: String) {
         val chat = mutableState.value.selectedChat ?: return
         if (chat.type == ChatType.GROUP) {
@@ -2523,31 +2551,67 @@ class MainViewModel(
     }
 
     private fun handleLocationFetchRequested(event: RealtimeEvent.LocationFetchRequested) {
+        Log.d(TAG, "location request received requestId=${event.requestId}, chatId=${event.chatId}, requester=${event.requesterUserId}")
+        if (!locationClient.hasLocationPermission()) {
+            mutableState.update {
+                it.copy(
+                    pendingLocationRequest = PendingLocationRequestUi(
+                        requestId = event.requestId,
+                        chatId = event.chatId,
+                        requesterName = event.requesterName,
+                        expiresAt = event.expiresAt
+                    ),
+                    errorMessage = "${event.requesterName.ifBlank { "Контакт" }} запросил местоположение. Разрешите доступ к геолокации"
+                )
+            }
+            return
+        }
+
+        executeLocationFetch(
+            requestId = event.requestId,
+            requesterName = event.requesterName
+        )
+    }
+
+    private fun executeLocationFetch(requestId: String, requesterName: String) {
         viewModelScope.launch {
             mutableState.update {
-                it.copy(errorMessage = "${event.requesterName.ifBlank { "Контакт" }} запросил местоположение")
+                it.copy(errorMessage = "${requesterName.ifBlank { "Контакт" }} запросил местоположение")
             }
 
+            Log.d(TAG, "location fetch started requestId=$requestId")
             val result = locationClient.getCurrentLocation()
             result
                 .onSuccess { location ->
+                    Log.d(
+                        TAG,
+                        "location fetched requestId=$requestId, lat=${location.latitude}, lon=${location.longitude}, accuracy=${location.accuracyMeters}"
+                    )
                     chatRepository.respondToLocationRequest(
-                        requestId = event.requestId,
+                        requestId = requestId,
                         location = location
                     )
+                    Log.d(TAG, "location response sent requestId=$requestId")
                 }
                 .onFailure { error ->
-                    val code = (error as? LocationFailure)?.code ?: "DEVICE_LOCATION_UNAVAILABLE"
+                    val rawCode = (error as? LocationFailure)?.code ?: "DEVICE_LOCATION_UNAVAILABLE"
+                    val responseCode = when (rawCode) {
+                        "DEVICE_LOCATION_PERMISSION_DENIED" -> "LOCATION_PERMISSION_DENIED"
+                        "DEVICE_LOCATION_DISABLED" -> "LOCATION_SERVICES_DISABLED"
+                        "DEVICE_LOCATION_LOW_ACCURACY" -> "LOCATION_ACCURACY_TOO_LOW"
+                        else -> "LOCATION_UNAVAILABLE"
+                    }
+                    Log.w(TAG, "location fetch failed requestId=$requestId, code=$rawCode", error)
                     chatRepository.failLocationRequest(
-                        requestId = event.requestId,
-                        code = code
+                        requestId = requestId,
+                        code = responseCode
                     )
                     mutableState.update { current ->
                         current.copy(
-                            errorMessage = when (code) {
-                                "DEVICE_LOCATION_PERMISSION_DENIED" -> "Нет разрешения Android на геолокацию"
-                                "DEVICE_LOCATION_DISABLED" -> "Геолокация выключена на устройстве"
-                                "DEVICE_LOCATION_LOW_ACCURACY" -> "Не удалось получить точное местоположение"
+                            errorMessage = when (responseCode) {
+                                "LOCATION_PERMISSION_DENIED" -> "Нет разрешения Android на геолокацию"
+                                "LOCATION_SERVICES_DISABLED" -> "Геолокация выключена на устройстве"
+                                "LOCATION_ACCURACY_TOO_LOW" -> "Не удалось получить точное местоположение"
                                 else -> "Не удалось получить местоположение"
                             }
                         )

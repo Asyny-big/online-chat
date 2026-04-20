@@ -9,6 +9,7 @@ const { NotificationService } = require('../services/notificationService');
 const {
   LOCATION_REQUEST_RATE_LIMIT_MS,
   LOCATION_REQUEST_TTL_MS,
+  getLocationRequestAvailability,
   getParticipantUserId,
   startLocationRequest
 } = require('../services/locationRequestService');
@@ -61,11 +62,27 @@ router.get('/permissions/:targetUserId', async (req, res) => {
         revokedAt: null
       }).lean()
     ]);
+    const io = req.app.get('io');
+    const socketData = req.app.get('socketData');
+    const availability = await getLocationRequestAvailability({
+      io,
+      userSockets: socketData?.userSockets,
+      requesterUserId: userId,
+      targetUserId
+    });
 
     return res.json({
       targetUserId,
       canRequestTarget: Boolean(canRequestTarget),
       targetCanRequestMe: Boolean(targetCanRequestMe),
+      targetAvailable: availability.targetAvailable,
+      hasPendingRequest: availability.hasPendingRequest,
+      pendingRequestId: availability.pendingRequestId,
+      pendingExpiresAt: availability.pendingExpiresAt,
+      retryAfterSeconds: availability.retryAfterSeconds,
+      requestAllowed: availability.requestAllowed,
+      requestDisabledReason: availability.requestDisabledReason,
+      requestDisabledMessage: availability.requestDisabledMessage,
       rateLimitSeconds: Math.ceil(LOCATION_REQUEST_RATE_LIMIT_MS / 1000),
       requestTtlSeconds: Math.ceil(LOCATION_REQUEST_TTL_MS / 1000)
     });

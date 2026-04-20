@@ -1,16 +1,17 @@
 {
-  "latestVersion": "1.0-ufo",
-  "latestVersionCode": 6,
+  "latestVersion": "1.0-ufo.1",
+  "latestVersionCode": 7,
   "minSupportedVersion": "1.0",
   "minSupportedVersionCode": 1,
   "forceUpdate": false,
-  "apkFile": "Monstr.apk",
-  "apkSha256": "c4e92b54b7e3b3e9860b3d57c8877534c363b60f6143ce114b8b8f15ca928589",
+  "apkFile": "Trest.apk",
+  "apkSha256": "dc89fe0c73107157259fe23be06b85f8b7f7982c4f92aefb1b5f3865b99db19a",
   "signingCertSha256": [
     "cf75eb6b4475ca93be8b8dd976a89045d2c6f749bde0cac21031fc88302fb5ea"
   ],
   "changelog": [
     "Обновлена Android-сборка для in-app update.",
-    "Актуализированы метаданные релиза и контрольная сумма APK."
+    "Добавлены исправления on-demand геолокации.",
+    "Обновлены метаданные релиза и контрольная сумма APK."
   ]
 }

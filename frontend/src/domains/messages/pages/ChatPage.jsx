@@ -115,6 +115,62 @@ function applyPresenceToChat(chat, { userId, status, lastSeen, viewerUserId }) {
   };
 }
 
+function getLocationErrorMessage(input) {
+  const code = String(
+    input?.code
+      || input?.requestDisabledReason
+      || input?.reason
+      || input
+      || ''
+  ).trim().toUpperCase();
+
+  switch (code) {
+    case 'LOCATION_PERMISSION_DENIED':
+      return 'Пользователь не разрешил доступ к геолокации';
+    case 'LOCATION_TARGET_OFFLINE':
+      return 'Пользователь оффлайн или Android-клиент недоступен';
+    case 'LOCATION_REQUEST_CONFLICT':
+      return 'Запрос уже отправлен. Дождитесь ответа пользователя';
+    case 'LOCATION_RATE_LIMIT':
+      return 'Подождите перед следующим запросом';
+    case 'LOCATION_REQUEST_EXPIRED':
+      return 'Время ожидания местоположения истекло';
+    case 'LOCATION_SERVICES_DISABLED':
+      return 'На устройстве пользователя выключена геолокация';
+    case 'LOCATION_ACCURACY_TOO_LOW':
+      return 'Не удалось получить точное местоположение';
+    case 'LOCATION_UNAVAILABLE':
+      return 'Пользователь не смог отправить местоположение';
+    default:
+      return '';
+  }
+}
+
+function getLocationRequestActionReason(locationPermission, pending) {
+  if (pending) {
+    return 'Запрос уже отправлен. Дождитесь ответа пользователя';
+  }
+  if (!locationPermission) {
+    return 'Статус геолокации ещё загружается';
+  }
+  if (locationPermission.requestAllowed === true) {
+    return '';
+  }
+
+  const mapped = getLocationErrorMessage(locationPermission);
+  if (mapped) {
+    if (
+      String(locationPermission.requestDisabledReason || '').trim().toUpperCase() === 'LOCATION_RATE_LIMIT'
+      && Number(locationPermission.retryAfterSeconds || 0) > 0
+    ) {
+      return `${mapped} (${locationPermission.retryAfterSeconds} сек.)`;
+    }
+    return mapped;
+  }
+
+  return String(locationPermission.requestDisabledMessage || '').trim();
+}
+
 function appendReceiptEntries(message, fieldName, userId, timestampField, timestampValue = null) {
   if (!message) return message;
 
@@ -709,6 +765,12 @@ function ChatPageInner({
     const targetUserId = getChatPeerUserId(chat, currentUserIdRef.current);
     if (!token || !chat?._id || !targetUserId) return;
 
+    const disabledReason = getLocationRequestActionReason(locationPermission, locationRequestPending);
+    if (disabledReason) {
+      alert(disabledReason);
+      return;
+    }
+
     setLocationRequestPending(true);
     try {
       await axios.post(
@@ -718,10 +780,15 @@ function ChatPageInner({
       );
     } catch (error) {
       console.error('[Location] request failed:', error);
-      alert(error.response?.data?.error || 'Не удалось запросить местоположение');
+      const locationErrorMessage =
+        getLocationErrorMessage(error?.response?.data)
+        || error?.response?.data?.error
+        || 'Не удалось запросить местоположение';
       setLocationRequestPending(false);
+      void fetchLocationPermission(chat);
+      return alert(locationErrorMessage);
     }
-  }, [token]);
+  }, [fetchLocationPermission, locationPermission, locationRequestPending, token]);
 
   const applyUserPresenceUpdate = useCallback(({ userId, status, lastSeen }) => {
     const normalizedUserId = String(userId || '').trim();
@@ -1095,19 +1162,31 @@ function ChatPageInner({
 
     // Индикатор печати
     socket.on('location:request:started', () => {
+      console.info('[Location][Web] request started');
       setLocationRequestPending(true);
+      void fetchLocationPermission(selectedChatRef.current);
     });
 
     socket.on('location:request:completed', () => {
+      console.info('[Location][Web] request completed');
       setLocationRequestPending(false);
+      void fetchLocationPermission(selectedChatRef.current);
     });
 
     socket.on('location:request:failed', (payload = {}) => {
+      console.warn('[Location][Web] request failed:', payload);
       setLocationRequestPending(false);
-      alert(payload.error || payload.code || 'Не удалось получить местоположение');
+      void fetchLocationPermission(selectedChatRef.current);
+      return alert(
+        getLocationErrorMessage(payload)
+        || payload.error
+        || payload.code
+        || 'Не удалось получить местоположение'
+      );
     });
 
     socket.on('location:permission-updated', () => {
+      console.info('[Location][Web] permission updated');
       void fetchLocationPermission(selectedChatRef.current);
     });
 
@@ -1533,6 +1612,10 @@ function ChatPageInner({
 
     socket.on('user:status', ({ userId, status, lastSeen }) => {
       applyUserPresenceUpdate({ userId, status, lastSeen });
+      const selectedChat = selectedChatRef.current;
+      if (getChatPeerUserId(selectedChat, currentUserIdRef.current) === String(userId || '').trim()) {
+        void fetchLocationPermission(selectedChat);
+      }
     });
 
     socket.on('wallet:update', (payload) => {

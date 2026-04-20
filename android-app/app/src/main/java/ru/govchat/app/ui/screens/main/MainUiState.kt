@@ -23,6 +23,7 @@ data class MainUiState(
     val incomingCall: IncomingCallUi? = null,
     val activeCall: ActiveCallUi? = null,
     val existingGroupCallPrompt: ExistingGroupCallPromptUi? = null,
+    val pendingLocationRequest: PendingLocationRequestUi? = null,
     val isCallActionInProgress: Boolean = false,
     val callErrorMessage: String? = null,
     val errorMessage: String? = null,
@@ -104,6 +105,13 @@ data class ExistingGroupCallPromptUi(
     val chatId: String,
     val chatName: String,
     val type: String
+)
+
+data class PendingLocationRequestUi(
+    val requestId: String,
+    val chatId: String,
+    val requesterName: String,
+    val expiresAt: String
 )
 
 enum class ActiveCallPhase {
