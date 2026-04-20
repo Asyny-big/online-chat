@@ -19,7 +19,9 @@ import ru.govchat.app.core.network.extractApiErrorInfo
 import ru.govchat.app.core.storage.SessionStorage
 import ru.govchat.app.core.location.DeviceLocation
 import ru.govchat.app.core.network.LocationPermissionUpdateRequest
+import ru.govchat.app.core.network.LocationFailureRequest
 import ru.govchat.app.core.network.LocationRequestCreateRequest
+import ru.govchat.app.core.network.LocationResponseRequest
 import ru.govchat.app.data.mapper.toDomain
 import ru.govchat.app.data.mapper.toParticipantsDomain
 import ru.govchat.app.domain.model.AttachmentType
@@ -405,6 +407,39 @@ class ChatRepositoryImpl(
             Unit
         }.recoverCatching { error ->
             throw translateLocationPermissionError(error)
+        }
+    }
+
+    override suspend fun submitLocationResponse(requestId: String, location: DeviceLocation): Result<Unit> {
+        return runAuthorized {
+            api.submitLocationResponse(
+                requestId = requestId,
+                request = LocationResponseRequest(
+                    latitude = location.latitude,
+                    longitude = location.longitude,
+                    accuracyMeters = location.accuracyMeters,
+                    altitudeMeters = location.altitudeMeters,
+                    headingDegrees = location.headingDegrees,
+                    speedMetersPerSecond = location.speedMetersPerSecond,
+                    provider = location.provider,
+                    capturedAt = location.capturedAt
+                )
+            )
+            Unit
+        }.recoverCatching { error ->
+            throw translateLocationRequestError(error)
+        }
+    }
+
+    override suspend fun submitLocationFailure(requestId: String, code: String, error: String?): Result<Unit> {
+        return runAuthorized {
+            api.submitLocationFailure(
+                requestId = requestId,
+                request = LocationFailureRequest(code = code, error = error)
+            )
+            Unit
+        }.recoverCatching { throwable ->
+            throw translateLocationRequestError(throwable)
         }
     }
 

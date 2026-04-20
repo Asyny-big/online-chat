@@ -11,6 +11,7 @@ object NotificationChannels {
     const val CALLS_CHANNEL_ID = "govchat_calls_active"
     const val INCOMING_CALLS_CHANNEL_ID = "govchat_calls_incoming_v4"
     const val MESSAGES_CHANNEL_ID = "govchat_messages"
+    const val LOCATION_CHANNEL_ID = "govchat_location"
 
     fun ensureCreated(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -50,9 +51,22 @@ object NotificationChannels {
             lockscreenVisibility = Notification.VISIBILITY_PRIVATE
         }
 
+        val locationChannel = NotificationChannel(
+            LOCATION_CHANNEL_ID,
+            "Геолокация",
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "Фоновая отправка геолокации по запросу"
+            setShowBadge(false)
+            lockscreenVisibility = Notification.VISIBILITY_PRIVATE
+            enableVibration(false)
+            setSound(null, null)
+        }
+
         manager.createNotificationChannel(activeCallsChannel)
         manager.createNotificationChannel(incomingCallsChannel)
         manager.createNotificationChannel(messagesChannel)
+        manager.createNotificationChannel(locationChannel)
     }
 }
 

@@ -33,6 +33,14 @@ class OnDemandLocationClient(
         return fine || coarse
     }
 
+    fun hasBackgroundLocationPermission(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return hasLocationPermission()
+        return ContextCompat.checkSelfPermission(
+            appContext,
+            Manifest.permission.ACCESS_BACKGROUND_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
     fun isLocationEnabled(): Boolean {
         val manager = appContext.getSystemService(LocationManager::class.java) ?: return false
         return runCatching {

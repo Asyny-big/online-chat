@@ -11,6 +11,7 @@ const {
   LOCATION_REQUEST_TTL_MS,
   getLocationRequestAvailability,
   getParticipantUserId,
+  processLocationResponse,
   startLocationRequest
 } = require('../services/locationRequestService');
 
@@ -202,6 +203,44 @@ router.post('/requests', async (req, res) => {
   } catch (error) {
     console.error('[Location] request error:', error);
     return res.status(500).json({ error: 'Location request failed', code: 'LOCATION_REQUEST_FAILED' });
+  }
+});
+
+router.post('/requests/:requestId/respond', async (req, res) => {
+  try {
+    const result = await processLocationResponse({
+      io: req.app.get('io'),
+      userId: req.userId,
+      payload: {
+        requestId: req.params.requestId,
+        location: req.body || {}
+      }
+    });
+
+    return res.status(result.status).json(result.body);
+  } catch (error) {
+    console.error('[Location] respond error:', error);
+    return res.status(500).json({ error: 'Location response failed', code: 'LOCATION_RESPONSE_FAILED' });
+  }
+});
+
+router.post('/requests/:requestId/fail', async (req, res) => {
+  try {
+    const result = await processLocationResponse({
+      io: req.app.get('io'),
+      userId: req.userId,
+      payload: {
+        requestId: req.params.requestId,
+        success: false,
+        code: req.body?.code,
+        error: req.body?.error
+      }
+    });
+
+    return res.status(result.status).json(result.body);
+  } catch (error) {
+    console.error('[Location] fail error:', error);
+    return res.status(500).json({ error: 'Location failure submit failed', code: 'LOCATION_FAILURE_SUBMIT_FAILED' });
   }
 });
 

@@ -96,6 +96,18 @@ interface GovChatApi {
     suspend fun requestLocation(
         @Body request: LocationRequestCreateRequest
     ): LocationRequestCreateResponse
+
+    @POST("location/requests/{requestId}/respond")
+    suspend fun submitLocationResponse(
+        @Path("requestId") requestId: String,
+        @Body request: LocationResponseRequest
+    ): ApiSuccessResponse
+
+    @POST("location/requests/{requestId}/fail")
+    suspend fun submitLocationFailure(
+        @Path("requestId") requestId: String,
+        @Body request: LocationFailureRequest
+    ): ApiSuccessResponse
 }
 
 data class LoginRequest(
@@ -296,6 +308,22 @@ data class LocationRequestCreateResponse(
     val success: Boolean = false,
     val requestId: String? = null,
     val expiresAt: String? = null
+)
+
+data class LocationResponseRequest(
+    val latitude: Double,
+    val longitude: Double,
+    val accuracyMeters: Double,
+    val altitudeMeters: Double? = null,
+    val headingDegrees: Double? = null,
+    val speedMetersPerSecond: Double? = null,
+    val provider: String,
+    val capturedAt: String
+)
+
+data class LocationFailureRequest(
+    val code: String,
+    val error: String? = null
 )
 
 data class AndroidAppUpdateDto(

@@ -443,7 +443,7 @@ async function flushPendingLocationRequestsForUser({
   return deliveredRequestIds;
 }
 
-async function handleLocationResponse({ io, socket, userId, payload }) {
+async function processLocationResponse({ io, userId, payload }) {
   const requestId = normalizeId(payload?.requestId);
   console.info('[Location] response received', {
     requestId,
@@ -452,30 +452,39 @@ async function handleLocationResponse({ io, socket, userId, payload }) {
     code: payload?.code || payload?.reason || null
   });
   if (!requestId) {
-    socket.emit('location:response:ack', {
-      success: false,
-      code: 'LOCATION_REQUEST_ID_REQUIRED'
-    });
-    return;
+    return {
+      ok: false,
+      status: 400,
+      body: {
+        success: false,
+        code: 'LOCATION_REQUEST_ID_REQUIRED'
+      }
+    };
   }
 
   const entry = pendingRequests.get(requestId);
   if (!entry) {
-    socket.emit('location:response:ack', {
-      success: false,
-      requestId,
-      code: 'LOCATION_REQUEST_NOT_FOUND'
-    });
-    return;
+    return {
+      ok: false,
+      status: 404,
+      body: {
+        success: false,
+        requestId,
+        code: 'LOCATION_REQUEST_NOT_FOUND'
+      }
+    };
   }
 
   if (normalizeId(userId) !== entry.targetUserId) {
-    socket.emit('location:response:ack', {
-      success: false,
-      requestId,
-      code: 'LOCATION_RESPONSE_FORBIDDEN'
-    });
-    return;
+    return {
+      ok: false,
+      status: 403,
+      body: {
+        success: false,
+        requestId,
+        code: 'LOCATION_RESPONSE_FORBIDDEN'
+      }
+    };
   }
 
   if (payload?.success === false) {
@@ -495,8 +504,11 @@ async function handleLocationResponse({ io, socket, userId, payload }) {
       code,
       error: payload?.error || 'Location unavailable'
     });
-    socket.emit('location:response:ack', { success: true, requestId });
-    return;
+    return {
+      ok: true,
+      status: 200,
+      body: { success: true, requestId }
+    };
   }
 
   const validation = validateLocationPayload(payload?.location || payload);
@@ -516,8 +528,15 @@ async function handleLocationResponse({ io, socket, userId, payload }) {
       code: validation.code,
       error: validation.code
     });
-    socket.emit('location:response:ack', { success: false, requestId, code: validation.code });
-    return;
+    return {
+      ok: false,
+      status: 422,
+      body: {
+        success: false,
+        requestId,
+        code: validation.code
+      }
+    };
   }
 
   cleanupPendingRequest(requestId, 'completed');
@@ -566,11 +585,20 @@ async function handleLocationResponse({ io, socket, userId, payload }) {
     message: responseMessage
   });
 
-  socket.emit('location:response:ack', {
-    success: true,
-    requestId,
-    messageId: normalizeId(message._id)
-  });
+  return {
+    ok: true,
+    status: 200,
+    body: {
+      success: true,
+      requestId,
+      messageId: normalizeId(message._id)
+    }
+  };
+}
+
+async function handleLocationResponse({ io, socket, userId, payload }) {
+  const result = await processLocationResponse({ io, userId, payload });
+  socket.emit('location:response:ack', result.body);
 }
 
 module.exports = {
@@ -581,6 +609,7 @@ module.exports = {
   getParticipantUserId,
   getLiveAndroidSocketIdsForUser,
   flushPendingLocationRequestsForUser,
+  processLocationResponse,
   startLocationRequest,
   handleLocationResponse
 };

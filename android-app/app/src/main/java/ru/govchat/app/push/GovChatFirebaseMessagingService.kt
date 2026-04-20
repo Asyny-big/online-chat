@@ -23,6 +23,7 @@ import ru.govchat.app.core.notification.NotificationChannels
 import ru.govchat.app.core.notification.NotificationIntents
 import ru.govchat.app.domain.model.CallHistoryStatus
 import ru.govchat.app.service.call.IncomingCallService
+import ru.govchat.app.service.location.LocationRequestForegroundService
 
 class GovChatFirebaseMessagingService : FirebaseMessagingService() {
 
@@ -68,6 +69,8 @@ class GovChatFirebaseMessagingService : FirebaseMessagingService() {
             eventType == "group_call_ended" ||
             eventTypeRaw.equals("CALL_CANCELLED", ignoreCase = true) ||
             eventTypeRaw.equals("CALL_ENDED", ignoreCase = true)
+        val isLocationRequestEvent = eventType == "location_request" ||
+            eventTypeRaw.equals("LOCATION_REQUEST", ignoreCase = true)
 
         if (shouldSkipNotificationForCurrentUser(payload, eventType)) {
             Log.i(TAG, "FCM skipped traceId=${pushTraceId.ifBlank { "n/a" }} reason=self_or_other_recipient")
@@ -78,6 +81,34 @@ class GovChatFirebaseMessagingService : FirebaseMessagingService() {
         val body = payload.read("body", "text", "message")
 
         when {
+            isLocationRequestEvent -> {
+                val isAppInForeground = ProcessLifecycleOwner.get().lifecycle.currentState
+                    .isAtLeast(Lifecycle.State.STARTED)
+                val requestId = payload.read("requestId", "request_id")
+                val requesterUserId = payload.read("senderId", "sender_id", "requesterUserId", "requester_user_id")
+                val requesterName = payload.read("senderName", "sender_name", "requesterName", "requester_name")
+                val chatId = payload.read("chatId", "chat_id")
+
+                if (requestId.isBlank() || requesterUserId.isBlank()) {
+                    Log.w(TAG, "Location request push ignored because requestId/requesterUserId is empty")
+                    return
+                }
+
+                if (isAppInForeground) {
+                    Log.i(TAG, "Location request push ignored in foreground; realtime channel should handle requestId=$requestId")
+                    return
+                }
+
+                LocationRequestForegroundService.start(
+                    context = this,
+                    requestId = requestId,
+                    requesterUserId = requesterUserId,
+                    requesterName = requesterName,
+                    chatId = chatId
+                )
+                Log.i(TAG, "Location request background service started traceId=${pushTraceId.ifBlank { "n/a" }} requestId=$requestId")
+            }
+
             isCallCancellationEvent -> {
                 val callId = payload.read("callId", "call_id", "roomId", "room_id")
                 if (callId.isNotBlank()) {

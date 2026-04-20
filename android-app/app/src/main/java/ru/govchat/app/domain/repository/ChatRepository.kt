@@ -61,6 +61,8 @@ interface ChatRepository {
     suspend fun requestLocation(chatId: String, targetUserId: String): Result<Unit>
     suspend fun canPeerRequestLocation(targetUserId: String): Result<Boolean>
     suspend fun setLocationPermission(allowedUserId: String, enabled: Boolean): Result<Unit>
+    suspend fun submitLocationResponse(requestId: String, location: DeviceLocation): Result<Unit>
+    suspend fun submitLocationFailure(requestId: String, code: String, error: String? = null): Result<Unit>
     fun respondToLocationRequest(requestId: String, location: DeviceLocation)
     fun failLocationRequest(requestId: String, code: String)
     suspend fun connectRealtime()

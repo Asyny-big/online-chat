@@ -414,7 +414,16 @@ fun MainScreen(
     val requestPendingLocationPermission = {
         permissionFlow.request(GovChatPermissionFeature.Location) { result ->
             if (result.granted) {
-                onApprovePendingLocationRequestPermission()
+                permissionFlow.request(GovChatPermissionFeature.BackgroundLocation) { backgroundResult ->
+                    if (!backgroundResult.granted) {
+                        permissionPrompt = PermissionPrompt(
+                            feature = GovChatPermissionFeature.BackgroundLocation,
+                            permanentlyDenied = backgroundResult.permanentlyDenied,
+                            onGranted = onApprovePendingLocationRequestPermission
+                        )
+                    }
+                    onApprovePendingLocationRequestPermission()
+                }
             } else {
                 onRejectPendingLocationRequestPermission(result.permanentlyDenied)
                 permissionPrompt = PermissionPrompt(
@@ -6232,6 +6241,7 @@ private fun PermissionDeniedDialog(
         GovChatPermissionFeature.Camera -> "Нужен доступ к камере"
         GovChatPermissionFeature.Microphone -> "Нужен доступ к микрофону"
         GovChatPermissionFeature.Location -> "Нужен доступ к геолокации"
+        GovChatPermissionFeature.BackgroundLocation -> "Нужен фоновый доступ к геолокации"
         GovChatPermissionFeature.MediaRead -> "Нужен доступ к файлам"
         GovChatPermissionFeature.Notifications -> "Нужны уведомления"
     }
@@ -6239,6 +6249,7 @@ private fun PermissionDeniedDialog(
         GovChatPermissionFeature.Camera -> "Без разрешения камеры нельзя отправлять фото и видео."
         GovChatPermissionFeature.Microphone -> "Без разрешения микрофона недоступны голосовые и звонки."
         GovChatPermissionFeature.Location -> "Без доступа к геолокации нельзя отвечать на запросы местоположения."
+        GovChatPermissionFeature.BackgroundLocation -> "Без фонового доступа приложение не сможет автоматически отправлять местоположение, когда оно свернуто или закрыто."
         GovChatPermissionFeature.MediaRead -> "Без доступа к медиа нельзя отправлять и скачивать вложения."
         GovChatPermissionFeature.Notifications -> "Без уведомлений вы можете пропустить важные сообщения."
     }

@@ -4,6 +4,7 @@ enum class GovChatPermissionFeature {
     Camera,
     Microphone,
     Location,
+    BackgroundLocation,
     MediaRead,
     Notifications
 }

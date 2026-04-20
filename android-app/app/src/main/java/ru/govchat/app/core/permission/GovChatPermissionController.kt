@@ -24,6 +24,13 @@ class GovChatPermissionController(
                 Manifest.permission.ACCESS_FINE_LOCATION,
                 Manifest.permission.ACCESS_COARSE_LOCATION
             )
+            GovChatPermissionFeature.BackgroundLocation -> {
+                if (sdkInt >= Build.VERSION_CODES.Q) {
+                    listOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                } else {
+                    emptyList()
+                }
+            }
             GovChatPermissionFeature.MediaRead -> {
                 if (sdkInt >= Build.VERSION_CODES.TIRAMISU) {
                     listOf(
