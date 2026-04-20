@@ -284,16 +284,6 @@ async function startLocationRequest({
     targetUserId
   });
 
-  if (!availability.canRequestTarget) {
-    console.warn('[Location] request rejected', {
-      reason: 'permission_denied',
-      chatId,
-      requesterUserId,
-      targetUserId
-    });
-    return buildRequestFailure(403, 'LOCATION_PERMISSION_DENIED');
-  }
-
   if (availability.hasPendingRequest) {
     console.warn('[Location] request rejected', {
       reason: 'conflict',
