@@ -110,8 +110,10 @@ data class ExistingGroupCallPromptUi(
 data class PendingLocationRequestUi(
     val requestId: String,
     val chatId: String,
+    val requesterUserId: String,
     val requesterName: String,
-    val expiresAt: String
+    val expiresAt: String,
+    val awaitingSystemPermission: Boolean = false
 )
 
 enum class ActiveCallPhase {

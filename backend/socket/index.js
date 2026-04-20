@@ -29,7 +29,10 @@ const {
   rememberAiUserMessage
 } = require('../services/aiChatService');
 const { startPrivateCallFlow, syncActiveCallsForUser } = require('../services/callOrchestrator');
-const { handleLocationResponse } = require('../services/locationRequestService');
+const {
+  handleLocationResponse,
+  flushPendingLocationRequestsForUser
+} = require('../services/locationRequestService');
 const {
   recordCallMetric,
   recordDroppedRealtimeEvent,
@@ -538,6 +541,19 @@ io.on('connection', async (socket) => {
     }
 
     broadcastUserStatus(io, userId, 'online', null);
+    Promise.resolve(
+      socket.data?.platform === 'android' && socket.data?.supportsOnDemandLocation === true
+        ? flushPendingLocationRequestsForUser({
+            io,
+            userSockets,
+            userId,
+            socketId: socket.id
+          })
+        : null
+    ).catch((error) => {
+      console.warn('[Location] pending request flush failed:', error?.message || error);
+    });
+
     Promise.resolve(
       syncActiveCallsForUser({
         app: appFacade,

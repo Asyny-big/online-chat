@@ -59,6 +59,7 @@ interface ChatRepository {
     fun stopTyping(chatId: String)
     suspend fun joinChat(chatId: String)
     suspend fun requestLocation(chatId: String, targetUserId: String): Result<Unit>
+    suspend fun canPeerRequestLocation(targetUserId: String): Result<Boolean>
     suspend fun setLocationPermission(allowedUserId: String, enabled: Boolean): Result<Unit>
     fun respondToLocationRequest(requestId: String, location: DeviceLocation)
     fun failLocationRequest(requestId: String, code: String)

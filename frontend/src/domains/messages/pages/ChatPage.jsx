@@ -773,11 +773,14 @@ function ChatPageInner({
 
     setLocationRequestPending(true);
     try {
-      await axios.post(
+      const response = await axios.post(
         `${API_URL}/location/requests`,
         { chatId: chat._id, targetUserId },
         { headers: { Authorization: `Bearer ${token}` } }
       );
+      if (response?.data?.requiresPermissionApproval) {
+        alert('Запрос доступа к геолокации отправлен. Пользователь должен подтвердить его в Android-приложении.');
+      }
     } catch (error) {
       console.error('[Location] request failed:', error);
       const locationErrorMessage =

@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const Chat = require('../models/Chat');
 const Message = require('../models/Message');
 const LocationPermission = require('../models/LocationPermission');
+const UserDevice = require('../models/UserDevice');
 const { buildLastMessagePayload } = require('./messageStateService');
 
 const LOCATION_REQUEST_TTL_MS = Number(process.env.LOCATION_REQUEST_TTL_MS || 45_000);
@@ -59,6 +60,19 @@ function cleanupPendingRequest(requestId, reason = 'expired') {
   return entry;
 }
 
+function buildFetchPayload(entry) {
+  return {
+    requestId: entry.requestId,
+    chatId: entry.chatId,
+    requester: {
+      _id: entry.requesterUserId,
+      name: entry.requesterName || 'Contact'
+    },
+    expiresAt: entry.expiresAt,
+    requestedAt: entry.createdAt
+  };
+}
+
 function getLiveAndroidSocketIdsForUser({ io, userSockets, userId }) {
   const key = normalizeId(userId);
   if (!key) return [];
@@ -87,6 +101,28 @@ function getLiveAndroidSocketIdsForUser({ io, userSockets, userId }) {
   }
 
   return liveAndroidSocketIds;
+}
+
+async function hasAndroidDeliveryTarget({ io, userSockets, userId }) {
+  const liveSocketIds = getLiveAndroidSocketIdsForUser({ io, userSockets, userId });
+  if (liveSocketIds.length > 0) {
+    return {
+      targetAvailable: true,
+      targetSocketIds: liveSocketIds,
+      hasPushTarget: true
+    };
+  }
+
+  const hasPushTarget = Boolean(await UserDevice.exists({
+    userId: normalizeId(userId),
+    platform: 'android'
+  }));
+
+  return {
+    targetAvailable: hasPushTarget,
+    targetSocketIds: [],
+    hasPushTarget
+  };
 }
 
 function findPendingPair(requesterUserId, targetUserId) {
@@ -147,23 +183,24 @@ async function getLocationRequestAvailability({
   const pairKey = makePairKey(requester, target);
   const previousRequestAt = lastRequestAtByPair.get(pairKey) || 0;
   const retryAfterMs = previousRequestAt + LOCATION_REQUEST_RATE_LIMIT_MS - Date.now();
-  const targetSocketIds = getLiveAndroidSocketIdsForUser({ io, userSockets, userId: target });
+  const delivery = await hasAndroidDeliveryTarget({ io, userSockets, userId: target });
 
   let requestDisabledReason = '';
-  if (!permission) {
-    requestDisabledReason = 'LOCATION_PERMISSION_DENIED';
-  } else if (existingPending) {
+  if (existingPending) {
     requestDisabledReason = 'LOCATION_REQUEST_CONFLICT';
   } else if (retryAfterMs > 0) {
     requestDisabledReason = 'LOCATION_RATE_LIMIT';
-  } else if (targetSocketIds.length === 0) {
+  } else if (!delivery.targetAvailable) {
     requestDisabledReason = 'LOCATION_TARGET_OFFLINE';
   }
 
   return {
     canRequestTarget: Boolean(permission),
-    targetAvailable: targetSocketIds.length > 0,
-    targetSocketCount: targetSocketIds.length,
+    requiresPermissionApproval: !permission,
+    targetAvailable: delivery.targetAvailable,
+    targetSocketCount: delivery.targetSocketIds.length,
+    targetRealtimeAvailable: delivery.targetSocketIds.length > 0,
+    targetHasPushTarget: delivery.hasPushTarget,
     hasPendingRequest: Boolean(existingPending),
     pendingRequestId: existingPending?.requestId || null,
     pendingExpiresAt: existingPending?.expiresAt || null,
@@ -306,9 +343,11 @@ async function startLocationRequest({
     chatId,
     requesterUserId,
     targetUserId,
+    requesterName,
     createdAt: now.toISOString(),
     expiresAt,
     io,
+    deliveredSocketIds: new Set(),
     timeout: setTimeout(() => cleanupPendingRequest(requestId, 'expired'), LOCATION_REQUEST_TTL_MS)
   };
   pendingRequests.set(requestId, entry);
@@ -319,7 +358,9 @@ async function startLocationRequest({
     requesterUserId,
     targetUserId,
     expiresAt,
-    targetSocketCount: availability.targetSocketCount
+    targetSocketCount: availability.targetSocketCount,
+    requiresPermissionApproval: availability.requiresPermissionApproval,
+    targetRealtimeAvailable: availability.targetRealtimeAvailable
   });
 
   await LocationPermission.updateOne(
@@ -330,31 +371,19 @@ async function startLocationRequest({
     }
   );
 
-  const fetchPayload = {
-    requestId,
-    chatId,
-    requester: {
-      _id: requesterUserId,
-      name: requesterName
-    },
-    expiresAt,
-    requestedAt: now.toISOString()
-  };
-  const targetSocketIds = getLiveAndroidSocketIdsForUser({ io, userSockets, userId: targetUserId });
-  targetSocketIds.forEach((socketId) => {
-    console.info('[Location] request emitted', {
-      requestId,
-      socketId,
-      targetUserId
-    });
-    io.to(socketId).emit('location:fetch', fetchPayload);
+  await flushPendingLocationRequestsForUser({
+    io,
+    userSockets,
+    userId: targetUserId
   });
 
   io.to(`user:${requesterUserId}`).emit('location:request:started', {
     requestId,
     chatId,
     targetUserId,
-    expiresAt
+    expiresAt,
+    requiresPermissionApproval: availability.requiresPermissionApproval,
+    targetRealtimeAvailable: availability.targetRealtimeAvailable
   });
 
   Promise.resolve(
@@ -372,8 +401,56 @@ async function startLocationRequest({
   return {
     ok: true,
     status: 202,
-    body: { success: true, requestId, expiresAt }
+    body: {
+      success: true,
+      requestId,
+      expiresAt,
+      requiresPermissionApproval: availability.requiresPermissionApproval,
+      targetRealtimeAvailable: availability.targetRealtimeAvailable
+    }
   };
+}
+
+async function flushPendingLocationRequestsForUser({
+  io,
+  userSockets,
+  userId,
+  socketId = null
+}) {
+  const normalizedUserId = normalizeId(userId);
+  if (!normalizedUserId) return [];
+
+  const liveSocketIds = getLiveAndroidSocketIdsForUser({ io, userSockets, userId: normalizedUserId });
+  const targetSocketIds = socketId
+    ? liveSocketIds.filter((candidate) => candidate === socketId)
+    : liveSocketIds;
+
+  if (targetSocketIds.length === 0) return [];
+
+  const deliveredRequestIds = [];
+  for (const entry of pendingRequests.values()) {
+    if (entry.targetUserId !== normalizedUserId) continue;
+    if (Date.parse(entry.expiresAt || '') <= Date.now()) {
+      cleanupPendingRequest(entry.requestId, 'expired');
+      continue;
+    }
+
+    const fetchPayload = buildFetchPayload(entry);
+    targetSocketIds.forEach((targetSocketId) => {
+      if (entry.deliveredSocketIds?.has?.(targetSocketId)) return;
+      entry.deliveredSocketIds?.add?.(targetSocketId);
+      console.info('[Location] request emitted', {
+        requestId: entry.requestId,
+        socketId: targetSocketId,
+        targetUserId: normalizedUserId,
+        replay: true
+      });
+      io.to(targetSocketId).emit('location:fetch', fetchPayload);
+      deliveredRequestIds.push(entry.requestId);
+    });
+  }
+
+  return deliveredRequestIds;
 }
 
 async function handleLocationResponse({ io, socket, userId, payload }) {
@@ -513,6 +590,7 @@ module.exports = {
   getLocationRequestAvailability,
   getParticipantUserId,
   getLiveAndroidSocketIdsForUser,
+  flushPendingLocationRequestsForUser,
   startLocationRequest,
   handleLocationResponse
 };

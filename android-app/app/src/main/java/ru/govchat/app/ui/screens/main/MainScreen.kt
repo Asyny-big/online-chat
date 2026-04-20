@@ -266,6 +266,8 @@ fun MainScreen(
     onStartGroupCall: (String) -> Unit,
     onRequestLocation: () -> Unit,
     onSetLocationPermission: (Boolean) -> Unit,
+    onConfirmPendingLocationRequest: () -> Unit,
+    onDeclinePendingLocationRequest: () -> Unit,
     onApprovePendingLocationRequestPermission: () -> Unit,
     onRejectPendingLocationRequestPermission: (Boolean) -> Unit,
     onConfirmJoinExistingGroupCall: () -> Unit,
@@ -424,8 +426,11 @@ fun MainScreen(
         }
     }
 
-    LaunchedEffect(state.pendingLocationRequest?.requestId) {
-        if (state.pendingLocationRequest != null) {
+    LaunchedEffect(
+        state.pendingLocationRequest?.requestId,
+        state.pendingLocationRequest?.awaitingSystemPermission
+    ) {
+        if (state.pendingLocationRequest?.awaitingSystemPermission == true) {
             requestPendingLocationPermission()
         }
     }
@@ -869,6 +874,31 @@ fun MainScreen(
             },
             dismissButton = {
                 TextButton(onClick = onDenyRemoteControl) {
+                    Text("Отклонить")
+                }
+            }
+        )
+    }
+
+    val pendingLocationRequest = state.pendingLocationRequest
+    if (
+        pendingLocationRequest != null &&
+        !pendingLocationRequest.awaitingSystemPermission &&
+        !isInPictureInPictureMode
+    ) {
+        AlertDialog(
+            onDismissRequest = onDeclinePendingLocationRequest,
+            title = { Text("Запрос геолокации") },
+            text = {
+                Text("${pendingLocationRequest.requesterName.ifBlank { "Контакт" }} запрашивает ваше текущее местоположение. Разрешить доступ?")
+            },
+            confirmButton = {
+                TextButton(onClick = onConfirmPendingLocationRequest) {
+                    Text("Разрешить")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onDeclinePendingLocationRequest) {
                     Text("Отклонить")
                 }
             }

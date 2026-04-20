@@ -713,12 +713,65 @@ class MainViewModel(
         }
     }
 
+    fun confirmPendingLocationRequest() {
+        val pending = mutableState.value.pendingLocationRequest ?: return
+        viewModelScope.launch {
+            chatRepository.setLocationPermission(
+                allowedUserId = pending.requesterUserId,
+                enabled = true
+            ).onFailure { error ->
+                mutableState.update {
+                    it.copy(
+                        pendingLocationRequest = null,
+                        errorMessage = error.message ?: "Не удалось разрешить доступ к геолокации"
+                    )
+                }
+                chatRepository.failLocationRequest(
+                    requestId = pending.requestId,
+                    code = "LOCATION_UNAVAILABLE"
+                )
+                return@launch
+            }
+
+            if (!locationClient.hasLocationPermission()) {
+                mutableState.update {
+                    it.copy(
+                        pendingLocationRequest = pending.copy(awaitingSystemPermission = true),
+                        errorMessage = "${pending.requesterName.ifBlank { "Контакт" }} запросил местоположение. Разрешите доступ к геолокации"
+                    )
+                }
+                return@launch
+            }
+
+            mutableState.update { it.copy(pendingLocationRequest = null) }
+            executeLocationFetch(
+                requestId = pending.requestId,
+                requesterName = pending.requesterName
+            )
+        }
+    }
+
     fun approvePendingLocationRequestPermission() {
         val pending = mutableState.value.pendingLocationRequest ?: return
         mutableState.update { it.copy(pendingLocationRequest = null) }
         executeLocationFetch(
             requestId = pending.requestId,
             requesterName = pending.requesterName
+        )
+    }
+
+    fun declinePendingLocationRequest() {
+        val pending = mutableState.value.pendingLocationRequest ?: return
+        mutableState.update {
+            it.copy(
+                pendingLocationRequest = null,
+                errorMessage = "Запрос доступа к геолокации отклонён"
+            )
+        }
+        Log.w(TAG, "location request declined requestId=${pending.requestId}")
+        chatRepository.failLocationRequest(
+            requestId = pending.requestId,
+            code = "LOCATION_PERMISSION_DENIED"
         )
     }
 
@@ -2552,25 +2605,35 @@ class MainViewModel(
 
     private fun handleLocationFetchRequested(event: RealtimeEvent.LocationFetchRequested) {
         Log.d(TAG, "location request received requestId=${event.requestId}, chatId=${event.chatId}, requester=${event.requesterUserId}")
-        if (!locationClient.hasLocationPermission()) {
+        viewModelScope.launch {
+            val requesterAlreadyAllowed = chatRepository.canPeerRequestLocation(event.requesterUserId)
+                .getOrElse { error ->
+                    Log.w(TAG, "failed to resolve location permission status for requester=${event.requesterUserId}", error)
+                    false
+                }
+
+            if (requesterAlreadyAllowed && locationClient.hasLocationPermission()) {
+                executeLocationFetch(
+                    requestId = event.requestId,
+                    requesterName = event.requesterName
+                )
+                return@launch
+            }
+
             mutableState.update {
                 it.copy(
                     pendingLocationRequest = PendingLocationRequestUi(
                         requestId = event.requestId,
                         chatId = event.chatId,
+                        requesterUserId = event.requesterUserId,
                         requesterName = event.requesterName,
-                        expiresAt = event.expiresAt
+                        expiresAt = event.expiresAt,
+                        awaitingSystemPermission = requesterAlreadyAllowed
                     ),
-                    errorMessage = "${event.requesterName.ifBlank { "Контакт" }} запросил местоположение. Разрешите доступ к геолокации"
+                    errorMessage = "${event.requesterName.ifBlank { "Контакт" }} запросил доступ к вашему местоположению"
                 )
             }
-            return
         }
-
-        executeLocationFetch(
-            requestId = event.requestId,
-            requesterName = event.requesterName
-        )
     }
 
     private fun executeLocationFetch(requestId: String, requesterName: String) {

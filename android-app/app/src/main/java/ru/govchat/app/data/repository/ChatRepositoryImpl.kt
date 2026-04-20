@@ -390,6 +390,12 @@ class ChatRepositoryImpl(
         }
     }
 
+    override suspend fun canPeerRequestLocation(targetUserId: String): Result<Boolean> {
+        return runAuthorized {
+            api.getLocationPermissionStatus(targetUserId).targetCanRequestMe
+        }
+    }
+
     override suspend fun setLocationPermission(allowedUserId: String, enabled: Boolean): Result<Unit> {
         return runAuthorized {
             api.setLocationPermission(
@@ -580,7 +586,7 @@ class ChatRepositoryImpl(
         if (error !is HttpException) return error
         val info = error.extractApiErrorInfo()
         val message = when (info.code) {
-            "LOCATION_PERMISSION_DENIED" -> "Пользователь не разрешил доступ к геолокации"
+            "LOCATION_PERMISSION_DENIED" -> "Пользователь отклонил запрос доступа к геолокации"
             "LOCATION_TARGET_OFFLINE" -> "Пользователь оффлайн или Android-клиент недоступен"
             "LOCATION_REQUEST_CONFLICT" -> "Запрос уже отправлен. Дождитесь ответа пользователя"
             "LOCATION_RATE_LIMIT" -> "Подождите перед следующим запросом"
