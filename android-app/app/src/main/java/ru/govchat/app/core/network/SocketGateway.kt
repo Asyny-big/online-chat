@@ -42,6 +42,8 @@ class SocketGateway(
 
         disconnect()
 
+        Log.i(TAG, "Connecting realtime socket to $baseUrl")
+
         val options = IO.Options.builder()
             .setTransports(arrayOf(WebSocket.NAME, Polling.NAME))
             .setReconnection(true)
@@ -74,11 +76,29 @@ class SocketGateway(
 
     private fun bindListeners(socket: Socket) {
         socket.on(Socket.EVENT_CONNECT) {
+            Log.i(TAG, "Socket connected")
             emit(RealtimeEvent.SocketConnected)
         }
 
         socket.on(Socket.EVENT_DISCONNECT) {
+            Log.w(TAG, "Socket disconnected: ${it.firstOrNull()}")
             emit(RealtimeEvent.SocketDisconnected)
+        }
+
+        socket.on(Socket.EVENT_CONNECT_ERROR) {
+            Log.e(TAG, "Socket connect_error: ${it.joinToString(limit = 3)}")
+        }
+
+        socket.on("connect_timeout") {
+            Log.e(TAG, "Socket connect_timeout: ${it.joinToString(limit = 3)}")
+        }
+
+        socket.on("reconnect_attempt") {
+            Log.w(TAG, "Socket reconnect_attempt: ${it.firstOrNull()}")
+        }
+
+        socket.on("reconnect_error") {
+            Log.e(TAG, "Socket reconnect_error: ${it.joinToString(limit = 3)}")
         }
 
         socket.on("user:status") { args ->

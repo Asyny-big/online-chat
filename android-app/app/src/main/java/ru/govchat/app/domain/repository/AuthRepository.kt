@@ -6,6 +6,7 @@ import ru.govchat.app.domain.model.UserProfile
 interface AuthRepository {
     val tokenFlow: Flow<String?>
 
+    suspend fun hasSessionToken(): Boolean
     suspend fun login(phone: String, password: String): Result<UserProfile>
     suspend fun register(phone: String, name: String, password: String): Result<UserProfile>
     suspend fun checkSession(): Result<UserProfile>

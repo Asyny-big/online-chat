@@ -12,6 +12,7 @@ import ru.govchat.app.tunnel.data.ServerManager
 object ConfigBuilder {
 
     private const val TAG = "ConfigBuilder"
+    private val supportedTransportTypes = setOf("tcp", "ws", "grpc", "httpupgrade")
 
     fun buildConfig(context: Context): String {
         val serverManager = ServerManager(context)
@@ -38,11 +39,11 @@ object ConfigBuilder {
 
         vlessLinks.forEachIndexed { index, link ->
             val tag = "proxy-$index"
-            serverTags.add(tag)
 
             try {
                 val outbound = parseVlessLink(link, tag)
                 outboundsArray.put(outbound)
+                serverTags.add(tag)
             } catch (e: Exception) {
                 Log.e(TAG, "Error parsing VLESS link: $link", e)
             }
@@ -110,6 +111,11 @@ object ConfigBuilder {
                         put("address", "https://1.1.1.1/dns-query")
                         put("detour", "proxy")
                     })
+                    put(JSONObject().apply {
+                        put("tag", "dns-direct")
+                        put("address", "8.8.8.8")
+                        put("detour", "direct")
+                    })
                 })
                 put("rules", JSONArray().apply {
                     put(JSONObject().apply {
@@ -117,6 +123,7 @@ object ConfigBuilder {
                         put("server", "dns-remote")
                     })
                 })
+                put("independent_cache", true)
             })
             put("inbounds", inboundsArray)
             put("outbounds", finalOutboundsArray)
@@ -139,8 +146,11 @@ object ConfigBuilder {
         require(!host.isNullOrBlank()) { "VLESS host is missing" }
         require(port > 0) { "VLESS port is invalid: $port" }
 
-        val transportType = queryParams["type"] ?: "tcp"
+        val transportType = normalizeTransportType(queryParams["type"])
         val securityType = queryParams["security"] ?: "none"
+        require(transportType in supportedTransportTypes) {
+            "Unsupported transport type: $transportType"
+        }
 
         val outbound = JSONObject().apply {
             put("type", "vless")
@@ -158,7 +168,10 @@ object ConfigBuilder {
         if (securityType == "tls" || securityType == "reality") {
             val tlsObject = JSONObject().apply {
                 put("enabled", true)
-                put("server_name", queryParams["sni"] ?: host)
+                put("server_name", queryParams["sni"] ?: queryParams["host"] ?: host)
+                if ((queryParams["insecure"] ?: queryParams["allowInsecure"]) == "1") {
+                    put("insecure", true)
+                }
                 queryParams["alpn"]
                     ?.split(",")
                     ?.map(String::trim)
@@ -225,5 +238,17 @@ object ConfigBuilder {
             }
         }
         return map
+    }
+
+    private fun normalizeTransportType(rawType: String?): String {
+        return when (rawType?.trim()?.lowercase()) {
+            null, "", "tcp" -> "tcp"
+            "raw" -> "tcp"
+            "ws" -> "ws"
+            "grpc" -> "grpc"
+            "httpupgrade" -> "httpupgrade"
+            "xhttp" -> "xhttp"
+            else -> rawType.trim().lowercase()
+        }
     }
 }

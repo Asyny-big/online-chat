@@ -1056,16 +1056,30 @@ private fun ChatsListContent(
                     modifier = Modifier.weight(1f)
                 )
 
-                // Connection status indicator
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (state.isRealtimeConnected) Color(0xFF4CAF50)
-                            else Color(0xFFEF4444)
+                val connectionTint = connectionIndicatorColor(state)
+                Surface(
+                    color = connectionTint.copy(alpha = 0.18f),
+                    shape = RoundedCornerShape(999.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(connectionTint)
                         )
-                )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = connectionIndicatorLabel(state),
+                            color = connectionTint,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
                 Spacer(modifier = Modifier.width(12.dp))
 
                 // Refresh
@@ -1088,6 +1102,13 @@ private fun ChatsListContent(
                 }
             }
         }
+
+        ConnectionStatusBanner(
+            state = state,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+        )
 
         if (!notificationsEnabled) {
             Surface(
@@ -1744,6 +1765,10 @@ private fun ProfileTabContent(
 
         Spacer(modifier = Modifier.height(8.dp))
 
+        ProfileDiagnosticsCard(state = state)
+
+        Spacer(modifier = Modifier.height(8.dp))
+
         // ── App Section ──
         Surface(
             modifier = Modifier.fillMaxWidth(),
@@ -1970,6 +1995,287 @@ private fun ProfileSettingsRow(
             )
         }
     }
+}
+
+@Composable
+private fun ConnectionStatusBanner(
+    state: MainUiState,
+    modifier: Modifier = Modifier
+) {
+    val diagnostics = state.tunnelDiagnostics
+    val tint = connectionIndicatorColor(state)
+
+    Surface(
+        modifier = modifier,
+        color = Color(0xFF1E2C3A),
+        shape = RoundedCornerShape(14.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .clip(CircleShape)
+                        .background(tint)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = diagnostics.stageLabel,
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = diagnostics.lastEvent,
+                color = Color(0xFFD7E3EE),
+                style = MaterialTheme.typography.bodySmall
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = buildString {
+                    append(diagnostics.networkLabel)
+                    append(" • ")
+                    append(if (diagnostics.isTunnelRunning) "VPN активен" else if (diagnostics.isRestrictedNetwork) "VPN не поднят" else "VPN не требуется")
+                    append(" • ")
+                    append(if (state.isRealtimeConnected) "Сокет подключён" else "Сокет отключён")
+                    append(" • Кэш: ")
+                    append(diagnostics.cachedServerCount)
+                    diagnostics.lastFetchParsedCount?.let {
+                        append("/")
+                        append(it)
+                    }
+                },
+                color = Color(0xFF8EA4B8),
+                style = MaterialTheme.typography.bodySmall
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = diagnostics.lastProbeSummary,
+                color = Color(0xFF8EA4B8),
+                style = MaterialTheme.typography.bodySmall
+            )
+            if (!diagnostics.lastError.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Ошибка: ${diagnostics.lastError}",
+                    color = Color(0xFFFF9E9E),
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileDiagnosticsCard(state: MainUiState) {
+    val diagnostics = state.tunnelDiagnostics
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = Color(0xFF1E2C3A),
+        shape = RoundedCornerShape(18.dp)
+    ) {
+        Column {
+            Column(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)
+            ) {
+                Text(
+                    text = "Диагностика подключения",
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Показывает, что сейчас происходит с сетью, VPN и сокетом realtime.",
+                    color = Color(0xFF8296AC),
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            Divider(color = Color(0xFF1D2E3D), thickness = 0.5.dp)
+            ProfileSettingsRow(
+                icon = Icons.Filled.PhoneInTalk,
+                title = "Сеть",
+                value = buildString {
+                    append(diagnostics.networkLabel)
+                    append(" • ")
+                    append(if (diagnostics.isConnected) "интернет есть" else "интернета нет")
+                    if (diagnostics.isRestrictedNetwork) {
+                        append(" • ограниченная/мобильная")
+                    }
+                }
+            )
+            Divider(
+                modifier = Modifier.padding(start = 56.dp),
+                color = Color(0xFF1D2E3D),
+                thickness = 0.5.dp
+            )
+            ProfileSettingsRow(
+                icon = Icons.Filled.Refresh,
+                title = "Проверка доступности",
+                value = buildString {
+                    append(
+                        when (diagnostics.isBackendReachable) {
+                            true -> "сервер отвечает"
+                            false -> "сервер не отвечает"
+                            null -> "сервер ещё проверяется"
+                        }
+                    )
+                    append(" • ")
+                    append(
+                        when (diagnostics.isPublicInternetReachable) {
+                            true -> "интернет есть"
+                            false -> "интернет нестабилен"
+                            null -> "проверка интернета идёт"
+                        }
+                    )
+                }
+            )
+            Divider(
+                modifier = Modifier.padding(start = 56.dp),
+                color = Color(0xFF1D2E3D),
+                thickness = 0.5.dp
+            )
+            ProfileSettingsRow(
+                icon = Icons.Filled.Settings,
+                title = "VPN / туннель",
+                value = buildString {
+                    append(diagnostics.stageLabel)
+                    append(" • ")
+                    append(if (diagnostics.isTunnelRunning) "активен" else "неактивен")
+                    if (diagnostics.isVpnPermissionRequired) {
+                        append(" • ждёт разрешение Android")
+                    }
+                }
+            )
+            Divider(
+                modifier = Modifier.padding(start = 56.dp),
+                color = Color(0xFF1D2E3D),
+                thickness = 0.5.dp
+            )
+            ProfileSettingsRow(
+                icon = Icons.Filled.DesktopWindows,
+                title = "Сокет realtime",
+                value = if (state.isRealtimeConnected) {
+                    "Подключён, события чатов приходят в реальном времени"
+                } else {
+                    "Не подключён, приложение работает без realtime или ждёт сеть"
+                }
+            )
+            Divider(
+                modifier = Modifier.padding(start = 56.dp),
+                color = Color(0xFF1D2E3D),
+                thickness = 0.5.dp
+            )
+            ProfileSettingsRow(
+                icon = Icons.Filled.Cached,
+                title = "Кэш серверов",
+                value = buildString {
+                    append("${diagnostics.cachedServerCount} в кэше")
+                    diagnostics.lastFetchParsedCount?.let {
+                        append(" • получено $it")
+                    }
+                    diagnostics.lastConfigSuccessAtMillis?.let {
+                        append(" • обновлён ${formatDiagnosticsTime(it)}")
+                    }
+                }
+            )
+            Divider(
+                modifier = Modifier.padding(start = 56.dp),
+                color = Color(0xFF1D2E3D),
+                thickness = 0.5.dp
+            )
+            ProfileSettingsRow(
+                icon = Icons.Filled.Refresh,
+                title = "Последний запуск VPN",
+                value = diagnostics.lastTunnelStartAtMillis?.let(::formatDiagnosticsTime)
+                    ?: "VPN ещё не запускался в этой сессии"
+            )
+            Divider(
+                modifier = Modifier.padding(start = 56.dp),
+                color = Color(0xFF1D2E3D),
+                thickness = 0.5.dp
+            )
+            ProfileSettingsRow(
+                icon = Icons.Filled.AttachFile,
+                title = "Источник конфигов",
+                value = formatConfigSourceLabel(diagnostics.configSourceUrl)
+            )
+            if (diagnostics.lastResponseSizeBytes != null) {
+                Divider(
+                    modifier = Modifier.padding(start = 56.dp),
+                    color = Color(0xFF1D2E3D),
+                    thickness = 0.5.dp
+                )
+                ProfileSettingsRow(
+                    icon = Icons.Filled.Email,
+                    title = "Ответ GitHub",
+                    value = "${diagnostics.lastResponseSizeBytes} байт"
+                )
+            }
+            if (!diagnostics.lastCacheReadError.isNullOrBlank()) {
+                Divider(
+                    modifier = Modifier.padding(start = 56.dp),
+                    color = Color(0xFF1D2E3D),
+                    thickness = 0.5.dp
+                )
+                ProfileSettingsRow(
+                    icon = Icons.Filled.Settings,
+                    title = "Ошибка чтения кэша",
+                    value = diagnostics.lastCacheReadError
+                )
+            }
+            if (!diagnostics.lastError.isNullOrBlank() || !state.errorMessage.isNullOrBlank()) {
+                Divider(
+                    modifier = Modifier.padding(start = 56.dp),
+                    color = Color(0xFF1D2E3D),
+                    thickness = 0.5.dp
+                )
+                ProfileSettingsRow(
+                    icon = Icons.Filled.Close,
+                    title = "Последняя ошибка",
+                    value = diagnostics.lastError ?: state.errorMessage.orEmpty()
+                )
+            }
+        }
+    }
+}
+
+private fun connectionIndicatorColor(state: MainUiState): Color {
+    return when {
+        !state.tunnelDiagnostics.lastError.isNullOrBlank() -> Color(0xFFEF4444)
+        state.isRealtimeConnected -> Color(0xFF4CAF50)
+        state.tunnelDiagnostics.isTunnelRunning -> Color(0xFF5EB5F7)
+        state.tunnelDiagnostics.isRestrictedNetwork -> Color(0xFFF59E0B)
+        else -> Color(0xFF8296AC)
+    }
+}
+
+private fun connectionIndicatorLabel(state: MainUiState): String {
+    return when {
+        !state.tunnelDiagnostics.lastError.isNullOrBlank() -> "Ошибка"
+        state.isRealtimeConnected -> "Онлайн"
+        state.tunnelDiagnostics.isTunnelRunning -> "VPN"
+        state.tunnelDiagnostics.isRestrictedNetwork -> "Ожидание"
+        else -> "Оффлайн"
+    }
+}
+
+private fun formatDiagnosticsTime(timestamp: Long): String {
+    val formatter = DateTimeFormatter.ofPattern("dd.MM HH:mm", Locale.getDefault())
+    return Instant.ofEpochMilli(timestamp)
+        .atZone(ZoneId.systemDefault())
+        .format(formatter)
+}
+
+private fun formatConfigSourceLabel(sourceUrl: String): String {
+    if (sourceUrl.isBlank()) return "Не задан"
+    val host = runCatching { Uri.parse(sourceUrl).host }.getOrNull().orEmpty()
+    return if (host.isNotBlank()) "$host • источник конфигов" else sourceUrl
 }
 
 @Composable

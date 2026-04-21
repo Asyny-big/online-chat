@@ -18,6 +18,10 @@ class AuthRepositoryImpl(
 
     override val tokenFlow = sessionStorage.tokenFlow
 
+    override suspend fun hasSessionToken(): Boolean {
+        return !sessionStorage.awaitToken().isNullOrBlank()
+    }
+
     override suspend fun login(phone: String, password: String): Result<UserProfile> {
         return runCatching {
             val response = api.login(

@@ -6,6 +6,7 @@ import ru.govchat.app.domain.model.ChatMessage
 import ru.govchat.app.domain.model.ChatPreview
 import ru.govchat.app.domain.model.TypingUser
 import ru.govchat.app.domain.model.UserProfile
+import ru.govchat.app.tunnel.TunnelDiagnosticsSnapshot
 
 data class MainUiState(
     val chats: List<ChatPreview> = emptyList(),
@@ -38,7 +39,8 @@ data class MainUiState(
     val groupParticipantsErrorMessage: String? = null,
     val recordingMode: RecordingMode = RecordingMode.Voice,
     val recordingState: RecordingState = RecordingState.Idle,
-    val failedRecordingUpload: FailedRecordingUploadUi? = null
+    val failedRecordingUpload: FailedRecordingUploadUi? = null,
+    val tunnelDiagnostics: TunnelDiagnosticsSnapshot = TunnelDiagnosticsSnapshot()
 ) {
     val selectedChat: ChatPreview?
         get() = chats.firstOrNull { it.id == selectedChatId }

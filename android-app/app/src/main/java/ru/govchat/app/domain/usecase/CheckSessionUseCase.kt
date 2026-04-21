@@ -9,5 +9,8 @@ class CheckSessionUseCase(
     suspend operator fun invoke(): Result<UserProfile> {
         return authRepository.checkSession()
     }
-}
 
+    suspend fun hasLocalSessionToken(): Boolean {
+        return authRepository.hasSessionToken()
+    }
+}

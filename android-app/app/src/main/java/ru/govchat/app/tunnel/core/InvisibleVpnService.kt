@@ -57,18 +57,25 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
     private fun startTunnel() {
         if (singBoxRunner.isRunning()) {
             Log.w(TAG, "VPN tunnel is already running")
+            TunnelManager.getInstance(applicationContext).reportTunnelEvent("VPN уже активен, повторный запуск пропущен")
             return
         }
 
         stopRequested = false
         try {
             startTunnelForeground()
+            TunnelManager.getInstance(applicationContext).reportTunnelEvent("Сервис VPN запущен, собираю конфиг sing-box")
             val configJson = ConfigBuilder.buildConfig(applicationContext)
             singBoxRunner.start(applicationContext, configJson, this)
             TunnelManager.getInstance(applicationContext).markTunnelRunning(true)
+            TunnelManager.getInstance(applicationContext)
+                .reportTunnelEvent("sing-box запущен, журнал ошибок: ${singBoxRunner.stderrLogPath()}")
             Log.i(TAG, "VPN tunnel started. stderr=${singBoxRunner.stderrLogPath()}")
         } catch (error: Throwable) {
             Log.e(TAG, "Error starting VPN tunnel", error)
+            TunnelManager.getInstance(applicationContext).reportTunnelFailure(
+                "Не удалось запустить VPN: ${error.message ?: error.javaClass.simpleName}"
+            )
             stopTunnel()
         }
     }
@@ -113,6 +120,7 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
             stopForeground(true)
         }
         stopSelf()
+        TunnelManager.getInstance(applicationContext).reportTunnelEvent("Сервис VPN остановлен")
         Log.i(TAG, "VPN tunnel stopped")
     }
 
@@ -142,6 +150,8 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
 
     override fun onRevoke() {
         Log.w(TAG, "VPN permission revoked by the system")
+        TunnelManager.getInstance(applicationContext)
+            .reportTunnelFailure("Android отозвал разрешение на VPN")
         stopTunnel()
         super.onRevoke()
     }
@@ -258,6 +268,12 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
 
     override fun sendNotification(notification: LibboxNotification) {
         Log.i(TAG, "sing-box notification: ${notification.title} ${notification.body}")
+        TunnelManager.getInstance(applicationContext).reportTunnelEvent(
+            listOf(notification.title, notification.body)
+                .filter { it.isNotBlank() }
+                .joinToString(" • ")
+                .ifBlank { "sing-box отправил системное уведомление" }
+        )
     }
 
     override fun startDefaultInterfaceMonitor(listener: InterfaceUpdateListener) = Unit
@@ -283,6 +299,9 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
 
     override fun writeLog(message: String) {
         Log.i("sing-box", message)
+        if (message.contains("error", ignoreCase = true) || message.contains("failed", ignoreCase = true)) {
+            TunnelManager.getInstance(applicationContext).reportTunnelFailure(message)
+        }
     }
 
     private fun addAddresses(builder: Builder, iterator: RoutePrefixIterator): Boolean {

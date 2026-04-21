@@ -19,10 +19,10 @@ class SplashViewModel(
     init {
         viewModelScope.launch {
             val result = checkSessionUseCase()
-            mutableState.value = if (result.isSuccess) {
-                SplashState.Authorized
-            } else {
-                SplashState.Unauthorized
+            mutableState.value = when {
+                result.isSuccess -> SplashState.Authorized
+                checkSessionUseCase.hasLocalSessionToken() -> SplashState.Authorized
+                else -> SplashState.Unauthorized
             }
         }
     }
@@ -33,4 +33,3 @@ class SplashViewModel(
         }
     }
 }
-

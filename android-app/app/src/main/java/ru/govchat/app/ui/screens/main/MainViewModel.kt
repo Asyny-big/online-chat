@@ -42,6 +42,7 @@ import ru.govchat.app.core.notification.NotificationIntents
 import ru.govchat.app.core.storage.ChatMessagesCacheStorage
 import ru.govchat.app.core.storage.SessionStorage
 import ru.govchat.app.core.ui.viewModelFactory
+import ru.govchat.app.tunnel.TunnelManager
 import ru.govchat.app.domain.model.AttachmentType
 import ru.govchat.app.domain.model.CallHistoryDraft
 import ru.govchat.app.domain.model.CallHistoryDirection
@@ -113,10 +114,16 @@ class MainViewModel(
 ) : ViewModel() {
 
     private val applicationContext = appContext.applicationContext
+    private val tunnelManager = TunnelManager.getInstance(applicationContext)
     private val tempMediaStore = TempMediaStore(applicationContext)
     private val locationClient = OnDemandLocationClient(applicationContext)
     private val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val mutableState = MutableStateFlow(MainUiState(isLoadingChats = true))
+    private val mutableState = MutableStateFlow(
+        MainUiState(
+            isLoadingChats = true,
+            tunnelDiagnostics = tunnelManager.diagnostics.value
+        )
+    )
     val state: StateFlow<MainUiState> = mutableState.asStateFlow()
     private val mutableUploadProgress = MutableStateFlow<Int?>(null)
     val uploadProgress: StateFlow<Int?> = mutableUploadProgress.asStateFlow()
@@ -147,6 +154,11 @@ class MainViewModel(
         callManager.bind(viewModelScope)
         viewModelScope.launch(Dispatchers.IO) {
             tempMediaStore.cleanupExpired()
+        }
+        viewModelScope.launch {
+            tunnelManager.diagnostics.collect { diagnostics ->
+                mutableState.update { it.copy(tunnelDiagnostics = diagnostics) }
+            }
         }
         viewModelScope.launch {
             CallNotificationManager.incomingCall.collect { command ->
@@ -202,6 +214,7 @@ class MainViewModel(
             }
         }
         viewModelScope.launch {
+            waitForNetworkPathReady()
             chatRepository.connectRealtime()
             observeRealtime()
         }
@@ -215,6 +228,7 @@ class MainViewModel(
         }
 
         viewModelScope.launch {
+            waitForNetworkPathReady()
             loadCurrentUser()
             refreshChats()
         }
@@ -222,9 +236,11 @@ class MainViewModel(
 
     fun refreshChats() {
         viewModelScope.launch {
+            Log.i(TAG, "Refreshing chats. restricted=${tunnelManager.isRestrictedNetworkState.value} vpn=${tunnelManager.isTunnelRunningState.value}")
             mutableState.update { it.copy(isLoadingChats = true, errorMessage = null) }
             loadChatsUseCase()
                 .onSuccess { chats ->
+                    Log.i(TAG, "Chats refreshed successfully. count=${chats.size}")
                     mutableState.update {
                         it.copy(
                             isLoadingChats = false,
@@ -234,6 +250,7 @@ class MainViewModel(
                     }
                 }
                 .onFailure { error ->
+                    Log.w(TAG, "Failed to refresh chats", error)
                     mutableState.update {
                         it.copy(
                             isLoadingChats = false,
@@ -1586,7 +1603,13 @@ class MainViewModel(
         chatRepository.observeRealtimeEvents().collect { event ->
             when (event) {
                 is RealtimeEvent.SocketConnected -> {
+                    Log.i(TAG, "Realtime socket connected")
                     mutableState.update { it.copy(isRealtimeConnected = true) }
+                    if (mutableState.value.currentUserId.isNullOrBlank()) {
+                        viewModelScope.launch {
+                            loadCurrentUser()
+                        }
+                    }
                     refreshChats()
                     val selectedChatId = mutableState.value.selectedChatId
                     if (!selectedChatId.isNullOrBlank()) {
@@ -1598,6 +1621,7 @@ class MainViewModel(
                 }
 
                 is RealtimeEvent.SocketDisconnected -> {
+                    Log.w(TAG, "Realtime socket disconnected")
                     mutableState.update { it.copy(isRealtimeConnected = false) }
                 }
 
@@ -2129,8 +2153,10 @@ class MainViewModel(
     }
 
     private suspend fun loadCurrentUser() {
+        Log.i(TAG, "Loading current user profile")
         mutableState.update { it.copy(userProfileLoading = true) }
         chatRepository.getCurrentUser().onSuccess { user ->
+            Log.i(TAG, "Current user profile loaded. userId=${user.id}")
             mutableState.update {
                 it.copy(
                     currentUserId = user.id,
@@ -2138,8 +2164,14 @@ class MainViewModel(
                     userProfileLoading = false
                 )
             }
-        }.onFailure {
-            mutableState.update { it.copy(userProfileLoading = false) }
+        }.onFailure { error ->
+            Log.w(TAG, "Failed to load current user profile", error)
+            mutableState.update {
+                it.copy(
+                    userProfileLoading = false,
+                    errorMessage = it.errorMessage ?: (error.message ?: "Не удалось загрузить профиль")
+                )
+            }
         }
     }
 
@@ -3032,6 +3064,27 @@ class MainViewModel(
         return block()
     }
 
+    private suspend fun waitForNetworkPathReady() {
+        val startedAt = SystemClock.elapsedRealtime()
+        Log.i(TAG, "Waiting for network path. restricted=${tunnelManager.isRestrictedNetworkState.value} vpn=${tunnelManager.isTunnelRunningState.value}")
+
+        while (true) {
+            val restricted = tunnelManager.isRestrictedNetworkState.value
+            val tunnelRunning = tunnelManager.isTunnelRunningState.value
+            if (!restricted || tunnelRunning) {
+                Log.i(TAG, "Network path ready. restricted=$restricted vpn=$tunnelRunning")
+                return
+            }
+
+            if (SystemClock.elapsedRealtime() - startedAt >= NETWORK_PATH_READY_TIMEOUT_MS) {
+                Log.w(TAG, "Timed out waiting for VPN tunnel on restricted network. Continuing bootstrap.")
+                return
+            }
+
+            delay(500)
+        }
+    }
+
     private suspend fun ensureRealtimeWarmup() {
         chatRepository.connectRealtime()
         delay(300)
@@ -3077,6 +3130,7 @@ class MainViewModel(
         private const val MAX_HANDLED_NOTIFICATION_EVENTS = 128
         private const val MESSAGES_PAGE_SIZE = 30
         private const val DISK_CACHE_MESSAGES_LIMIT = 100
+        private const val NETWORK_PATH_READY_TIMEOUT_MS = 15_000L
 
         fun factory(
             appContext: Context,
