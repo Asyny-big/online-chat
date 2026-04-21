@@ -19,6 +19,9 @@ class GovChatApp : Application() {
         NotificationChannels.ensureCreated(this)
         CallNotificationManager.ensureInitialized(this)
 
+        // Initialize VLESS secure tunnel manager
+        ru.govchat.app.tunnel.TunnelManager.getInstance(this).initialize()
+
         ProcessLifecycleOwner.get().lifecycle.addObserver(
             RealtimeLifecycleObserver(
                 chatRepository = container.chatRepository,
