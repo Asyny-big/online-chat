@@ -137,7 +137,7 @@ function Sidebar({
         }
 
         .sidebar-header {
-          padding: var(--space-14) var(--space-12);
+          padding: max(var(--space-14), var(--safe-area-top)) var(--space-12) var(--space-14);
           border-bottom: 1px solid var(--border-color);
           display: flex;
           justify-content: space-between;
@@ -299,6 +299,10 @@ function Sidebar({
         }
 
         @media (max-width: 768px) {
+          .chat-sidebar {
+            padding-bottom: max(var(--space-12), var(--safe-area-bottom));
+          }
+
           .new-chat-label {
             display: none;
           }

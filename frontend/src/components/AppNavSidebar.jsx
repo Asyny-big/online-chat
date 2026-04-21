@@ -58,7 +58,7 @@ export default function AppNavSidebar({ activeKey, onNavigate, badgeCounts = {} 
       <style>{`
         .app-nav-sidebar {
           width: var(--sidebar-width);
-          min-height: 100vh;
+          min-height: 100%;
           background:
             radial-gradient(circle at top, rgba(59, 130, 246, 0.2), transparent 42%),
             var(--bg-primary);
@@ -175,6 +175,75 @@ export default function AppNavSidebar({ activeKey, onNavigate, badgeCounts = {} 
         .app-nav-item:hover .app-nav-tooltip {
           opacity: 1;
           visibility: visible;
+        }
+
+        @media (max-width: 768px) {
+          .app-nav-sidebar {
+            position: fixed;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            width: 100%;
+            min-height: 0;
+            height: calc(var(--bottom-nav-height) + var(--safe-area-bottom));
+            padding:
+              var(--space-8)
+              max(var(--space-10), var(--safe-area-right))
+              max(var(--space-8), var(--safe-area-bottom))
+              max(var(--space-10), var(--safe-area-left));
+            border-right: none;
+            border-top: 1px solid var(--border-color);
+            flex-direction: row;
+            justify-content: center;
+            background:
+              radial-gradient(circle at 50% 0%, rgba(59, 130, 246, 0.14), transparent 52%),
+              rgba(7, 11, 20, 0.94);
+            backdrop-filter: blur(18px);
+          }
+
+          .app-nav-header {
+            display: none;
+          }
+
+          .app-nav-menu {
+            width: 100%;
+            flex-direction: row;
+            justify-content: space-between;
+            align-items: stretch;
+            gap: 6px;
+          }
+
+          .app-nav-item {
+            flex: 1 1 0;
+            width: auto;
+            min-width: 0;
+            height: 56px;
+            border-radius: 16px;
+            gap: 4px;
+            flex-direction: column;
+            padding: 8px 6px 6px;
+          }
+
+          .app-nav-badge {
+            top: 3px;
+            right: calc(50% - 20px);
+            border-color: rgba(7, 11, 20, 0.94);
+          }
+
+          .app-nav-tooltip {
+            position: static;
+            transform: none;
+            background: transparent;
+            border: none;
+            padding: 0;
+            font-size: 11px;
+            line-height: 1.1;
+            font-weight: 700;
+            color: inherit;
+            opacity: 1;
+            visibility: visible;
+            white-space: nowrap;
+          }
         }
       `}</style>
     </aside>

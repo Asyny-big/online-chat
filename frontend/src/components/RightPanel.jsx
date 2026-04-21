@@ -8,10 +8,15 @@ const RightPanel = () => (
     <style>{`
       .right-panel {
         width: var(--right-panel-width);
-        height: 100vh;
+        height: 100%;
+        min-height: 0;
         position: sticky;
         top: 0;
-        padding: var(--space-16);
+        padding:
+          max(var(--space-16), var(--safe-area-top))
+          max(var(--space-16), var(--safe-area-right))
+          max(var(--space-16), var(--safe-area-bottom))
+          var(--space-16);
         border-left: 1px solid var(--border-color);
         display: flex;
         flex-direction: column;

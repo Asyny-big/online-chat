@@ -2100,7 +2100,7 @@ function CallModal(props) {
       position: 'fixed',
       inset: 0,
       width: '100vw',
-      height: '100vh',
+      height: '100dvh',
       borderRadius: 0,
       zIndex: 1,
       background: '#000',
@@ -2486,6 +2486,7 @@ const styles = {
     justifyContent: 'center',
     zIndex: 10000,
     perspective: '1000px',
+    padding: 'env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px)',
   },
   modal: {
     position: 'relative',
@@ -2512,8 +2513,8 @@ const styles = {
   },
   localVideo: {
     position: 'absolute',
-    top: '24px',
-    right: '24px',
+    top: 'calc(24px + env(safe-area-inset-top, 0px))',
+    right: 'calc(24px + env(safe-area-inset-right, 0px))',
     width: '180px', 
     aspectRatio: '3/4',
     borderRadius: '16px',
@@ -2562,7 +2563,7 @@ const styles = {
   },
   info: {
     position: 'absolute',
-    top: '48px',
+    top: 'calc(48px + env(safe-area-inset-top, 0px))',
     left: 0,
     right: 0,
     textAlign: 'center',
@@ -2589,8 +2590,8 @@ const styles = {
   },
   remoteControlBadge: {
     position: 'absolute',
-    top: '24px',
-    left: '24px',
+    top: 'calc(24px + env(safe-area-inset-top, 0px))',
+    left: 'calc(24px + env(safe-area-inset-left, 0px))',
     display: 'flex',
     alignItems: 'center',
     gap: '10px',
@@ -2615,8 +2616,8 @@ const styles = {
   },
   remoteControlDock: {
     position: 'absolute',
-    left: '24px',
-    top: '112px',
+    left: 'calc(24px + env(safe-area-inset-left, 0px))',
+    top: 'calc(112px + env(safe-area-inset-top, 0px))',
     display: 'flex',
     flexDirection: 'column',
     gap: '8px',
@@ -2630,8 +2631,8 @@ const styles = {
   },
   remoteControlTextPopover: {
     position: 'absolute',
-    left: '204px',
-    top: '112px',
+    left: 'calc(204px + env(safe-area-inset-left, 0px))',
+    top: 'calc(112px + env(safe-area-inset-top, 0px))',
     width: '320px',
     display: 'flex',
     flexDirection: 'column',
@@ -2708,7 +2709,7 @@ const styles = {
   },
   controls: {
     position: 'absolute',
-    bottom: '40px',
+    bottom: 'calc(40px + env(safe-area-inset-bottom, 0px))',
     left: '50%',
     transform: 'translateX(-50%)',
     display: 'flex',
@@ -2727,7 +2728,7 @@ const styles = {
   controlsDocked: {
     position: 'absolute',
     top: '50%',
-    right: '24px',
+    right: 'calc(24px + env(safe-area-inset-right, 0px))',
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',

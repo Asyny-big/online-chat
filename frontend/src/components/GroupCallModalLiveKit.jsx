@@ -2127,6 +2127,11 @@ const CSS_STYLES = `
 .gvc-overlay {
   position: fixed; inset: 0; background: #000; z-index: 9999;
   display: flex; flex-direction: column; font-family: sans-serif;
+  padding:
+    env(safe-area-inset-top, 0px)
+    env(safe-area-inset-right, 0px)
+    env(safe-area-inset-bottom, 0px)
+    env(safe-area-inset-left, 0px);
 }
 
 /* HEADER */
@@ -2181,7 +2186,7 @@ const CSS_STYLES = `
   font-size: 40px; display: flex; align-items: center; justify-content: center; font-weight: bold;
 }
 .gvc-stage-name {
-  position: absolute; bottom: 120px; /* Above control bar */ left: 16px; background: rgba(0,0,0,0.6); 
+  position: absolute; bottom: calc(120px + env(safe-area-inset-bottom, 0px)); /* Above control bar */ left: 16px; background: rgba(0,0,0,0.6); 
   padding: 4px 8px; border-radius: 4px; color: white; font-size: 14px; font-weight: 600;
 }
 
@@ -2211,7 +2216,7 @@ const CSS_STYLES = `
 
 /* CONTROLS (Floating) */
 .gvc-controls {
-  position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%);
+  position: absolute; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%);
   display: flex; gap: 16px; align-items: center; padding: 12px 24px;
   background: rgba(0,0,0,0.85); border-radius: 32px; z-index: 50;
   transition: opacity 0.3s ease, transform 0.3s ease;
@@ -2230,6 +2235,18 @@ const CSS_STYLES = `
 
 /* Desktop-only: hide on mobile */
 @media (max-width: 768px) {
+  .gvc-header {
+    padding: max(16px, env(safe-area-inset-top, 0px)) 16px 12px;
+  }
+
+  .gvc-strip {
+    height: calc(112px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .gvc-strip-scroll {
+    padding: 0 12px env(safe-area-inset-bottom, 0px);
+  }
+
   .gvc-btn-screenshare { display: none; }
 }
 

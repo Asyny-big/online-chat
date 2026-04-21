@@ -360,6 +360,7 @@ function MessageInput({ chat, chatId, socket, token, onTyping }) {
             onClick={handleFileSelect}
             className="icon-btn-circle attachment"
             disabled={uploading}
+            enterKeyHint="send"
             title="Прикрепить файл"
           >
             📎
@@ -405,7 +406,7 @@ function MessageInput({ chat, chatId, socket, token, onTyping }) {
 
       <style>{`
         .message-input-container {
-            padding: 12px 16px;
+            padding: 12px 16px max(12px, var(--safe-area-bottom));
             border-top: 1px solid var(--border-color);
             background-color: var(--bg-surface);
             position: relative;
@@ -423,23 +424,23 @@ function MessageInput({ chat, chatId, socket, token, onTyping }) {
         }
         .drop-text { color: white; font-size: 16px; font-weight: 600; }
 
-        .input-form { display: flex; align-items: center; gap: 8px; }
+        .input-form { display: flex; align-items: center; gap: 8px; min-width: 0; }
 
         .message-input-field {
-            flex: 1; padding: 12px 16px; background-color: var(--bg-input);
-            border: 1px solid var(--border-input); borderRadius: 24px;
-            color: var(--text-primary); fontSize: 14px; outline: none; transition: border-color 0.2s;
+            flex: 1; min-width: 0; padding: 12px 16px; background-color: var(--bg-input);
+            border: 1px solid var(--border-input); border-radius: 24px;
+            color: var(--text-primary); font-size: 14px; outline: none; transition: border-color 0.2s;
         }
         .message-input-field:focus { border-color: var(--accent); }
 
         .icon-btn-circle {
-            width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;
-            background: transparent; border: none; borderRadius: 50%; fontSize: 20px;
-            cursor: pointer; transition: background 0.2s; color: var(--text-secondary);
+            width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;
+            background: transparent; border: none; border-radius: 50%; font-size: 20px;
+            cursor: pointer; transition: background 0.2s; color: var(--text-secondary); flex-shrink: 0;
         }
         .icon-btn-circle:hover { background-color: var(--bg-hover); color: var(--text-primary); }
 
-        .icon-btn-circle.send { background-color: var(--accent); color: white; fontSize: 16px; }
+        .icon-btn-circle.send { background-color: var(--accent); color: white; font-size: 16px; }
         .icon-btn-circle.send:hover { background-color: var(--accent-hover); }
         .icon-btn-circle.send.disabled { background-color: var(--bg-disabled); cursor: not-allowed; opacity: 0.7; }
 
@@ -449,16 +450,16 @@ function MessageInput({ chat, chatId, socket, token, onTyping }) {
         .icon-btn-circle.attachment:hover { color: var(--accent); }
 
         /* Recording */
-        .recording-row { display: flex; align-items: center; gap: 12px; }
+        .recording-row { display: flex; align-items: center; gap: 12px; min-width: 0; }
         .recording-indicator {
-            flex: 1; display: flex; align-items: center; gap: 10px; padding: 12px 16px;
-            background-color: var(--bg-input); borderRadius: 24px;
+            flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 12px 16px;
+            background-color: var(--bg-input); border-radius: 24px;
         }
         .recording-dot {
-            width: 10px; height: 10px; background-color: var(--danger); borderRadius: 50%;
+            width: 10px; height: 10px; background-color: var(--danger); border-radius: 50%;
             animation: pulse 1s infinite;
         }
-        .recording-time { color: var(--text-primary); fontSize: 14px; fontWeight: 500; }
+        .recording-time { color: var(--text-primary); font-size: 14px; font-weight: 500; }
 
         .icon-btn-circle.cancel { background-color: rgba(239, 68, 68, 0.1); color: var(--danger); border: 1px solid var(--danger); }
         .icon-btn-circle.cancel:hover { background-color: var(--danger); color: white; }
@@ -467,6 +468,22 @@ function MessageInput({ chat, chatId, socket, token, onTyping }) {
         .icon-btn-circle.send-voice:hover { opacity: 0.9; }
 
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+
+        @media (max-width: 768px) {
+            .message-input-container {
+                padding-left: 10px;
+                padding-right: 10px;
+            }
+
+            .input-form,
+            .recording-row {
+                gap: 6px;
+            }
+
+            .message-input-field {
+                padding: 12px 14px;
+            }
+        }
       `}</style>
     </div>
   );

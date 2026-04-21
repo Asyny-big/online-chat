@@ -184,3 +184,19 @@
     transform: translateY(0) scale(1);
   }
 }
+
+@media (max-width: 768px) {
+  .apk-modal-overlay {
+    padding:
+      max(18px, env(safe-area-inset-top, 0px))
+      14px
+      max(14px, env(safe-area-inset-bottom, 0px));
+    align-items: flex-end;
+  }
+
+  .apk-modal-card {
+    width: 100%;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+  }
+}

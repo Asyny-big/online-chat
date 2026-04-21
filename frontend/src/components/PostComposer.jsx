@@ -347,6 +347,12 @@ export default function PostComposer({ token, onCreated }) {
         }
 
         @media (max-width: 720px) {
+          .composer-container {
+            margin-inline: 0;
+            padding: 12px;
+            gap: 10px;
+          }
+
           .composer-footer {
             flex-direction: column;
             align-items: flex-start;
@@ -355,6 +361,10 @@ export default function PostComposer({ token, onCreated }) {
           .composer-submit-area {
             width: 100%;
             justify-content: space-between;
+          }
+
+          .composer-submit {
+            min-height: 44px;
           }
         }
       `}</style>

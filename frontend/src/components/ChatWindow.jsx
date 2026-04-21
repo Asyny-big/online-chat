@@ -3,6 +3,7 @@ import axios from 'axios';
 import MessageInput from './MessageInput';
 import MediaViewerModal from './MediaViewerModal';
 import { API_URL } from '@/config';
+import { useMediaQuery } from '@/shared/hooks/useMediaQuery';
 import { DuckIcon, MessageIcon, PlusIcon, SearchIcon } from '@/shared/ui/Icons';
 import { parseMessageTextParts } from '@/shared/lib/messageLinks';
 import { getPreferredPlayableAudioMimeType } from '@/utils/audioFormats';
@@ -108,15 +109,9 @@ function ChatWindow({
   const messagesEndRef = useRef(null);
   const containerRef = useRef(null);
   const [autoScroll, setAutoScroll] = useState(true);
-  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+  const isMobile = useMediaQuery('(max-width: 768px)');
   const [showDeleteChatModal, setShowDeleteChatModal] = useState(false);
   const [showChatMenu, setShowChatMenu] = useState(false);
-
-  useEffect(() => {
-    const handleResize = () => setIsMobile(window.innerWidth <= 768);
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
 
   useEffect(() => {
     const handleClickOutside = () => setShowChatMenu(false);
@@ -616,6 +611,7 @@ function ChatWindow({
             height: 100%;
             min-height: 0;
             position: relative;
+            overflow: hidden;
         }
 
         /* Banners */
@@ -627,9 +623,9 @@ function ChatWindow({
             gap: 12px;
             animation: slideDown 0.3s ease, pulse-banner 1.5s infinite;
             position: absolute;
-            top: 70px;
-            left: 20px;
-            right: 20px;
+            top: calc(12px + var(--safe-area-top));
+            left: 12px;
+            right: 12px;
             z-index: 50;
             border-radius: 12px;
             color: white;
@@ -640,7 +636,7 @@ function ChatWindow({
         .incoming-group-call-banner { background: linear-gradient(135deg, #a855f7, #7e22ce); }
 
         .call-banner-content { display: flex; align-items: center; gap: 12px; }
-        .call-banner-icon { fontSize: 24px; animation: shake 0.5s infinite; }
+        .call-banner-icon { font-size: 24px; animation: shake 0.5s infinite; }
         .call-banner-info { display: flex; flex-direction: column; }
         .call-banner-title { font-weight: 700; font-size: 14px; }
         .call-banner-subtitle { font-size: 12px; opacity: 0.9; }
@@ -658,24 +654,25 @@ function ChatWindow({
 
         /* Header */
         .chat-header {
-            padding: 12px 16px;
+            padding: calc(10px + var(--safe-area-top)) 16px 10px;
             border-bottom: 1px solid var(--border-color);
             background-color: var(--bg-surface);
             display: flex;
             align-items: center;
             justify-content: space-between;
-            height: 64px;
+            gap: 12px;
+            min-height: 72px;
             flex-shrink: 0;
         }
 
-        .header-info { display: flex; align-items: center; gap: 12px; min-width: 0; }
+        .header-info { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1; }
         .header-meta { min-width: 0; }
         .chat-name-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
         
         .back-btn {
-            width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;
-            background: transparent; border: none; border-radius: 50%;
-            font-size: 20px; color: var(--text-primary); cursor: pointer; margin-right: 8px;
+            width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;
+            background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-light); border-radius: 50%;
+            font-size: 20px; color: var(--text-primary); cursor: pointer; margin-right: 2px; flex-shrink: 0;
         }
 
         .chat-avatar {
@@ -686,15 +683,15 @@ function ChatWindow({
         }
         .chat-avatar.group { background: linear-gradient(135deg, #a855f7, #7e22ce); }
 
-        .chat-name { margin: 0; fontSize: 16px; font-weight: 700; color: var(--text-primary); }
+        .chat-name { margin: 0; font-size: 16px; font-weight: 700; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .presence-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.45); }
         .presence-dot.online { background: #22c55e; }
         .presence-dot.offline { background: rgba(148, 163, 184, 0.75); }
-        .participant-count { fontSize: 12px; color: var(--text-secondary); margin-top: 2px; }
-        .chat-presence { fontSize: 12px; margin-top: 2px; }
+        .participant-count { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+        .chat-presence { font-size: 12px; margin-top: 2px; }
         .chat-presence.online { color: #4ade80; }
         .chat-presence.offline { color: var(--text-secondary); }
-        .typing-indicator { fontSize: 12px; color: var(--accent); margin-top: 2px; }
+        .typing-indicator { font-size: 12px; color: var(--accent); margin-top: 2px; }
         .chat-location-hint {
             max-width: 260px;
             font-size: 12px;
@@ -704,10 +701,10 @@ function ChatWindow({
         }
         .typing-dots { animation: blink 1s infinite; }
 
-        .header-actions { display: flex; gap: 8px; align-items: center; }
+        .header-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
 
         .header-action-btn {
-            width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;
+            width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;
             background: transparent; border: 1px solid var(--border-light); border-radius: 50%;
             font-size: 18px; cursor: pointer; transition: var(--transition-fast); color: var(--text-secondary);
             position: relative;
@@ -716,7 +713,7 @@ function ChatWindow({
         .header-action-btn.group { color: var(--accent); border-color: var(--accent); }
         .header-action-btn.group:hover { background-color: rgba(168, 85, 247, 0.1); }
 
-        .group-call-badge { position: absolute; fontSize: 10px; bottom: -2px; right: -2px; }
+        .group-call-badge { position: absolute; font-size: 10px; bottom: -2px; right: -2px; }
 
         /* Menu */
         .menu-container { position: relative; }
@@ -728,21 +725,23 @@ function ChatWindow({
         }
         .chat-menu-item {
             width: 100%; padding: 12px 16px; background: transparent; border: none;
-            color: var(--danger); fontSize: 14px; textAlign: left; cursor: pointer;
+            color: var(--danger); font-size: 14px; text-align: left; cursor: pointer;
             display: flex; align-items: center; gap: 8px; transition: var(--transition-fast);
         }
         .chat-menu-item:hover { background-color: var(--bg-surface); }
 
         /* Messages */
         .messages-container {
-            flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 8px;
+            flex: 1; overflow-y: auto; padding: 16px 16px 12px; display: flex; flex-direction: column; gap: 8px;
             background-color: var(--bg-primary);
+            overscroll-behavior: contain;
+            scroll-padding-bottom: 24px;
         }
         .no-messages {
             flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
             color: var(--text-muted); gap: 8px;
         }
-        .no-messages-icon { fontSize: 32px; opacity: 0.5; }
+        .no-messages-icon { font-size: 32px; opacity: 0.5; }
 
         /* Message Bubble */
         .message-row { display: flex; width: 100%; margin-bottom: 2px; }
@@ -768,8 +767,9 @@ function ChatWindow({
           box-shadow: 0 6px 14px rgba(0, 0, 0, 0.2);
         }
         .message-bubble {
-            max-width: 75%; padding: 10px 14px; border-radius: 18px; word-wrap: break-word;
+            max-width: min(75%, 560px); padding: 10px 14px; border-radius: 18px; word-wrap: break-word;
             position: relative; box-shadow: var(--shadow-sm);
+            min-width: 0;
         }
         .message-bubble.mine {
             background: linear-gradient(135deg, #3b82f6, #2563eb); color: white;
@@ -808,12 +808,12 @@ function ChatWindow({
         }
         
         /* Media */
-        .media-wrapper { max-width: 280px; border-radius: 12px; overflow: hidden; margin-top: 4px; }
+        .media-wrapper { width: min(100%, 280px); max-width: 280px; border-radius: 12px; overflow: hidden; margin-top: 4px; }
         .image-preview { width: 100%; height: auto; display: block; cursor: pointer; }
         .video-preview { width: 100%; height: auto; display: block; border-radius: 12px; }
         .media-caption { margin-top: 6px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
 
-        .audio-wrapper { display: flex; align-items: center; gap: 8px; min-width: 200px; padding: 4px 0; }
+        .audio-wrapper { display: flex; align-items: center; gap: 8px; min-width: min(200px, 100%); width: min(100%, 280px); padding: 4px 0; }
         .audio-icon { font-size: 20px; }
         .audio-player { height: 36px; flex: 1; outline: none; }
         .audio-duration { font-size: 12px; opacity: 0.75; min-width: 38px; text-align: right; }
@@ -857,7 +857,7 @@ function ChatWindow({
 
         .location-card {
           display: block;
-          width: min(280px, 70vw);
+          width: min(280px, 100%);
           overflow: hidden;
           border-radius: 12px;
           color: inherit;
@@ -903,7 +903,7 @@ function ChatWindow({
 
         /* Controls */
         .delete-msg-btn {
-            background: transparent; border: none; fontSize: 12px; cursor: pointer;
+            background: transparent; border: none; font-size: 12px; cursor: pointer;
             opacity: 0.5; padding: 0; color: inherit;
         }
         .delete-msg-btn:hover { opacity: 1; }
@@ -912,7 +912,7 @@ function ChatWindow({
             color: var(--text-secondary);
             font-style: italic;
         }
-        .message-edit-block { display: grid; gap: 8px; min-width: 220px; }
+        .message-edit-block { display: grid; gap: 8px; min-width: min(220px, 100%); }
         .message-edit-input {
             width: 100%;
             resize: vertical;
@@ -955,13 +955,14 @@ function ChatWindow({
             position: fixed; top: 0; left: 0; right: 0; bottom: 0;
             background: rgba(0,0,0,0.7); backdrop-filter: blur(2px);
             display: flex; align-items: center; justify-content: center; z-index: 10000;
+            padding: 16px;
         }
         .modal-card {
             background-color: var(--bg-card); border-radius: var(--radius-card); padding: 24px;
-            max-width: 360px; width: 90%; textAlign: center; border: 1px solid var(--border-light);
+            max-width: 360px; width: 90%; text-align: center; border: 1px solid var(--border-light);
             box-shadow: var(--shadow-xl);
         }
-        .modal-icon { fontSize: 48px; margin-bottom: 16px; }
+        .modal-icon { font-size: 48px; margin-bottom: 16px; }
         .modal-title { font-size: 20px; font-weight: 700; margin-bottom: 12px; color: var(--text-primary); }
         .modal-text { font-size: 14px; line-height: 1.5; margin-bottom: 24px; color: var(--text-secondary); }
         
@@ -980,7 +981,7 @@ function ChatWindow({
         }
         .context-menu-item {
             padding: 10px 16px; background: transparent; border: none;
-            color: var(--text-primary); fontSize: 13px; cursor: pointer;
+            color: var(--text-primary); font-size: 13px; cursor: pointer;
             display: flex; align-items: center; gap: 8px; white-space: nowrap;
         }
         .context-menu-item:hover { background-color: var(--bg-surface); }
@@ -992,10 +993,10 @@ function ChatWindow({
             box-shadow: var(--shadow-lg); z-index: 100; min-width: 180px;
             border: 1px solid var(--border-light);
         }
-        .delete-confirm-text { color: var(--text-primary); fontSize: 13px; margin-bottom: 12px; text-align: center; }
+        .delete-confirm-text { color: var(--text-primary); font-size: 13px; margin-bottom: 12px; text-align: center; }
         .delete-confirm-actions { display: flex; gap: 8px; justify-content: center; }
-        .delete-confirm-cancel { padding: 6px 12px; background: var(--bg-surface); border: none; borderRadius: 6px; color: var(--text-primary); fontSize: 12px; cursor: pointer; }
-        .delete-confirm-yes { padding: 6px 12px; background: var(--danger); border: none; borderRadius: 6px; color: white; fontSize: 12px; cursor: pointer; }
+        .delete-confirm-cancel { padding: 6px 12px; background: var(--bg-surface); border: none; border-radius: 6px; color: var(--text-primary); font-size: 12px; cursor: pointer; }
+        .delete-confirm-yes { padding: 6px 12px; background: var(--danger); border: none; border-radius: 6px; color: white; font-size: 12px; cursor: pointer; }
         
         @keyframes slideDown { from { transform: translateY(-100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
         @keyframes pulse-banner {
@@ -1003,6 +1004,71 @@ function ChatWindow({
         }
         @keyframes pulse-btn { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.1); } }
         @keyframes shake { 0%, 100% { transform: rotate(0deg); } 25% { transform: rotate(-15deg); } 75% { transform: rotate(15deg); } }
+
+        @media (max-width: 768px) {
+            .incoming-call-banner, .incoming-group-call-banner {
+                top: calc(10px + var(--safe-area-top));
+                left: 10px;
+                right: 10px;
+                align-items: flex-start;
+                gap: 10px;
+                padding: 12px;
+            }
+
+            .call-banner-content {
+                min-width: 0;
+                flex: 1;
+            }
+
+            .call-banner-subtitle {
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
+            .chat-header {
+                padding-left: 12px;
+                padding-right: 12px;
+            }
+
+            .chat-location-hint {
+                display: none;
+            }
+
+            .messages-container {
+                padding: 12px 10px 10px;
+            }
+
+            .message-bubble {
+                max-width: min(88%, 100%);
+                padding: 10px 12px;
+            }
+
+            .text-content {
+                font-size: 14px;
+            }
+
+            .media-wrapper,
+            .audio-wrapper,
+            .location-card {
+                width: 100%;
+                max-width: 100%;
+            }
+
+            .video-note-button {
+                width: 132px;
+                height: 132px;
+            }
+
+            .video-note-modal {
+                width: min(100vw - 24px, 560px);
+            }
+
+            .modal-card {
+                width: 100%;
+                max-width: 100%;
+                padding: 18px;
+            }
+        }
       `}</style>
     </div>
   );

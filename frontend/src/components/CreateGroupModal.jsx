@@ -1152,12 +1152,14 @@ function CreateGroupModal({ token, onClose, onGroupCreated }) {
 
           @media (max-width: 768px) {
             .group-wizard-overlay {
-              padding: var(--space-10);
+              padding: 0;
             }
 
             .group-wizard-modal {
               width: 100%;
-              max-height: 94vh;
+              max-height: 100%;
+              height: 100%;
+              border-radius: 0;
             }
 
             .group-wizard-title {
@@ -1170,6 +1172,14 @@ function CreateGroupModal({ token, onClose, onGroupCreated }) {
             .group-wizard-footer {
               padding-left: var(--space-14);
               padding-right: var(--space-14);
+            }
+
+            .group-wizard-header {
+              padding-top: max(var(--space-20), var(--safe-area-top));
+            }
+
+            .group-wizard-footer {
+              padding-bottom: max(var(--space-14), var(--safe-area-bottom));
             }
 
             .group-step-text {

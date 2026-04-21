@@ -234,6 +234,7 @@ export default function NotificationsPage({ token }) {
       <style>{`
         .notifications-page {
           padding: var(--space-20);
+          min-width: 0;
         }
 
         .notifications-top {
@@ -296,6 +297,7 @@ export default function NotificationsPage({ token }) {
 
         .notif-content {
           flex: 1;
+          min-width: 0;
         }
 
         .notif-header {
@@ -362,13 +364,28 @@ export default function NotificationsPage({ token }) {
         }
 
         @media (max-width: 768px) {
+          .notifications-page {
+            padding: var(--space-14);
+          }
+
           .notifications-top {
             flex-direction: column;
             align-items: stretch;
           }
 
+          .notification-card {
+            align-items: flex-start;
+            padding: 14px 12px;
+            gap: 12px;
+          }
+
+          .notif-unread-dot {
+            margin-top: 6px;
+          }
+
           .mark-all-btn {
             width: 100%;
+            min-height: 44px;
           }
         }
       `}</style>

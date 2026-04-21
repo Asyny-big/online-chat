@@ -1,16 +1,17 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { Suspense, lazy, useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 import io from 'socket.io-client';
 import { API_URL, SOCKET_URL } from '@/config';
 import Sidebar from '@/components/Sidebar';
 import ChatWindow from '@/components/ChatWindow';
-import CallModal from '@/components/CallModal';
-import GroupCallModalLiveKit from '@/components/GroupCallModalLiveKit';
 import { useHrumToast } from '@/components/HrumToast';
 import { getTransactions } from '@/domains/hrum/api/economyApi';
 import { consumePendingPushAction, pushEvents } from '@/mobile/pushNotifications';
 import { useOnboarding } from '@/onboarding/OnboardingProvider';
 import { playIncomingCallTone, playNotificationTone } from '@/shared/lib/playNotificationTone';
+
+const CallModal = lazy(() => import('@/components/CallModal'));
+const GroupCallModalLiveKit = lazy(() => import('@/components/GroupCallModalLiveKit'));
 
 const WALLET_UPDATE_EVENT = 'govchat:wallet-update';
 const UNREAD_BADGES_REFRESH_EVENT = 'govchat:unread-badges-refresh';
@@ -2037,7 +2038,12 @@ function ChatPageInner({
   return (
     <div className="chat-page-layout">
       {/* Сайдбар с чатами */}
-      <div className={`chat-sidebar-wrapper ${selectedChat ? 'hidden' : ''}`}>
+      <div
+        className={`chat-sidebar-backdrop ${selectedChat ? 'visible' : ''}`}
+        onClick={() => setSelectedChat(null)}
+        aria-hidden={selectedChat ? 'false' : 'true'}
+      />
+      <div className={`chat-sidebar-wrapper ${selectedChat ? 'is-closed-mobile' : 'is-open-mobile'}`}>
         <Sidebar
           token={token}
           chats={chats}
@@ -2082,92 +2088,121 @@ function ChatPageInner({
 
       {/* Модальное окно 1-to-1 звонка */}
       {callState !== 'idle' && selectedChat?.type === 'private' && (
-        <CallModal
-          socket={socketRef.current}
-          callState={callState}
-          callType={callType}
-          callId={callId}
-          chatId={selectedChat?._id}
-          remoteUser={remoteUser}
-          onClose={resetCallState}
-          onCallAccepted={handleCallAccepted}
-          currentUserId={currentUserId}
-          token={token}
-          controlSessionSummary={callControlSession}
-        />
+        <Suspense fallback={null}>
+          <CallModal
+            socket={socketRef.current}
+            callState={callState}
+            callType={callType}
+            callId={callId}
+            chatId={selectedChat?._id}
+            remoteUser={remoteUser}
+            onClose={resetCallState}
+            onCallAccepted={handleCallAccepted}
+            currentUserId={currentUserId}
+            token={token}
+            controlSessionSummary={callControlSession}
+          />
+        </Suspense>
       )}
 
       {/* Модальное окно группового звонка */}
       {groupCallState !== 'idle' && groupCallData && (
-        <GroupCallModalLiveKit
-          socket={socketRef.current}
-          callId={groupCallData.callId}
-          chatId={groupCallData.chatId}
-          chatName={groupCallData.chatName}
-          callType={groupCallData.type}
-          isIncoming={groupCallState === 'incoming'}
-          autoJoin={!!groupCallData.autoJoin}
-          initiator={groupCallData.initiator}
-          existingParticipants={groupCallData.existingParticipants || []}
-          currentUserId={currentUserId}
-          token={token}
-          onClose={resetGroupCallState}
-          onJoin={handleJoinGroupCall}
-        />
+        <Suspense fallback={null}>
+          <GroupCallModalLiveKit
+            socket={socketRef.current}
+            callId={groupCallData.callId}
+            chatId={groupCallData.chatId}
+            chatName={groupCallData.chatName}
+            callType={groupCallData.type}
+            isIncoming={groupCallState === 'incoming'}
+            autoJoin={!!groupCallData.autoJoin}
+            initiator={groupCallData.initiator}
+            existingParticipants={groupCallData.existingParticipants || []}
+            currentUserId={currentUserId}
+            token={token}
+            onClose={resetGroupCallState}
+            onJoin={handleJoinGroupCall}
+          />
+        </Suspense>
       )}
 
       <style>{`
         .chat-page-layout {
-            display: flex;
-            height: 100vh;
-            height: 100dvh;
+            display: grid;
+            grid-template-columns: minmax(280px, 320px) minmax(0, 1fr);
+            height: 100%;
+            min-height: 0;
             overflow: hidden;
             background: var(--bg-primary);
             position: relative;
         }
 
+        .chat-sidebar-backdrop {
+            display: none;
+        }
+
         .chat-sidebar-wrapper {
-            width: 320px;
-            flex-shrink: 0;
             height: 100%;
+            min-height: 0;
+            min-width: 0;
             transition: transform 0.3s ease;
             border-right: 1px solid var(--border-color);
+            background-color: var(--bg-primary);
         }
 
         .chat-window-wrapper {
-            flex: 1;
             display: flex;
             flex-direction: column;
             height: 100%;
             min-width: 0;
+            min-height: 0;
         }
 
         @media (max-width: 768px) {
+            .chat-page-layout {
+                grid-template-columns: minmax(0, 1fr);
+            }
+
+            .chat-sidebar-backdrop {
+                position: fixed;
+                inset: 0;
+                display: block;
+                z-index: 58;
+                opacity: 0;
+                pointer-events: none;
+                background: rgba(2, 6, 23, 0.62);
+                backdrop-filter: blur(2px);
+                transition: opacity 0.24s ease;
+            }
+
+            .chat-sidebar-backdrop.visible {
+                opacity: 1;
+                pointer-events: auto;
+            }
+
             .chat-sidebar-wrapper {
-                position: absolute;
-                top: 0; left: 0;
-                width: 100%; height: 100%;
-                z-index: 10;
-                background-color: var(--bg-primary);
+                position: fixed;
+                top: 0;
+                left: 0;
+                bottom: 0;
+                width: min(100vw, 380px);
+                max-width: 100%;
+                z-index: 60;
+                box-shadow: 0 24px 56px rgba(2, 6, 23, 0.42);
+                border-right: 1px solid var(--border-color);
+            }
+
+            .chat-sidebar-wrapper.is-open-mobile {
                 transform: translateX(0);
             }
-            
-            .chat-sidebar-wrapper.hidden {
-                transform: translateX(-100%);
+
+            .chat-sidebar-wrapper.is-closed-mobile {
+                transform: translateX(calc(-100% - 24px));
                 pointer-events: none;
             }
 
             .chat-window-wrapper {
-                position: absolute;
-                top: 0; left: 0; right: 0; bottom: 0;
-                z-index: 20;
-                background-color: var(--bg-primary);
-                transform: translateX(100%);
-                transition: transform 0.3s ease;
-            }
-
-            .chat-window-wrapper.active {
-                transform: translateX(0);
+                width: 100%;
             }
         }
       `}</style>

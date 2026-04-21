@@ -1,9 +1,9 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import axios from 'axios';
 import { API_URL } from '@/config';
 import PostComposer from '@/components/PostComposer';
 import PostCard from '@/components/PostCard';
-import CommentsModal from '@/components/CommentsModal';
+const CommentsModal = lazy(() => import('@/components/CommentsModal'));
 
 export default function FeedPage({ token }) {
   const [feedMode, setFeedMode] = useState('subscriptions');
@@ -169,17 +169,20 @@ export default function FeedPage({ token }) {
       </div>
 
       {activePostId ? (
-        <CommentsModal
-          token={token}
-          postId={activePostId}
-          onClose={() => setActivePostId(null)}
-          onCommentCreated={handleCommentCreated}
-        />
+        <Suspense fallback={null}>
+          <CommentsModal
+            token={token}
+            postId={activePostId}
+            onClose={() => setActivePostId(null)}
+            onCommentCreated={handleCommentCreated}
+          />
+        </Suspense>
       ) : null}
 
       <style>{`
         .feed-page {
           padding: var(--space-16) 0 var(--space-24);
+          min-width: 0;
         }
 
         .feed-header {
@@ -259,8 +262,35 @@ export default function FeedPage({ token }) {
         }
 
         @media (max-width: 768px) {
+          .feed-page {
+            padding-top: var(--space-12);
+          }
+
+          .feed-header {
+            padding: 0 0 var(--space-6);
+          }
+
           .feed-title {
             display: block;
+          }
+
+          .feed-tabs {
+            gap: 4px;
+          }
+
+          .feed-tab {
+            min-height: 44px;
+            padding-inline: 8px;
+            font-size: 13px;
+          }
+
+          .empty-state {
+            padding: var(--space-24) var(--space-12);
+            margin: 0;
+          }
+
+          .load-more-container {
+            padding-inline: 0;
           }
         }
       `}</style>

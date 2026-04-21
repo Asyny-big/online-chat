@@ -298,6 +298,7 @@ export default function PostCard({
 
         .post-footer {
           display: flex;
+          flex-wrap: wrap;
           gap: var(--space-8);
           border-top: 1px solid var(--border-color);
           padding-top: var(--space-12);
@@ -349,6 +350,17 @@ export default function PostCard({
 
         .count {
           min-width: 12px;
+        }
+
+        @media (max-width: 768px) {
+          .post-card {
+            padding: 14px 12px;
+          }
+
+          .action-btn {
+            min-height: 40px;
+            padding: 8px 10px;
+          }
         }
       `}</style>
     </article>

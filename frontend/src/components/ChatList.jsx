@@ -105,6 +105,7 @@ function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
             flex: 1;
             overflow-y: auto;
             padding: 12px;
+            overscroll-behavior: contain;
         }
 
         .chat-list-empty {
@@ -348,6 +349,35 @@ function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
             color: white;
         }
 
+        @media (max-width: 768px) {
+            .chat-list-container {
+                padding: 10px;
+            }
+
+            .chat-list-label {
+                padding-inline: 2px;
+                margin-bottom: 10px;
+            }
+
+            .chat-item {
+                padding: 12px;
+                border-radius: 14px;
+            }
+
+            .chat-item-avatar {
+                width: 48px;
+                height: 48px;
+            }
+
+            .chat-item-name {
+                font-size: 15px;
+            }
+
+            .chat-item-last-msg {
+                font-size: 13px;
+            }
+        }
+
         @keyframes pulse-call {
             0%, 100% { background: rgba(239, 68, 68, 0.15); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
             50% { background: rgba(239, 68, 68, 0.25); box-shadow: 0 0 0 4px rgba(239, 68, 68, 0); }
@@ -370,4 +400,4 @@ function ChatList({ chats, selectedChat, onSelectChat, incomingCallChatId }) {
   );
 }
 
-export default ChatList;
+export default React.memo(ChatList);

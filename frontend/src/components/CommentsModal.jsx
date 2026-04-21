@@ -475,6 +475,45 @@ export default function CommentsModal({ token, postId, onClose, onCommentCreated
           object-fit: cover;
           display: block;
         }
+
+        @media (max-width: 768px) {
+          .comments-modal-overlay {
+            padding: 0;
+          }
+
+          .comments-modal {
+            width: 100%;
+            max-height: 100%;
+            height: 100%;
+            border-radius: 0;
+            padding:
+              max(var(--space-14), var(--safe-area-top))
+              var(--space-12)
+              max(var(--space-12), var(--safe-area-bottom));
+          }
+
+          .comments-form-footer {
+            flex-direction: column;
+            align-items: stretch;
+          }
+
+          .comments-form-left {
+            flex-direction: column;
+            align-items: stretch;
+          }
+
+          .comments-submit {
+            width: 100%;
+            min-width: 0;
+            min-height: 44px;
+          }
+
+          .comment-meta {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 4px;
+          }
+        }
       `}</style>
     </div>
   );

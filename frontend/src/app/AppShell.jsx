@@ -18,9 +18,11 @@ function PrimaryNav({ show, activeKey, onNavigate, onLogout, badgeCounts }) {
   );
 }
 
-function RouteOutlet({ children, withRightPanel }) {
+function RouteOutlet({ children, withRightPanel, hasPrimaryNav }) {
   return (
-    <main className={`app-shell-main ${withRightPanel ? 'with-right-panel' : ''}`}>
+    <main
+      className={`app-shell-main ${withRightPanel ? 'with-right-panel' : ''} ${hasPrimaryNav ? 'with-primary-nav' : ''}`}
+    >
       {children}
     </main>
   );
@@ -54,7 +56,9 @@ export default function AppShell({
           badgeCounts={navBadgeCounts}
         />
 
-        <RouteOutlet withRightPanel={withRightPanel}>{children}</RouteOutlet>
+        <RouteOutlet withRightPanel={withRightPanel} hasPrimaryNav={showPrimaryNav}>
+          {children}
+        </RouteOutlet>
 
         {withRightPanel ? rightPanel : null}
       </div>
@@ -63,8 +67,8 @@ export default function AppShell({
 
       <style>{`
         .app-shell-root {
-          height: 100vh;
-          min-height: 100vh;
+          height: 100%;
+          min-height: 100dvh;
           position: relative;
           overflow: hidden;
         }
@@ -74,6 +78,8 @@ export default function AppShell({
           grid-template-columns: var(--sidebar-width) 1fr;
           height: 100%;
           min-height: 100%;
+          min-width: 0;
+          box-sizing: border-box;
         }
 
         .app-shell-layout.with-right-panel {
@@ -87,6 +93,8 @@ export default function AppShell({
           min-height: 0;
           overflow-y: auto;
           overflow-x: hidden;
+          overscroll-behavior: contain;
+          -webkit-overflow-scrolling: touch;
         }
 
         .app-shell-main.with-right-panel {
@@ -107,6 +115,19 @@ export default function AppShell({
         @media (max-width: 1024px) {
           .app-shell-layout.with-right-panel {
             grid-template-columns: var(--sidebar-width) 1fr;
+          }
+        }
+
+        @media (max-width: 768px) {
+          .app-shell-layout,
+          .app-shell-layout.with-right-panel {
+            grid-template-columns: minmax(0, 1fr);
+            padding-bottom: calc(var(--bottom-nav-height) + var(--safe-area-bottom));
+          }
+
+          .app-shell-main {
+            border-left: none;
+            border-right: none;
           }
         }
       `}</style>
