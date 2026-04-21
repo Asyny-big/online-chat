@@ -23,6 +23,11 @@ android {
         buildConfigField("String", "API_BASE_URL", "\"https://govchat.ru/api/\"")
         buildConfigField("String", "SOCKET_BASE_URL", "\"https://govchat.ru\"")
         buildConfigField("String", "LIVEKIT_URL", "\"wss://govchat.ru/rtc\"")
+        buildConfigField(
+            "String",
+            "TUNNEL_CONFIG_URL",
+            "\"https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile.txt\""
+        )
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -40,8 +45,8 @@ android {
         abi {
             isEnable = true
             reset()
-            include("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
-            isUniversalApk = true
+            include("arm64-v8a")
+            isUniversalApk = false
         }
     }
     compileOptions {
@@ -66,6 +71,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.fragment.ktx)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.core.splashscreen)
     implementation(libs.androidx.datastore.preferences)
@@ -74,6 +80,7 @@ dependencies {
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
+    implementation(files("libs/libbox.aar"))
 
     implementation(libs.kotlinx.coroutines.android)
 

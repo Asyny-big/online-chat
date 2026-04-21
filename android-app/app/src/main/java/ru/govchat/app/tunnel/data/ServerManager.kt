@@ -2,19 +2,20 @@ package ru.govchat.app.tunnel.data
 
 import android.content.Context
 import android.util.Base64
+import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import ru.govchat.app.BuildConfig
 import java.net.HttpURLConnection
 import java.net.URL
 
 class ServerManager(context: Context) {
 
     companion object {
-        // Change this to your actual raw Github URL that returns the config
-        private const val GITHUB_CONFIG_URL = "https://raw.githubusercontent.com/YourOrg/YourRepo/main/config_v1.json"
+        private const val TAG = "ServerManager"
         private const val PREFS_NAME = "secure_tunnel_prefs"
         private const val KEY_SERVERS = "cached_vless_servers"
     }
@@ -47,43 +48,81 @@ class ServerManager(context: Context) {
 
     suspend fun fetchAndCacheServers(): Boolean = withContext(Dispatchers.IO) {
         try {
-            val url = URL(GITHUB_CONFIG_URL)
+            require(BuildConfig.TUNNEL_CONFIG_URL.isNotBlank()) {
+                "BuildConfig.TUNNEL_CONFIG_URL is blank"
+            }
+
+            val url = URL(BuildConfig.TUNNEL_CONFIG_URL)
             val connection = url.openConnection() as HttpURLConnection
             connection.connectTimeout = 10000
             connection.readTimeout = 10000
             connection.requestMethod = "GET"
+            connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("User-Agent", "GovChat-Android/${BuildConfig.VERSION_NAME}")
 
             if (connection.responseCode == HttpURLConnection.HTTP_OK) {
                 val responseString = connection.inputStream.bufferedReader().use { it.readText() }
-                
-                val responseJson = JSONObject(responseString)
-                val base64Array = responseJson.getJSONArray("servers")
-                
-                val decodedServers = mutableListOf<String>()
-                
-                for (i in 0 until base64Array.length()) {
-                    val base64String = base64Array.getString(i)
-                    val decodedBytes = Base64.decode(base64String, Base64.DEFAULT)
-                    decodedServers.add(String(decodedBytes, Charsets.UTF_8))
-                }
+
+                val decodedServers = parseServersResponse(responseString)
 
                 if (decodedServers.isNotEmpty()) {
                     val cacheJson = JSONObject().apply {
                         put("servers", decodedServers)
                     }
                     sharedPrefs.edit().putString(KEY_SERVERS, cacheJson.toString()).apply()
+                    Log.i(TAG, "Cached ${decodedServers.size} VLESS servers from ${BuildConfig.TUNNEL_CONFIG_URL}")
                     return@withContext true
                 }
             }
+            Log.e(TAG, "Config fetch failed. responseCode=${connection.responseCode}")
             return@withContext false
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "Failed to fetch server config", e)
             return@withContext false
         }
     }
     
     fun hasCachedServers(): Boolean {
-        return sharedPrefs.contains(KEY_SERVERS)
+        return getCachedServers().isNotEmpty()
+    }
+
+    private fun parseServersResponse(responseString: String): List<String> {
+        val trimmed = responseString.trim()
+        if (trimmed.isEmpty()) return emptyList()
+
+        return if (trimmed.startsWith("{")) {
+            parseJsonServers(trimmed)
+        } else {
+            parsePlainTextServers(trimmed)
+        }
+    }
+
+    private fun parseJsonServers(responseString: String): List<String> {
+        val responseJson = JSONObject(responseString)
+        val base64Array = responseJson.getJSONArray("servers")
+        val decodedServers = mutableListOf<String>()
+
+        for (i in 0 until base64Array.length()) {
+            val base64String = base64Array.getString(i)
+            val decodedBytes = Base64.decode(base64String, Base64.DEFAULT)
+            val decoded = String(decodedBytes, Charsets.UTF_8).trim()
+            if (decoded.startsWith("vless://")) {
+                decodedServers.add(decoded)
+            }
+        }
+
+        return decodedServers
+    }
+
+    private fun parsePlainTextServers(responseString: String): List<String> {
+        return responseString
+            .lineSequence()
+            .map(String::trim)
+            .filter { it.isNotEmpty() }
+            .filterNot { it.startsWith("#") }
+            .filter { it.startsWith("vless://") }
+            .distinct()
+            .toList()
     }
     
     fun clearCache() {

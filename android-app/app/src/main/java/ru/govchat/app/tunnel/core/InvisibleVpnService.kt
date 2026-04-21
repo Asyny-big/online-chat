@@ -1,25 +1,37 @@
 package ru.govchat.app.tunnel.core
 
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
 import android.net.VpnService
+import android.net.wifi.WifiManager
 import android.os.Build
+import android.os.IBinder
 import android.os.ParcelFileDescriptor
+import android.os.Process
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import io.nekohasekai.libbox.InterfaceUpdateListener
+import io.nekohasekai.libbox.NetworkInterfaceIterator
+import io.nekohasekai.libbox.Notification as LibboxNotification
+import io.nekohasekai.libbox.PlatformInterface
+import io.nekohasekai.libbox.RoutePrefix
+import io.nekohasekai.libbox.RoutePrefixIterator
+import io.nekohasekai.libbox.TunOptions
+import io.nekohasekai.libbox.WIFIState
+import ru.govchat.app.tunnel.TunnelManager
 import java.io.IOException
 
-class InvisibleVpnService : VpnService() {
+class InvisibleVpnService : VpnService(), PlatformInterface {
 
     private var vpnInterface: ParcelFileDescriptor? = null
-    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val singBoxRunner = SingBoxRunner.getInstance()
+    private var stopRequested = false
 
     companion object {
         const val ACTION_START = "ru.govchat.app.START_VPN"
@@ -34,84 +46,294 @@ class InvisibleVpnService : VpnService() {
             ACTION_START -> startTunnel()
             ACTION_STOP -> stopTunnel()
         }
-        return START_STICKY
+        return START_NOT_STICKY
+    }
+
+    override fun onBind(intent: Intent): IBinder? {
+        val binder = super.onBind(intent)
+        return binder
     }
 
     private fun startTunnel() {
-        if (vpnInterface != null) return
-        startForeground(NOTIFICATION_ID, createNotification())
+        if (singBoxRunner.isRunning()) {
+            Log.w(TAG, "VPN tunnel is already running")
+            return
+        }
 
+        stopRequested = false
         try {
-            val builder = Builder()
-                .setSession("App Secure Tunnel")
-                .setMtu(9000)
-                .addAddress("172.19.0.1", 30)
-                .addAddress("fdfe:dcba:9876::1", 126)
-                .addDnsServer("1.1.1.1")
-                .addDnsServer("8.8.8.8")
-                .addRoute("0.0.0.0", 0)
-                .addRoute("::", 0)
-                .addAllowedApplication(applicationContext.packageName)
-                .setBlocking(true)
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                builder.allowBypass()
-            }
-
-            vpnInterface = builder.establish()
-
-            vpnInterface?.let { fd ->
-                val configJson = ConfigBuilder.buildConfig(applicationContext)
-                singBoxRunner.start(fd.fd, configJson)
-            } ?: run {
-                Log.e(TAG, "Failed to create VPN interface")
-                stopSelf()
-            }
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Error starting VPN", e)
+            startTunnelForeground()
+            val configJson = ConfigBuilder.buildConfig(applicationContext)
+            singBoxRunner.start(applicationContext, configJson, this)
+            TunnelManager.getInstance(applicationContext).markTunnelRunning(true)
+            Log.i(TAG, "VPN tunnel started. stderr=${singBoxRunner.stderrLogPath()}")
+        } catch (error: Throwable) {
+            Log.e(TAG, "Error starting VPN tunnel", error)
             stopTunnel()
         }
     }
 
+    private fun startTunnelForeground() {
+        val notification = createNotification()
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        }.onFailure { error ->
+            Log.e(TAG, "Failed to start VPN foreground service", error)
+            throw error
+        }
+    }
+
     private fun stopTunnel() {
-        serviceScope.cancel()
+        if (stopRequested) return
+        stopRequested = true
+
         singBoxRunner.stop()
+        TunnelManager.getInstance(applicationContext).markTunnelRunning(false)
+
         try {
             vpnInterface?.close()
-        } catch (e: IOException) {
-            Log.e(TAG, "Error closing interface", e)
+        } catch (error: IOException) {
+            Log.e(TAG, "Error closing VPN interface", error)
+        } finally {
+            vpnInterface = null
         }
-        vpnInterface = null
-        stopForeground(true)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
         stopSelf()
+        Log.i(TAG, "VPN tunnel stopped")
     }
 
     private fun createNotification(): Notification {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Защищенное соединение",
+                "Secure tunnel",
                 NotificationManager.IMPORTANCE_LOW
             )
             getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
         }
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Оптимизация соединения")
-            .setContentText("Приложение настраивает защищенный маршрут...")
-            // Replace with your actual app icon if needed, e.g. R.mipmap.ic_launcher
+            .setContentTitle("Secure tunnel active")
+            .setContentText("GovChat is routing app traffic through sing-box")
             .setSmallIcon(android.R.drawable.ic_secure)
+            .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .build()
     }
 
     override fun onDestroy() {
-        super.onDestroy()
         stopTunnel()
+        super.onDestroy()
     }
 
     override fun onRevoke() {
-        super.onRevoke()
+        Log.w(TAG, "VPN permission revoked by the system")
         stopTunnel()
+        super.onRevoke()
+    }
+
+    override fun autoDetectInterfaceControl(fd: Int) {
+        protect(fd)
+    }
+
+    override fun clearDNSCache() = Unit
+
+    override fun closeDefaultInterfaceMonitor(listener: InterfaceUpdateListener) = Unit
+
+    override fun findConnectionOwner(
+        ipProtocol: Int,
+        sourceAddress: String,
+        sourcePort: Int,
+        destinationAddress: String,
+        destinationPort: Int
+    ): Int {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            return Process.INVALID_UID
+        }
+
+        val connectivityManager =
+            getSystemService(ConnectivityManager::class.java) ?: return Process.INVALID_UID
+
+        return runCatching {
+            connectivityManager.getConnectionOwnerUid(
+                ipProtocol,
+                java.net.InetSocketAddress(sourceAddress, sourcePort),
+                java.net.InetSocketAddress(destinationAddress, destinationPort)
+            )
+        }.getOrElse { error ->
+            Log.w(TAG, "Unable to resolve connection owner", error)
+            Process.INVALID_UID
+        }
+    }
+
+    override fun getInterfaces(): NetworkInterfaceIterator {
+        return EmptyNetworkInterfaceIterator
+    }
+
+    override fun includeAllNetworks(): Boolean = false
+
+    override fun openTun(options: TunOptions): Int {
+        if (prepare(this) != null) {
+            error("android: missing vpn permission")
+        }
+
+        val mtu = options.mtu.coerceIn(1280, 1500)
+        val builder = Builder()
+            .setSession("GovChat Secure Tunnel")
+            .setMtu(mtu)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            builder.setBlocking(true)
+            builder.setMetered(false)
+            builder.allowBypass()
+        }
+
+        val hasInet4 = addAddresses(builder, options.inet4Address)
+        val hasInet6 = addAddresses(builder, options.inet6Address)
+
+        if (options.autoRoute) {
+            val dnsAddress = runCatching { options.dnsServerAddress.value }.getOrNull()
+            if (!dnsAddress.isNullOrBlank()) {
+                builder.addDnsServer(dnsAddress)
+            }
+
+            addRoutes(builder, options.inet4RouteAddress, "0.0.0.0", hasInet4)
+            addRoutes(builder, options.inet6RouteAddress, "::", hasInet6)
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                excludeRoutes(builder, options.inet4RouteExcludeAddress)
+                excludeRoutes(builder, options.inet6RouteExcludeAddress)
+            }
+        }
+
+        try {
+            builder.addAllowedApplication(packageName)
+        } catch (error: PackageManager.NameNotFoundException) {
+            Log.e(TAG, "Failed to configure split tunneling for package $packageName", error)
+        }
+
+        runCatching { vpnInterface?.close() }
+            .onFailure { error -> Log.w(TAG, "Failed to close previous VPN interface", error) }
+        vpnInterface = builder.establish()
+            ?: error("android: failed to establish VPN interface")
+
+        Log.i(
+            TAG,
+            "openTun established. fd=${vpnInterface!!.fd}, mtu=$mtu, autoRoute=${options.autoRoute}, strictRoute=${options.strictRoute}"
+        )
+        return vpnInterface!!.fd
+    }
+
+    override fun packageNameByUid(uid: Int): String {
+        return packageManager.getPackagesForUid(uid)?.firstOrNull().orEmpty()
+    }
+
+    @SuppressLint("MissingPermission")
+    override fun readWIFIState(): WIFIState? {
+        val wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as? WifiManager ?: return null
+        @Suppress("DEPRECATION")
+        val wifiInfo = wifiManager.connectionInfo ?: return null
+        var ssid = wifiInfo.ssid ?: return null
+        if (ssid == "<unknown ssid>") {
+            ssid = ""
+        } else if (ssid.startsWith("\"") && ssid.endsWith("\"")) {
+            ssid = ssid.substring(1, ssid.length - 1)
+        }
+        return WIFIState(ssid, wifiInfo.bssid.orEmpty())
+    }
+
+    override fun sendNotification(notification: LibboxNotification) {
+        Log.i(TAG, "sing-box notification: ${notification.title} ${notification.body}")
+    }
+
+    override fun startDefaultInterfaceMonitor(listener: InterfaceUpdateListener) = Unit
+
+    override fun uidByPackageName(packageName: String): Int {
+        return runCatching {
+            packageManager.getApplicationInfo(packageName, 0).uid
+        }.getOrElse { error ->
+            Log.w(TAG, "uidByPackageName failed for $packageName", error)
+            Process.INVALID_UID
+        }
+    }
+
+    override fun underNetworkExtension(): Boolean = false
+
+    override fun usePlatformAutoDetectInterfaceControl(): Boolean = true
+
+    override fun usePlatformDefaultInterfaceMonitor(): Boolean = false
+
+    override fun usePlatformInterfaceGetter(): Boolean = false
+
+    override fun useProcFS(): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+
+    override fun writeLog(message: String) {
+        Log.i("sing-box", message)
+    }
+
+    private fun addAddresses(builder: Builder, iterator: RoutePrefixIterator): Boolean {
+        var hasItems = false
+        while (iterator.hasNext()) {
+            hasItems = true
+            val prefix = iterator.next()
+            builder.addAddress(prefix.address(), prefix.prefix())
+        }
+        return hasItems
+    }
+
+    private fun addRoutes(
+        builder: Builder,
+        iterator: RoutePrefixIterator,
+        fallbackAddress: String,
+        hasAddressFamily: Boolean
+    ) {
+        if (iterator.hasNext()) {
+            while (iterator.hasNext()) {
+                val prefix = iterator.next()
+                builder.addRoute(prefix.address(), prefix.prefix())
+            }
+            return
+        }
+
+        if (hasAddressFamily) {
+            builder.addRoute(fallbackAddress, 0)
+        }
+    }
+
+    private fun excludeRoutes(builder: Builder, iterator: RoutePrefixIterator) {
+        while (iterator.hasNext()) {
+            val prefix = iterator.next()
+            runCatching {
+                builder.excludeRoute(
+                    android.net.IpPrefix(
+                        java.net.InetAddress.getByName(prefix.address()),
+                        prefix.prefix()
+                    )
+                )
+            }.onFailure { error ->
+                Log.w(TAG, "Failed to exclude route ${prefix.address()}/${prefix.prefix()}", error)
+            }
+        }
+    }
+
+    private object EmptyNetworkInterfaceIterator : NetworkInterfaceIterator {
+        override fun hasNext(): Boolean = false
+        override fun next(): io.nekohasekai.libbox.NetworkInterface {
+            throw NoSuchElementException("No network interface data exposed")
+        }
     }
 }

@@ -2,11 +2,12 @@ package ru.govchat.app.tunnel.core
 
 import android.content.Context
 import android.util.Log
-import ru.govchat.app.tunnel.data.ServerManager
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URI
 import java.net.URLDecoder
+import ru.govchat.app.BuildConfig
+import ru.govchat.app.tunnel.data.ServerManager
 
 object ConfigBuilder {
 
@@ -70,10 +71,11 @@ object ConfigBuilder {
         val tunInbound = JSONObject().apply {
             put("type", "tun")
             put("tag", "tun-in")
-            put("inet4_address", "172.19.0.1/30") 
+            put("mtu", 1400)
+            put("inet4_address", "172.19.0.1/30")
             put("inet6_address", "fdfe:dcba:9876::1/126")
-            put("auto_route", false)
-            put("strict_route", false)
+            put("auto_route", true)
+            put("strict_route", true)
             put("stack", "system")
             put("endpoint_independent_nat", true)
         }
@@ -98,7 +100,8 @@ object ConfigBuilder {
 
         val finalConfig = JSONObject().apply {
             put("log", JSONObject().apply {
-                put("level", "info")
+                put("level", SingBoxRunner.getInstance().logLevel())
+                put("timestamp", true)
             })
             put("dns", JSONObject().apply {
                 put("servers", JSONArray().apply {
@@ -120,6 +123,7 @@ object ConfigBuilder {
             put("route", routeObject)
         }
 
+        Log.i(TAG, "Built sing-box config. servers=${serverTags.size}, logLevel=${SingBoxRunner.getInstance().logLevel()}")
         return finalConfig.toString()
     }
 
@@ -131,6 +135,12 @@ object ConfigBuilder {
         val host = uri.host
         val port = uri.port
         val queryParams = getQueryMap(uri.query)
+        require(!uuid.isNullOrBlank()) { "VLESS UUID is missing" }
+        require(!host.isNullOrBlank()) { "VLESS host is missing" }
+        require(port > 0) { "VLESS port is invalid: $port" }
+
+        val transportType = queryParams["type"] ?: "tcp"
+        val securityType = queryParams["security"] ?: "none"
 
         val outbound = JSONObject().apply {
             put("type", "vless")
@@ -138,25 +148,65 @@ object ConfigBuilder {
             put("server", host)
             put("server_port", port)
             put("uuid", uuid)
-            put("flow", queryParams["flow"] ?: "xtls-rprx-vision")
             put("packet_encoding", "xudp")
         }
 
-        if (queryParams["security"] == "reality") {
+        queryParams["flow"]
+            ?.takeIf { it.isNotBlank() && it != "none" }
+            ?.let { outbound.put("flow", it) }
+
+        if (securityType == "tls" || securityType == "reality") {
             val tlsObject = JSONObject().apply {
                 put("enabled", true)
                 put("server_name", queryParams["sni"] ?: host)
-                put("reality", JSONObject().apply {
-                    put("enabled", true)
-                    put("public_key", queryParams["pbk"] ?: "")
-                    put("short_id", queryParams["sid"] ?: "")
-                })
+                queryParams["alpn"]
+                    ?.split(",")
+                    ?.map(String::trim)
+                    ?.filter(String::isNotEmpty)
+                    ?.takeIf { it.isNotEmpty() }
+                    ?.let { put("alpn", JSONArray(it)) }
+                queryParams["fp"]
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let {
+                        put("utls", JSONObject().apply {
+                            put("enabled", true)
+                            put("fingerprint", it)
+                        })
+                    }
+                if (securityType == "reality") {
+                    put("reality", JSONObject().apply {
+                        put("enabled", true)
+                        put("public_key", queryParams["pbk"] ?: "")
+                        put("short_id", queryParams["sid"] ?: "")
+                    })
+                }
             }
             outbound.put("tls", tlsObject)
         }
 
         val transportObject = JSONObject().apply {
-            put("type", queryParams["type"] ?: "tcp")
+            put("type", transportType)
+            when (transportType) {
+                "ws" -> {
+                    queryParams["path"]?.let { put("path", it) }
+                    queryParams["host"]
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { headerHost ->
+                            put("headers", JSONObject().apply {
+                                put("Host", headerHost)
+                            })
+                        }
+                }
+
+                "grpc" -> {
+                    queryParams["serviceName"]?.let { put("service_name", it) }
+                }
+
+                "httpupgrade" -> {
+                    queryParams["path"]?.let { put("path", it) }
+                    queryParams["host"]?.let { put("host", it) }
+                }
+            }
         }
         outbound.put("transport", transportObject)
 

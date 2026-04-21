@@ -1,9 +1,11 @@
 package ru.govchat.app
 
+import android.app.Activity
 import android.app.PictureInPictureParams
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.net.VpnService
 import android.os.Bundle
 import android.os.Build
 import android.util.Rational
@@ -19,13 +21,17 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import ru.govchat.app.core.notification.NotificationCommand
 import ru.govchat.app.core.notification.NotificationIntents
+import ru.govchat.app.tunnel.TunnelManager
 import ru.govchat.app.ui.update.AppUpdateDialog
 import ru.govchat.app.ui.navigation.GovChatNavGraph
 import ru.govchat.app.ui.theme.GovChatTheme
@@ -38,12 +44,41 @@ class MainActivity : ComponentActivity() {
         extraBufferCapacity = 8
     )
     private var canEnterPipForCall: Boolean = false
+    private var vpnPermissionRequestInFlight = false
+    private val vpnPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        vpnPermissionRequestInFlight = false
+        TunnelManager.getInstance(this).onVpnPermissionResult(result.resultCode == Activity.RESULT_OK)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val container = (application as GovChatApp).container
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                TunnelManager.getInstance(this@MainActivity).vpnPermissionRequired.collect { required ->
+                    if (!required) {
+                        vpnPermissionRequestInFlight = false
+                        return@collect
+                    }
+                    if (vpnPermissionRequestInFlight) {
+                        return@collect
+                    }
+
+                    val intent = VpnService.prepare(this@MainActivity)
+                    if (intent == null) {
+                        TunnelManager.getInstance(this@MainActivity).onVpnPermissionResult(true)
+                        return@collect
+                    }
+
+                    vpnPermissionRequestInFlight = true
+                    vpnPermissionLauncher.launch(intent)
+                }
+            }
+        }
         setContent {
             val isInPipMode = pipModeFlow.collectAsStateWithLifecycle().value
             val updateState = container.appUpdateManager.state.collectAsStateWithLifecycle().value

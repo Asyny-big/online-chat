@@ -6,6 +6,7 @@ import ru.govchat.app.core.AppContainer
 import ru.govchat.app.core.lifecycle.RealtimeLifecycleObserver
 import ru.govchat.app.core.notification.CallNotificationManager
 import ru.govchat.app.core.notification.NotificationChannels
+import ru.govchat.app.tunnel.core.SingBoxRunner
 
 class GovChatApp : Application() {
 
@@ -18,6 +19,7 @@ class GovChatApp : Application() {
         container = AppContainer(this)
         NotificationChannels.ensureCreated(this)
         CallNotificationManager.ensureInitialized(this)
+        SingBoxRunner.getInstance().initialize(this)
 
         // Initialize VLESS secure tunnel manager
         ru.govchat.app.tunnel.TunnelManager.getInstance(this).initialize()

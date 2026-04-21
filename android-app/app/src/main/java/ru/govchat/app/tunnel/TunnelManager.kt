@@ -2,7 +2,9 @@ package ru.govchat.app.tunnel
 
 import android.content.Context
 import android.content.Intent
+import android.net.VpnService
 import android.util.Log
+import androidx.core.content.ContextCompat
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
@@ -13,7 +15,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import ru.govchat.app.tunnel.core.InvisibleVpnService
 import ru.govchat.app.tunnel.data.ServerManager
@@ -30,6 +34,9 @@ class TunnelManager private constructor(private val context: Context) {
     
     private var isTracking = false
     private var isVpnRunning = false
+    private var pendingTunnelStart = false
+    private val _vpnPermissionRequired = MutableStateFlow(false)
+    val vpnPermissionRequired: StateFlow<Boolean> = _vpnPermissionRequired
 
     companion object {
         private const val TAG = "TunnelManager"
@@ -100,11 +107,17 @@ class TunnelManager private constructor(private val context: Context) {
 
     private fun startTunnel() {
         if (isVpnRunning) return
+        if (VpnService.prepare(applicationContext) != null) {
+            pendingTunnelStart = true
+            _vpnPermissionRequired.value = true
+            Log.w(TAG, "VPN permission has not been granted yet")
+            return
+        }
+
         val intent = Intent(applicationContext, InvisibleVpnService::class.java).apply {
             action = InvisibleVpnService.ACTION_START
         }
-        applicationContext.startService(intent)
-        isVpnRunning = true
+        ContextCompat.startForegroundService(applicationContext, intent)
     }
 
     private fun stopTunnel() {
@@ -112,8 +125,7 @@ class TunnelManager private constructor(private val context: Context) {
         val intent = Intent(applicationContext, InvisibleVpnService::class.java).apply {
             action = InvisibleVpnService.ACTION_STOP
         }
-        applicationContext.startService(intent)
-        isVpnRunning = false
+        ContextCompat.startForegroundService(applicationContext, intent)
     }
     
     fun restartTunnel() {
@@ -126,6 +138,30 @@ class TunnelManager private constructor(private val context: Context) {
     }
 
     fun isTunnelActive() = isVpnRunning
+
+    fun onVpnPermissionResult(granted: Boolean) {
+        _vpnPermissionRequired.value = false
+        val shouldStartTunnel = pendingTunnelStart
+        pendingTunnelStart = false
+
+        if (!granted) {
+            Log.w(TAG, "VPN permission request was denied")
+            return
+        }
+
+        if (shouldStartTunnel) {
+            Log.i(TAG, "VPN permission granted. Resuming tunnel start.")
+            startTunnel()
+        }
+    }
+
+    fun markTunnelRunning(isRunning: Boolean) {
+        isVpnRunning = isRunning
+        if (isRunning) {
+            pendingTunnelStart = false
+            _vpnPermissionRequired.value = false
+        }
+    }
 
     private fun scheduleConfigUpdate() {
         val constraints = Constraints.Builder()

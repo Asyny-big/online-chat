@@ -1,18 +1,27 @@
 package ru.govchat.app.tunnel.core
 
+import android.content.Context
+import android.os.Build
 import android.util.Log
-
-// NOTE: You will need to import libbox.aar and then replace these dummy implementations
-// import io.nekohasekai.libbox.BoxService
-// import io.nekohasekai.libbox.Libbox
+import io.nekohasekai.libbox.BoxService
+import io.nekohasekai.libbox.Libbox
+import io.nekohasekai.libbox.PlatformInterface
+import io.nekohasekai.libbox.SetupOptions
+import ru.govchat.app.BuildConfig
+import java.io.File
+import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 
 class SingBoxRunner private constructor() {
 
-    // private var boxService: BoxService? = null
-    private var isRunningVar = false
+    private var boxService: BoxService? = null
+    private var stderrLogFile: File? = null
+    private val initialized = AtomicBoolean(false)
+    private val running = AtomicBoolean(false)
 
     companion object {
         private const val TAG = "SingBoxRunner"
+
         @Volatile
         private var instance: SingBoxRunner? = null
 
@@ -23,41 +32,98 @@ class SingBoxRunner private constructor() {
         }
     }
 
-    fun start(fdInt: Int, configJson: String) {
-        if (isRunningVar) {
-            Log.w(TAG, "Sing-box is already running!")
-            return
+    fun initialize(context: Context) {
+        if (initialized.get()) return
+
+        synchronized(this) {
+            if (initialized.get()) return
+
+            val appContext = context.applicationContext
+            val baseDir = appContext.filesDir.apply { mkdirs() }
+            val workingDir = (appContext.getExternalFilesDir(null) ?: baseDir).apply { mkdirs() }
+            val tempDir = appContext.cacheDir.apply { mkdirs() }
+            val logDir = File(workingDir, "tunnel-logs").apply { mkdirs() }
+            stderrLogFile = File(logDir, "sing-box-stderr.log")
+
+            try {
+                runCatching {
+                    Libbox.setLocale(
+                        Locale.getDefault().toLanguageTag().replace("-", "_")
+                    )
+                }.onFailure { error ->
+                    Log.w(TAG, "Failed to set libbox locale", error)
+                }
+
+                val setupOptions = SetupOptions().apply {
+                    basePath = baseDir.absolutePath
+                    workingPath = workingDir.absolutePath
+                    tempPath = tempDir.absolutePath
+                    fixAndroidStack = true
+                }
+                Libbox.setup(setupOptions)
+                stderrLogFile?.let { Libbox.redirectStderr(it.absolutePath) }
+
+                initialized.set(true)
+                Log.i(
+                    TAG,
+                    "libbox initialized. version=${runCatching { Libbox.version() }.getOrDefault("unknown")}, log=${stderrLogFile?.absolutePath}"
+                )
+            } catch (error: UnsatisfiedLinkError) {
+                Log.e(
+                    TAG,
+                    "libbox JNI load failed. supportedAbis=${Build.SUPPORTED_ABIS.joinToString()}",
+                    error
+                )
+                throw error
+            } catch (error: Throwable) {
+                Log.e(TAG, "Failed to initialize libbox", error)
+                throw error
+            }
         }
+    }
 
-        try {
-            Log.d(TAG, "Starting sing-box with config length: ${configJson.length}")
-            
-            // TODO: Uncomment when libbox.aar is added
-            // Libbox.setupEnvironment()
-            // boxService = Libbox.newService(configJson)
-            // boxService?.start()
-            
-            isRunningVar = true
-            Log.i(TAG, "Sing-box started successfully!")
+    fun start(context: Context, configJson: String, platformInterface: PlatformInterface) {
+        initialize(context)
 
-        } catch (e: Exception) {
-            Log.e(TAG, "Critical error starting sing-box", e)
-            stop()
+        synchronized(this) {
+            if (running.get()) {
+                Log.w(TAG, "Sing-box is already running")
+                return
+            }
+
+            try {
+                Libbox.checkConfig(configJson)
+                boxService = Libbox.newService(configJson, platformInterface).also { it.start() }
+                running.set(true)
+                Log.i(
+                    TAG,
+                    "Sing-box started. configLength=${configJson.length}, stderr=${stderrLogFile?.absolutePath}"
+                )
+            } catch (error: Throwable) {
+                Log.e(TAG, "Critical error starting sing-box", error)
+                stop()
+                throw error
+            }
         }
     }
 
     fun stop() {
-        try {
-            // TODO: Uncomment when libbox.aar is added
-            // boxService?.close()
-            Log.i(TAG, "Sing-box stopped.")
-        } catch (e: Exception) {
-            Log.e(TAG, "Error stopping sing-box", e)
-        } finally {
-            isRunningVar = false
-            // boxService = null
+        synchronized(this) {
+            try {
+                boxService?.close()
+                Log.i(TAG, "Sing-box stopped")
+            } catch (error: Throwable) {
+                Log.e(TAG, "Error stopping sing-box", error)
+            } finally {
+                running.set(false)
+                boxService = null
+            }
         }
     }
-    
-    fun isRunning(): Boolean = isRunningVar
+
+    fun isRunning(): Boolean = running.get()
+
+    fun stderrLogPath(): String? = stderrLogFile?.absolutePath
+
+    fun logLevel(): String = if (BuildConfig.DEBUG) "debug" else "info"
 }
