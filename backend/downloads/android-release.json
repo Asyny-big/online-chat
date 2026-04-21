@@ -4,8 +4,8 @@
   "minSupportedVersion": "1.0",
   "minSupportedVersionCode": 1,
   "forceUpdate": false,
-  "apkFile": "Lokinyt.apk",
-  "apkSha256": "301d14be99e61a739b657e200ec0403dd7e1b53d966539e004a7da3878880b87",
+  "apkFile": "TetsVPN.apk",
+  "apkSha256": "922928c6848b1668ee54a00ceaa2b46e6e5941dfb8026de97761479fe0282ce2",
   "signingCertSha256": [
     "cf75eb6b4475ca93be8b8dd976a89045d2c6f749bde0cac21031fc88302fb5ea"
   ],
