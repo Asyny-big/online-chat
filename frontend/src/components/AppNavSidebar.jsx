@@ -180,6 +180,7 @@ export default function AppNavSidebar({ activeKey, onNavigate, badgeCounts = {} 
         @media (max-width: 768px) {
           .app-nav-sidebar {
             position: fixed;
+            top: auto;
             left: 0;
             right: 0;
             bottom: 0;
@@ -208,41 +209,40 @@ export default function AppNavSidebar({ activeKey, onNavigate, badgeCounts = {} 
           .app-nav-menu {
             width: 100%;
             flex-direction: row;
-            justify-content: space-between;
-            align-items: stretch;
-            gap: 6px;
+            justify-content: space-around;
+            align-items: center;
+            gap: 0;
           }
 
           .app-nav-item {
-            flex: 1 1 0;
+            flex: 1;
             width: auto;
             min-width: 0;
-            height: 56px;
-            border-radius: 16px;
-            gap: 4px;
+            height: 100%;
+            border-radius: 12px;
             flex-direction: column;
-            padding: 8px 6px 6px;
+            padding: 8px 0;
+            background: transparent;
+            border: none;
+          }
+
+          .app-nav-item.active {
+            background: transparent;
+            box-shadow: none;
+            color: #60a5fa;
+            border: none;
+            transform: none;
           }
 
           .app-nav-badge {
-            top: 3px;
-            right: calc(50% - 20px);
+            top: 4px;
+            right: calc(50% - 16px);
             border-color: rgba(7, 11, 20, 0.94);
+            transform: scale(0.9);
           }
 
           .app-nav-tooltip {
-            position: static;
-            transform: none;
-            background: transparent;
-            border: none;
-            padding: 0;
-            font-size: 11px;
-            line-height: 1.1;
-            font-weight: 700;
-            color: inherit;
-            opacity: 1;
-            visibility: visible;
-            white-space: nowrap;
+            display: none; /* Hide text on mobile for clean icon-only bottom nav */
           }
         }
       `}</style>
