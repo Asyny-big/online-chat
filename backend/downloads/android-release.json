@@ -1,11 +1,11 @@
 {
-  "latestVersion": "1.0-ufo.1",
-  "latestVersionCode": 7,
+  "latestVersion": "1.0-ufo.2",
+  "latestVersionCode": 8,
   "minSupportedVersion": "1.0",
   "minSupportedVersionCode": 1,
   "forceUpdate": false,
-  "apkFile": "VPNok.apk",
-  "apkSha256": "abeec34366091d978c212cac4a0a78b7c2876ac90b4818a902278e1ce3bd41f0",
+  "apkFile": "Sngabt.apk",
+  "apkSha256": "04dbe34ade790794b21e3fb7eef18e88711924491ca06e27d3fc1bef6208e7d1",
   "signingCertSha256": [],
   "changelog": [
     "Обновлена Android-сборка для in-app update.",
