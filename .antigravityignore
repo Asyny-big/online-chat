@@ -1,54 +1,19 @@
-# Dependencies
-**/node_modules/
-**/bower_components/
-
-# Build outputs
-**/dist/
-**/build/
-**/out/
-**/bin/
-**/obj/
-**/.next/
-**/.nuxt/
-**/.cache/
-
-# IDE and System files
-**/.vscode/
-**/.idea/
-**/.vs/
-**/.DS_Store
-**/Thumbs.db
-
-# Logs and temp files
-**/logs/
-**/*.log
-**/tmp/
-**/temp/
-
-# Large lock files (optional, but usually noise for AI)
-**/package-lock.json
-**/yarn.lock
-**/pnpm-lock.yaml
-
-# Mobile specific
-**/android/app/build/
-**/ios/Pods/
-
-# Media and large assets
-**/*.png
-**/*.jpg
-**/*.jpeg
-**/*.gif
-**/*.svg
-**/*.mp4
-**/*.mp3
-**/*.zip
-**/*.tar.gz
-**/*.pdf
-
-# Project specific
-**/artifacts/
-**/context/
-
-# Git
-**/.git/
+# Dependencies **/node_modules/ **/bower_components/ # Build outputs **/dist/ **/build/ **/out/ **/bin/ **/obj/ **/.next/ **/.nuxt/ **/.cache/ # IDE and System files **/.vscode/ **/.idea/ **/.vs/ **/.DS_Store **/Thumbs.db .claude/ # Logs and temp files **/logs/ **
+/*.log
+**/
+tmp/ **/temp/ # Large lock files (optional, but usually noise for AI) **/package-lock.json **/yarn.lock **/pnpm-lock.yaml # Mobile specific **/android/app/build/ **/ios/Pods/ # Media and large assets **
+/*.png
+**/
+*.jpg **
+/*.jpeg
+**/
+*.gif **
+/*.svg
+**/
+*.mp4 **
+/*.mp3
+**/
+*.zip **
+/*.tar.gz
+**/
+*.pdf # Project specific **/artifacts/ **/context/ # Git **/.git/ **/.claude/

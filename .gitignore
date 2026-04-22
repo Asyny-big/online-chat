@@ -28,3 +28,4 @@ Thumbs.db
 # AI skills (local only)
 .agents/
 skills-lock.json
+.claude
