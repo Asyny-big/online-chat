@@ -274,7 +274,7 @@ class TunnelManager private constructor(private val context: Context) {
             stopTunnel()
             updateDiagnostics {
                 it.copy(
-                    stageLabel = "Wi-Fi без VPN",
+                    stageLabel = directNetworkStageLabel(it.networkLabel),
                     lastEvent = if (it.cachedServerCount > 0) {
                         "Приложение работает напрямую, кэш серверов доступен"
                     } else {
@@ -388,7 +388,7 @@ class TunnelManager private constructor(private val context: Context) {
                     isRunning -> "VPN активен"
                     current.lastError != null -> "Ошибка VPN"
                     current.isRestrictedNetwork -> "VPN остановлен"
-                    current.isConnected -> "Wi-Fi без VPN"
+                    current.isConnected -> directNetworkStageLabel(current.networkLabel)
                     else -> "Нет подключения"
                 },
                 lastEvent = when {
@@ -401,6 +401,15 @@ class TunnelManager private constructor(private val context: Context) {
                 lastTunnelStartAtMillis = if (isRunning) System.currentTimeMillis() else current.lastTunnelStartAtMillis,
                 lastTunnelStopAtMillis = if (isRunning) current.lastTunnelStopAtMillis else System.currentTimeMillis()
             )
+        }
+    }
+
+    private fun directNetworkStageLabel(networkLabel: String): String {
+        return when (networkLabel) {
+            "Мобильная сеть" -> "Мобильная сеть без VPN"
+            "Wi-Fi" -> "Wi-Fi без VPN"
+            "Ethernet" -> "Ethernet без VPN"
+            else -> "Прямое подключение"
         }
     }
 

@@ -16,7 +16,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import ru.govchat.app.BuildConfig
 import java.net.HttpURLConnection
+import java.net.SocketTimeoutException
 import java.net.URL
+import java.net.UnknownHostException
+import javax.net.ssl.SSLException
 
 class NetworkStateTracker(private val context: Context) {
 
@@ -54,9 +57,8 @@ class NetworkStateTracker(private val context: Context) {
         }
 
         override fun onLost(network: Network) {
-            if (network != connectivityManager.activeNetwork) {
-                return
-            }
+            if (network != connectivityManager.activeNetwork) return
+
             probeJob?.cancel()
             _isConnected.value = false
             _isRestrictedNetwork.value = false
@@ -96,8 +98,8 @@ class NetworkStateTracker(private val context: Context) {
         probeJob?.cancel()
         try {
             connectivityManager.unregisterNetworkCallback(networkCallback)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error unregistering callback", e)
+        } catch (error: Exception) {
+            Log.e(TAG, "Error unregistering callback", error)
         }
     }
 
@@ -124,9 +126,16 @@ class NetworkStateTracker(private val context: Context) {
             _isPublicInternetReachable.value = result.publicInternetReachable
             _lastProbeError.value = result.lastError
 
+            val backendBlockedByCarrier = result.backendFailureKind in setOf(
+                ProbeFailureKind.Dns,
+                ProbeFailureKind.Timeout,
+                ProbeFailureKind.Connection,
+                ProbeFailureKind.Ssl
+            )
+
             val restricted = transport == TransportKind.Cellular &&
-                result.publicInternetReachable &&
-                !result.backendReachable
+                !result.backendReachable &&
+                (result.publicInternetReachable || backendBlockedByCarrier)
 
             _isRestrictedNetwork.value = restricted
             _lastProbeSummary.value = when {
@@ -134,6 +143,8 @@ class NetworkStateTracker(private val context: Context) {
                     "Сервер доступен через мобильную сеть, VPN не нужен"
                 result.backendReachable ->
                     "Сервер доступен напрямую, VPN не нужен"
+                restricted && result.backendFailureKind == ProbeFailureKind.Dns ->
+                    "DNS ${backendHostLabel()} недоступен в мобильной сети, запускаю VPN"
                 restricted ->
                     "Сервер недоступен в мобильной сети, VPN нужен"
                 result.publicInternetReachable ->
@@ -144,7 +155,9 @@ class NetworkStateTracker(private val context: Context) {
 
             Log.i(
                 TAG,
-                "Probe completed. network=${transport.label} backend=${result.backendReachable} public=${result.publicInternetReachable} restricted=$restricted error=${result.lastError}"
+                "Probe completed. network=${transport.label} backend=${result.backendReachable} " +
+                    "public=${result.publicInternetReachable} restricted=$restricted " +
+                    "backendFailure=${result.backendFailureKind} error=${result.lastError}"
             )
         }
     }
@@ -153,6 +166,7 @@ class NetworkStateTracker(private val context: Context) {
         var backendReachable = false
         var publicInternetReachable = false
         var lastError: String? = null
+        var backendFailureKind = ProbeFailureKind.None
 
         repeat(PROBE_ATTEMPTS) { attempt ->
             val backend = probeUrl(
@@ -161,13 +175,13 @@ class NetworkStateTracker(private val context: Context) {
                 successCodes = 200..299
             )
             backendReachable = backend.isSuccess
+            backendFailureKind = if (backend.isSuccess) ProbeFailureKind.None else backend.failureKind
             if (backendReachable) {
-                publicInternetReachable = true
-                lastError = null
                 return ProbeResult(
                     backendReachable = true,
                     publicInternetReachable = true,
-                    lastError = null
+                    lastError = null,
+                    backendFailureKind = ProbeFailureKind.None
                 )
             }
 
@@ -187,7 +201,8 @@ class NetworkStateTracker(private val context: Context) {
         return ProbeResult(
             backendReachable = backendReachable,
             publicInternetReachable = publicInternetReachable,
-            lastError = lastError
+            lastError = lastError,
+            backendFailureKind = backendFailureKind
         )
     }
 
@@ -208,21 +223,50 @@ class NetworkStateTracker(private val context: Context) {
             val responseCode = connection.responseCode
             ProbeAttempt(
                 isSuccess = responseCode in successCodes,
-                error = if (responseCode in successCodes) null else "HTTP $responseCode for $url"
+                error = if (responseCode in successCodes) null else "HTTP $responseCode for $url",
+                failureKind = if (responseCode in successCodes) ProbeFailureKind.None else ProbeFailureKind.Http
             )
         } catch (error: Exception) {
             ProbeAttempt(
                 isSuccess = false,
-                error = error.message ?: error.javaClass.simpleName
+                error = error.message ?: error.javaClass.simpleName,
+                failureKind = classifyProbeFailure(error)
             )
         } finally {
             connection?.disconnect()
         }
     }
 
+    private fun classifyProbeFailure(error: Exception): ProbeFailureKind {
+        val message = error.message.orEmpty()
+        return when {
+            error is UnknownHostException ||
+                message.contains("Unable to resolve host", ignoreCase = true) ||
+                message.contains("No address associated with hostname", ignoreCase = true) ->
+                ProbeFailureKind.Dns
+            error is SocketTimeoutException ->
+                ProbeFailureKind.Timeout
+            error is SSLException ->
+                ProbeFailureKind.Ssl
+            message.contains("failed to connect", ignoreCase = true) ||
+                message.contains("connection refused", ignoreCase = true) ||
+                message.contains("network is unreachable", ignoreCase = true) ||
+                message.contains("econn", ignoreCase = true) ->
+                ProbeFailureKind.Connection
+            else ->
+                ProbeFailureKind.Other
+        }
+    }
+
     private fun buildBackendPingUrl(): String {
         val baseUrl = BuildConfig.API_BASE_URL.trimEnd('/')
         return "$baseUrl/ping"
+    }
+
+    private fun backendHostLabel(): String {
+        return runCatching { URL(buildBackendPingUrl()).host }
+            .getOrDefault("сервер")
+            .ifBlank { "сервер" }
     }
 
     private fun resolveTransport(capabilities: NetworkCapabilities): TransportKind {
@@ -237,13 +281,25 @@ class NetworkStateTracker(private val context: Context) {
     private data class ProbeResult(
         val backendReachable: Boolean,
         val publicInternetReachable: Boolean,
-        val lastError: String?
+        val lastError: String?,
+        val backendFailureKind: ProbeFailureKind
     )
 
     private data class ProbeAttempt(
         val isSuccess: Boolean,
-        val error: String?
+        val error: String?,
+        val failureKind: ProbeFailureKind
     )
+
+    private enum class ProbeFailureKind {
+        None,
+        Dns,
+        Timeout,
+        Connection,
+        Ssl,
+        Http,
+        Other
+    }
 
     private enum class TransportKind(val label: String) {
         Cellular("Мобильная сеть"),
