@@ -9,6 +9,7 @@ import { getTransactions } from '@/domains/hrum/api/economyApi';
 import { consumePendingPushAction, pushEvents } from '@/mobile/pushNotifications';
 import { useOnboarding } from '@/onboarding/OnboardingProvider';
 import { playIncomingCallTone, playNotificationTone } from '@/shared/lib/playNotificationTone';
+import { useMediaQuery } from '@/shared/hooks/useMediaQuery';
 
 const CallModal = lazy(() => import('@/components/CallModal'));
 const GroupCallModalLiveKit = lazy(() => import('@/components/GroupCallModalLiveKit'));
@@ -305,6 +306,7 @@ function ChatPageInner({
 }) {
   const { showEarn } = useHrumToast();
   const { isOpen: isOnboardingOpen, activeStep } = useOnboarding();
+  const isMobileLayout = useMediaQuery('(max-width: 768px)');
   const [chats, setChats] = useState([]);
   const [selectedChat, setSelectedChat] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -2035,24 +2037,27 @@ function ChatPageInner({
     setCallState('active');
   }, []);
 
+  const shouldRenderChatSidebar = !isMobileLayout || !selectedChat;
+
   return (
     <div className="chat-page-layout">
       {/* Сайдбар с чатами */}
-      <div className="chat-sidebar-backdrop" aria-hidden="true" />
-      <div className={`chat-sidebar-wrapper ${selectedChat ? 'is-closed-mobile' : 'is-open-mobile'}`}>
-        <Sidebar
-          token={token}
-          chats={chats}
-          selectedChat={selectedChat}
-          onSelectChat={handleSelectChat}
-          onCreateChat={handleCreateChat}
-          onAddChat={handleAddChat}
-          onOpenNewDialog={() => { window.location.hash = '#/search'; }}
-          onLogout={onLogout}
-          onNavigateToProfile={() => { window.location.hash = '#/profile'; }}
-          incomingCallChatId={incomingCallData?.chatId}
-        />
-      </div>
+      {shouldRenderChatSidebar && (
+        <div className={`chat-sidebar-wrapper ${selectedChat ? 'is-closed-mobile' : 'is-open-mobile'}`}>
+          <Sidebar
+            token={token}
+            chats={chats}
+            selectedChat={selectedChat}
+            onSelectChat={handleSelectChat}
+            onCreateChat={handleCreateChat}
+            onAddChat={handleAddChat}
+            onOpenNewDialog={() => { window.location.hash = '#/search'; }}
+            onLogout={onLogout}
+            onNavigateToProfile={() => { window.location.hash = '#/profile'; }}
+            incomingCallChatId={incomingCallData?.chatId}
+          />
+        </div>
+      )}
 
       {/* Окно чата */}
       <div className={`chat-window-wrapper ${selectedChat ? 'active' : ''}`}>
@@ -2133,10 +2138,6 @@ function ChatPageInner({
             position: relative;
         }
 
-        .chat-sidebar-backdrop {
-            display: none;
-        }
-
         .chat-sidebar-wrapper {
             height: 100%;
             min-height: 0;
@@ -2161,10 +2162,6 @@ function ChatPageInner({
                 grid-template-columns: minmax(0, 1fr);
                 height: 100%;
                 max-height: 100%;
-            }
-
-            .chat-sidebar-backdrop {
-                display: none;
             }
 
             .chat-sidebar-wrapper {

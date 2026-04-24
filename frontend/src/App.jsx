@@ -14,6 +14,7 @@ import AppShell from './app/AppShell';
 import RootProviders from './app/providers/RootProviders';
 import { initNotificationSound, playNotificationTone } from '@/shared/lib/playNotificationTone';
 import { OnboardingProvider } from '@/onboarding/OnboardingProvider';
+import { useMediaQuery } from '@/shared/hooks/useMediaQuery';
 
 const UNREAD_BADGES_REFRESH_EVENT = 'govchat:unread-badges-refresh';
 
@@ -35,6 +36,7 @@ function resolveRouteKey(hash) {
 }
 
 function App() {
+  const isMobileLayout = useMediaQuery('(max-width: 768px)');
   const [token, setToken] = useState(localStorage.getItem('token'));
   const [authMode, setAuthMode] = useState('login');
   const [phone, setPhone] = useState('');
@@ -413,7 +415,7 @@ function App() {
   const appView = (() => {
     const routeView = buildRouteView();
     return (
-      <OnboardingProvider enabled={Boolean(token)} route={route} navigate={navigateTo}>
+      <OnboardingProvider enabled={Boolean(token) && !isMobileLayout} route={route} navigate={navigateTo}>
         <AppShell
           showPrimaryNav={routeView.showPrimaryNav}
           activeNavKey={routeView.key}
