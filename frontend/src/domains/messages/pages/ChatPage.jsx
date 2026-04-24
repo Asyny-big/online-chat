@@ -361,6 +361,17 @@ function ChatPageInner({
   useEffect(() => { groupCallDataRef.current = groupCallData; }, [groupCallData]);
   useEffect(() => { messagesRef.current = messages; }, [messages]);
 
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined;
+    const className = 'govchat-chat-detail-mobile';
+    const shouldHideBottomNav = Boolean(isMobileLayout && selectedChat);
+    document.body.classList.toggle(className, shouldHideBottomNav);
+
+    return () => {
+      document.body.classList.remove(className);
+    };
+  }, [isMobileLayout, selectedChat]);
+
   const shouldHandlePrivateCallEvent = useCallback((direction, rawCallId) => {
     const callId = String(rawCallId || '').trim();
     if (!callId) return false;
@@ -2158,6 +2169,15 @@ function ChatPageInner({
         }
 
         @media (max-width: 768px) {
+            body.govchat-chat-detail-mobile .app-shell-layout,
+            body.govchat-chat-detail-mobile .app-shell-layout.with-right-panel {
+                padding-bottom: 0;
+            }
+
+            body.govchat-chat-detail-mobile .app-nav-sidebar {
+                display: none;
+            }
+
             .chat-page-layout {
                 grid-template-columns: minmax(0, 1fr);
                 height: 100%;
