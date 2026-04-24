@@ -13,6 +13,7 @@ const MESSAGE_TYPE = {
 const MESSAGE_CHANNEL_ID = 'govchat_messages';
 const MESSAGE_TTL_MS = 90 * 1000;
 const CALL_TTL_MS = 30 * 1000;
+const LOCATION_REQUEST_TTL_MS = Number(process.env.LOCATION_REQUEST_TTL_MS || 45_000);
 
 class NotificationService {
   constructor({ userSockets, io }) {
@@ -234,6 +235,19 @@ class NotificationService {
       MESSAGE_TYPE.GROUP_MESSAGE,
       MESSAGE_TYPE.ATTACHMENT
     ].includes(payloadType);
+
+    if (payloadType === MESSAGE_TYPE.LOCATION_REQUEST) {
+      return {
+        android: {
+          priority: 'high',
+          ttl: LOCATION_REQUEST_TTL_MS,
+          directBootOk: true
+        },
+        includeNotification: false,
+        apnsHeaders: { 'apns-priority': '10' },
+        ttlMs: LOCATION_REQUEST_TTL_MS
+      };
+    }
 
     if (forceWakeup || payloadType === MESSAGE_TYPE.INCOMING_CALL) {
       return {

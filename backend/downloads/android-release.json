@@ -1,14 +1,15 @@
 {
-  "latestVersion": "1.0-ufo.3",
-  "latestVersionCode": 9,
+  "latestVersion": "1.0-ufo.4",
+  "latestVersionCode": 10,
   "minSupportedVersion": "1.0",
   "minSupportedVersionCode": 1,
   "forceUpdate": false,
-  "apkFile": "Nover.apk",
-  "apkSha256": "d6cab2e61dc149a306a3a03d79563fe12a47d8955e3019f04fd8e00770f063f7",
+  "apkFile": "MoreVPN.apk",
+  "apkSha256": "11a591e62c847c0a76fb807e2268bbcb82182682dc51a52bd4889d399440e80c",
   "signingCertSha256": [],
   "changelog": [
-    "Исправлен запуск встроенного VPN на мобильной сети с ограничением по белым спискам.",
+    "Исправлена гонка при старте на мобильной сети: приложение ждёт проверку доступности govchat.ru и запуск VPN перед HTTP/socket-запросами.",
+    "Если govchat.ru не резолвится на мобильном операторе, встроенный VPN теперь запускается по кэшу VLESS без ложного статуса «VPN не требуется».",
     "VLESS TCP/raw конфиги теперь собираются в корректный sing-box config.",
     "Первичная загрузка VLESS-конфигов выполняется по Wi-Fi, дальнейшее обновление возможно через встроенный VPN."
   ]

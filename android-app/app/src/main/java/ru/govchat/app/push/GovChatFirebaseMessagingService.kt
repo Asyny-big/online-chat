@@ -3,6 +3,7 @@ package ru.govchat.app.push
 import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.content.Intent
+import android.provider.Settings
 import android.util.Log
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ProcessLifecycleOwner
@@ -18,6 +19,7 @@ import kotlinx.coroutines.runBlocking
 import ru.govchat.app.GovChatApp
 import ru.govchat.app.MainActivity
 import ru.govchat.app.R
+import ru.govchat.app.core.location.OnDemandLocationClient
 import ru.govchat.app.core.notification.CallNotificationManager
 import ru.govchat.app.core.notification.NotificationChannels
 import ru.govchat.app.core.notification.NotificationIntents
@@ -100,21 +102,94 @@ class GovChatFirebaseMessagingService : FirebaseMessagingService() {
                 }
 
                 serviceScope.launch {
-                    val autoReplyEnabled = (application as GovChatApp).container.sessionStorage.getLocationAutoReplyEnabled()
-                    if (autoReplyEnabled) {
-                        LocationRequestForegroundService.start(
-                            context = applicationContext,
-                            requestId = requestId,
-                            requesterUserId = requesterUserId,
-                            requesterName = requesterName,
-                            chatId = chatId
-                        )
-                        Log.i(TAG, "Location request background service started traceId=${pushTraceId.ifBlank { "n/a" }} requestId=$requestId")
-                    } else {
-                        Log.i(TAG, "Location auto reply is disabled, ignoring location request push requestId=$requestId")
+                    val app = application as GovChatApp
+                    val autoReplyEnabled = app.container.sessionStorage.getLocationAutoReplyEnabled()
+                    val locationClient = OnDemandLocationClient(applicationContext)
+
+                    when {
+                        !autoReplyEnabled -> {
+                            app.container.chatRepository.submitLocationFailure(
+                                requestId = requestId,
+                                code = "LOCATION_PERMISSION_DENIED",
+                                error = "Location auto reply is disabled"
+                            )
+                            showLocationIssueNotification(
+                                chatId = chatId,
+                                title = "Запрос геолокации",
+                                body = "${requesterName.ifBlank { "Контакт" }} запрашивает ваше местоположение. Откройте GovChat, чтобы включить автоответ."
+                            )
+                            Log.i(TAG, "Location auto reply is disabled, rejected location request push requestId=$requestId")
+                        }
+
+                        !locationClient.hasLocationPermission() -> {
+                            app.container.chatRepository.submitLocationFailure(
+                                requestId = requestId,
+                                code = "LOCATION_PERMISSION_DENIED",
+                                error = "Android location permission is missing"
+                            )
+                            showLocationIssueNotification(
+                                chatId = chatId,
+                                title = "Нет доступа к геолокации",
+                                body = "Откройте GovChat и разрешите доступ к геолокации для автоответа."
+                            )
+                            Log.i(TAG, "Location request rejected because foreground permission is missing requestId=$requestId")
+                        }
+
+                        !locationClient.hasBackgroundLocationPermission() -> {
+                            app.container.chatRepository.submitLocationFailure(
+                                requestId = requestId,
+                                code = "LOCATION_PERMISSION_DENIED",
+                                error = "Background location permission is missing"
+                            )
+                            showLocationIssueNotification(
+                                chatId = chatId,
+                                title = "Нужен фоновый доступ",
+                                body = "Разрешите GovChat доступ к геолокации всегда, чтобы отвечать на запросы, когда приложение свернуто."
+                            )
+                            Log.i(TAG, "Location request rejected because background permission is missing requestId=$requestId")
+                        }
+
+                        !locationClient.isLocationEnabled() -> {
+                            app.container.chatRepository.submitLocationFailure(
+                                requestId = requestId,
+                                code = "LOCATION_SERVICES_DISABLED",
+                                error = "Device location services are disabled"
+                            )
+                            showLocationIssueNotification(
+                                chatId = chatId,
+                                title = "Включите геолокацию",
+                                body = "GovChat не может отправить координаты, пока системная геолокация выключена.",
+                                openLocationSettings = true
+                            )
+                            Log.i(TAG, "Location request rejected because device location is disabled requestId=$requestId")
+                        }
+
+                        else -> {
+                            val started = LocationRequestForegroundService.start(
+                                context = applicationContext,
+                                requestId = requestId,
+                                requesterUserId = requesterUserId,
+                                requesterName = requesterName,
+                                chatId = chatId
+                            )
+                            if (started) {
+                                Log.i(TAG, "Location request background service started traceId=${pushTraceId.ifBlank { "n/a" }} requestId=$requestId")
+                            } else {
+                                app.container.chatRepository.submitLocationFailure(
+                                    requestId = requestId,
+                                    code = "LOCATION_UNAVAILABLE",
+                                    error = "Android refused to start location foreground service"
+                                )
+                                showLocationIssueNotification(
+                                    chatId = chatId,
+                                    title = "Геолокация недоступна",
+                                    body = "Android не разрешил запустить фоновую отправку местоположения. Откройте GovChat и повторите настройку."
+                                )
+                            }
+                        }
                     }
                 }
-                }
+            }
 
             isCallCancellationEvent -> {
                 val callId = payload.read("callId", "call_id", "roomId", "room_id")
@@ -205,6 +280,55 @@ class GovChatFirebaseMessagingService : FirebaseMessagingService() {
 
     override fun onDeletedMessages() {
         Log.w(TAG, "FCM deleted pending messages on server (possible long offline or burst traffic)")
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun showLocationIssueNotification(
+        chatId: String,
+        title: String,
+        body: String,
+        openLocationSettings: Boolean = false
+    ) {
+        val intent = if (openLocationSettings) {
+            Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+        } else {
+            NotificationIntents.addCommandExtras(
+                Intent(this, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                },
+                action = NotificationIntents.ACTION_OPEN_CHAT,
+                chatId = chatId.ifBlank { null }
+            )
+        }
+
+        val openIntent = PendingIntent.getActivity(
+            this,
+            ("location_issue|$chatId|$title").hashCode(),
+            intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val notification = NotificationCompat.Builder(this, NotificationChannels.LOCATION_CHANNEL_ID)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setContentIntent(openIntent)
+            .build()
+
+        val manager = NotificationManagerCompat.from(this)
+        if (!manager.areNotificationsEnabled()) {
+            Log.w(TAG, "Notifications disabled at system level; location issue notification will not be visible")
+            return
+        }
+
+        val stableId = (chatId.ifBlank { NotificationIntents.newEventId() }).hashCode()
+        manager.notify(LOCATION_NOTIFICATION_BASE_ID + stableId, notification)
     }
 
     @SuppressLint("MissingPermission")
@@ -306,6 +430,7 @@ class GovChatFirebaseMessagingService : FirebaseMessagingService() {
     private companion object {
         private const val TAG = "GovChatFCM"
         const val MESSAGE_NOTIFICATION_BASE_ID = 20_000
+        const val LOCATION_NOTIFICATION_BASE_ID = 30_000
     }
 
     private fun priorityName(priority: Int): String = when (priority) {

@@ -236,6 +236,7 @@ class MainViewModel(
 
     fun refreshChats() {
         viewModelScope.launch {
+            waitForNetworkPathReady()
             Log.i(TAG, "Refreshing chats. restricted=${tunnelManager.isRestrictedNetworkState.value} vpn=${tunnelManager.isTunnelRunningState.value}")
             mutableState.update { it.copy(isLoadingChats = true, errorMessage = null) }
             loadChatsUseCase()
@@ -3066,18 +3067,51 @@ class MainViewModel(
 
     private suspend fun waitForNetworkPathReady() {
         val startedAt = SystemClock.elapsedRealtime()
+        var lastWaitLogAt = 0L
         Log.i(TAG, "Waiting for network path. restricted=${tunnelManager.isRestrictedNetworkState.value} vpn=${tunnelManager.isTunnelRunningState.value}")
 
         while (true) {
-            val restricted = tunnelManager.isRestrictedNetworkState.value
-            val tunnelRunning = tunnelManager.isTunnelRunningState.value
-            if (!restricted || tunnelRunning) {
-                Log.i(TAG, "Network path ready. restricted=$restricted vpn=$tunnelRunning")
+            val diagnostics = tunnelManager.diagnostics.value
+            val restricted = tunnelManager.isRestrictedNetworkState.value || diagnostics.isRestrictedNetwork
+            val tunnelRunning = tunnelManager.isTunnelRunningState.value || diagnostics.isTunnelRunning
+            val initialNetworkProbePending = diagnostics.isConnected &&
+                diagnostics.networkLabel == NETWORK_LABEL_UNKNOWN &&
+                diagnostics.isBackendReachable == null &&
+                !tunnelRunning
+            val cellularProbePending = diagnostics.isConnected &&
+                diagnostics.networkLabel == NETWORK_LABEL_CELLULAR &&
+                diagnostics.isBackendReachable == null &&
+                !tunnelRunning
+            val waitingForTunnel = restricted && !tunnelRunning
+            val waitingForVpnPermission = diagnostics.isVpnPermissionRequired
+
+            if (!initialNetworkProbePending && !cellularProbePending && !waitingForTunnel && !waitingForVpnPermission) {
+                Log.i(
+                    TAG,
+                    "Network path ready. label=${diagnostics.networkLabel} " +
+                        "backend=${diagnostics.isBackendReachable} restricted=$restricted vpn=$tunnelRunning"
+                )
                 return
             }
 
+            val now = SystemClock.elapsedRealtime()
+            if (now - lastWaitLogAt >= NETWORK_PATH_WAIT_LOG_INTERVAL_MS) {
+                lastWaitLogAt = now
+                Log.i(
+                    TAG,
+                    "Waiting for network path. label=${diagnostics.networkLabel} " +
+                        "backend=${diagnostics.isBackendReachable} restricted=$restricted " +
+                        "vpn=$tunnelRunning vpnPermission=${diagnostics.isVpnPermissionRequired}"
+                )
+            }
+
             if (SystemClock.elapsedRealtime() - startedAt >= NETWORK_PATH_READY_TIMEOUT_MS) {
-                Log.w(TAG, "Timed out waiting for VPN tunnel on restricted network. Continuing bootstrap.")
+                Log.w(
+                    TAG,
+                    "Timed out waiting for network path. label=${diagnostics.networkLabel} " +
+                        "backend=${diagnostics.isBackendReachable} restricted=$restricted vpn=$tunnelRunning. " +
+                        "Continuing bootstrap."
+                )
                 return
             }
 
@@ -3130,7 +3164,10 @@ class MainViewModel(
         private const val MAX_HANDLED_NOTIFICATION_EVENTS = 128
         private const val MESSAGES_PAGE_SIZE = 30
         private const val DISK_CACHE_MESSAGES_LIMIT = 100
-        private const val NETWORK_PATH_READY_TIMEOUT_MS = 15_000L
+        private const val NETWORK_PATH_READY_TIMEOUT_MS = 45_000L
+        private const val NETWORK_PATH_WAIT_LOG_INTERVAL_MS = 2_000L
+        private const val NETWORK_LABEL_UNKNOWN = "Неизвестная сеть"
+        private const val NETWORK_LABEL_CELLULAR = "Мобильная сеть"
 
         fun factory(
             appContext: Context,

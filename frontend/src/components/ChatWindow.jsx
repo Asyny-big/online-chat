@@ -21,7 +21,7 @@ function getLocationActionTitle(locationPermission, locationRequestPending) {
 
   const code = String(locationPermission.requestDisabledReason || '').trim().toUpperCase();
   if (code === 'LOCATION_PERMISSION_DENIED') {
-    return 'Пользователь не разрешил доступ к геолокации';
+    return 'Пользователь не разрешил вам запрашивать геолокацию';
   }
   if (code === 'LOCATION_TARGET_OFFLINE') {
     return 'Пользователь оффлайн или Android-клиент недоступен';

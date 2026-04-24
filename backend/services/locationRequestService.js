@@ -14,10 +14,12 @@ const pendingRequests = new Map();
 const lastRequestAtByPair = new Map();
 
 const LOCATION_FAILURES = {
-  LOCATION_PERMISSION_DENIED: 'Location access is not granted',
+  LOCATION_PERMISSION_DENIED: 'Target user has not allowed location requests',
   LOCATION_TARGET_OFFLINE: 'Target user has no online Android client',
   LOCATION_REQUEST_CONFLICT: 'Location request is already pending',
-  LOCATION_RATE_LIMIT: 'Too many location requests'
+  LOCATION_RATE_LIMIT: 'Too many location requests',
+  LOCATION_SERVICES_DISABLED: 'Target device location services are disabled',
+  LOCATION_UNAVAILABLE: 'Target device could not provide location'
 };
 
 function normalizeId(value) {
@@ -186,7 +188,9 @@ async function getLocationRequestAvailability({
   const delivery = await hasAndroidDeliveryTarget({ io, userSockets, userId: target });
 
   let requestDisabledReason = '';
-  if (existingPending) {
+  if (!permission) {
+    requestDisabledReason = 'LOCATION_PERMISSION_DENIED';
+  } else if (existingPending) {
     requestDisabledReason = 'LOCATION_REQUEST_CONFLICT';
   } else if (retryAfterMs > 0) {
     requestDisabledReason = 'LOCATION_RATE_LIMIT';
@@ -283,6 +287,18 @@ async function startLocationRequest({
     requesterUserId,
     targetUserId
   });
+
+  if (!availability.canRequestTarget) {
+    console.warn('[Location] request rejected', {
+      reason: 'permission_denied',
+      chatId,
+      requesterUserId,
+      targetUserId
+    });
+    return buildRequestFailure(403, 'LOCATION_PERMISSION_DENIED', {
+      requiresPermissionApproval: true
+    });
+  }
 
   if (availability.hasPendingRequest) {
     console.warn('[Location] request rejected', {
@@ -508,6 +524,38 @@ async function processLocationResponse({ io, userId, payload }) {
       ok: true,
       status: 200,
       body: { success: true, requestId }
+    };
+  }
+
+  const permissionStillGranted = await LocationPermission.exists({
+    ownerUser: entry.targetUserId,
+    allowedUser: entry.requesterUserId,
+    enabled: true,
+    revokedAt: null
+  });
+  if (!permissionStillGranted) {
+    cleanupPendingRequest(requestId, 'failed');
+    console.warn('[Location] response rejected because permission was revoked', {
+      requestId,
+      chatId: entry.chatId,
+      requesterUserId: entry.requesterUserId,
+      targetUserId: entry.targetUserId
+    });
+    io.to(`user:${entry.requesterUserId}`).emit('location:request:failed', {
+      requestId,
+      chatId: entry.chatId,
+      targetUserId: entry.targetUserId,
+      code: 'LOCATION_PERMISSION_DENIED',
+      error: LOCATION_FAILURES.LOCATION_PERMISSION_DENIED
+    });
+    return {
+      ok: false,
+      status: 403,
+      body: {
+        success: false,
+        requestId,
+        code: 'LOCATION_PERMISSION_DENIED'
+      }
     };
   }
 

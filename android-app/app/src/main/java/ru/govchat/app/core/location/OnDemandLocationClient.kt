@@ -59,8 +59,6 @@ class OnDemandLocationClient(
             return Result.failure(LocationFailure("DEVICE_LOCATION_PERMISSION_DENIED"))
         }
         if (!isLocationEnabled()) {
-            // "если GPS выключен: вернуть LOCATION_SERVICES_DISABLED -> попытаться coarse location"
-            // actually we just return DEVICE_LOCATION_DISABLED
             return Result.failure(LocationFailure("DEVICE_LOCATION_DISABLED"))
         }
 

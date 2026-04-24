@@ -128,7 +128,7 @@ function getLocationErrorMessage(input) {
 
   switch (code) {
     case 'LOCATION_PERMISSION_DENIED':
-      return 'Пользователь не разрешил доступ к геолокации';
+      return 'Пользователь не разрешил вам запрашивать геолокацию';
     case 'LOCATION_TARGET_OFFLINE':
       return 'Пользователь оффлайн или Android-клиент недоступен';
     case 'LOCATION_REQUEST_CONFLICT':

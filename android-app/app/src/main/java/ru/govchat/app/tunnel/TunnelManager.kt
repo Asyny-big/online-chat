@@ -79,6 +79,9 @@ class TunnelManager private constructor(private val context: Context) {
     val isTunnelRunningState: StateFlow<Boolean> = _isTunnelRunningState
     private val _diagnostics = MutableStateFlow(
         TunnelDiagnosticsSnapshot(
+            networkLabel = networkStateTracker.networkLabel.value,
+            isConnected = networkStateTracker.isConnected.value,
+            isRestrictedNetwork = networkStateTracker.isRestrictedNetwork.value,
             cachedServerCount = serverManager.getCacheStats().cachedServerCount,
             lastFetchParsedCount = serverManager.getCacheStats().lastFetchParsedCount,
             lastConfigAttemptAtMillis = serverManager.getCacheStats().lastFetchAttemptAtMillis,
@@ -153,11 +156,18 @@ class TunnelManager private constructor(private val context: Context) {
     }
 
     private suspend fun handleNetworkStateChange(decision: NetworkStateDecision) {
-        _isRestrictedNetworkState.value = decision.isRestricted
+        val isCellularNetwork = decision.networkLabel == NETWORK_LABEL_CELLULAR
+        val isCellularProbePending = isCellularNetwork &&
+            decision.backendReachable == null &&
+            !isVpnRunning
+        val shouldUseTunnel = decision.isRestricted ||
+            (isCellularNetwork && decision.backendReachable == false)
+
+        _isRestrictedNetworkState.value = shouldUseTunnel
         updateDiagnostics {
             it.copy(
                 isConnected = decision.isConnected,
-                isRestrictedNetwork = decision.isRestricted,
+                isRestrictedNetwork = shouldUseTunnel,
                 networkLabel = decision.networkLabel,
                 isBackendReachable = decision.backendReachable,
                 isPublicInternetReachable = decision.publicInternetReachable,
@@ -179,7 +189,20 @@ class TunnelManager private constructor(private val context: Context) {
             return
         }
 
-        if (decision.isRestricted) {
+        if (isCellularProbePending) {
+            Log.d(TAG, "Cellular reachability probe is still pending. Waiting before choosing direct/VPN path.")
+            updateDiagnostics {
+                it.copy(
+                    stageLabel = NETWORK_LABEL_CELLULAR,
+                    lastEvent = decision.probeSummary,
+                    isVpnPermissionRequired = _vpnPermissionRequired.value,
+                    lastError = decision.probeError
+                )
+            }
+            return
+        }
+
+        if (shouldUseTunnel) {
             Log.d(TAG, "Restricted network detected. Checking cache...")
             updateDiagnostics {
                 it.copy(

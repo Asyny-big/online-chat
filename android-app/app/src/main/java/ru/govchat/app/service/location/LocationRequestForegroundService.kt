@@ -77,6 +77,11 @@ class LocationRequestForegroundService : Service() {
         try {
             val autoReplyEnabled = container.sessionStorage.getLocationAutoReplyEnabled()
             if (!autoReplyEnabled) {
+                chatRepository.submitLocationFailure(
+                    requestId = requestId,
+                    code = "LOCATION_PERMISSION_DENIED",
+                    error = "Location auto reply is disabled"
+                )
                 showActionNotification(
                     title = "Запрос геолокации",
                     text = "$requesterName запрашивает ваше местоположение. Откройте приложение и подтвердите доступ.",
@@ -112,7 +117,7 @@ class LocationRequestForegroundService : Service() {
                 )
                 chatRepository.submitLocationFailure(
                     requestId = requestId,
-                    code = "LOCATION_UNAVAILABLE",
+                    code = "LOCATION_PERMISSION_DENIED",
                     error = "Background location permission is missing"
                 )
                 stopSelf(startId)
@@ -135,33 +140,35 @@ class LocationRequestForegroundService : Service() {
                 return
             }
 
-            locationClient.getCurrentLocation()
-                .onSuccess { location ->
-                    serviceScope.launch {
-                        chatRepository.submitLocationResponse(requestId = requestId, location = location)
+            val locationResult = locationClient.getCurrentLocation()
+            val location = locationResult.getOrNull()
+            if (location != null) {
+                chatRepository.submitLocationResponse(requestId = requestId, location = location)
+                    .onFailure { error ->
+                        Log.e(TAG, "Location response submit failed requestId=$requestId", error)
                     }
+            } else {
+                val error = locationResult.exceptionOrNull()
+                val failureCode = when ((error as? LocationFailure)?.code) {
+                    "DEVICE_LOCATION_PERMISSION_DENIED" -> "LOCATION_PERMISSION_DENIED"
+                    "DEVICE_LOCATION_DISABLED" -> "LOCATION_SERVICES_DISABLED"
+                    "DEVICE_LOCATION_LOW_ACCURACY" -> "LOCATION_ACCURACY_TOO_LOW"
+                    else -> "LOCATION_UNAVAILABLE"
                 }
-                .onFailure { error ->
-                    val failureCode = when ((error as? LocationFailure)?.code) {
-                        "DEVICE_LOCATION_PERMISSION_DENIED" -> "LOCATION_PERMISSION_DENIED"
-                        "DEVICE_LOCATION_DISABLED" -> "LOCATION_SERVICES_DISABLED"
-                        "DEVICE_LOCATION_LOW_ACCURACY" -> "LOCATION_ACCURACY_TOO_LOW"
-                        else -> "LOCATION_UNAVAILABLE"
-                    }
-                    chatRepository.submitLocationFailure(
-                        requestId = requestId,
-                        code = failureCode,
-                        error = error.message
+                chatRepository.submitLocationFailure(
+                    requestId = requestId,
+                    code = failureCode,
+                    error = error?.message
+                )
+                if (failureCode == "LOCATION_SERVICES_DISABLED") {
+                    showActionNotification(
+                        title = "Включите геолокацию",
+                        text = "Приложение не может получить координаты, пока системная геолокация выключена.",
+                        chatId = chatId,
+                        openLocationSettings = true
                     )
-                    if (failureCode == "LOCATION_SERVICES_DISABLED") {
-                        showActionNotification(
-                            title = "Включите геолокацию",
-                            text = "Приложение не может получить координаты, пока системная геолокация выключена.",
-                            chatId = chatId,
-                            openLocationSettings = true
-                        )
-                    }
                 }
+            }
         } catch (error: Throwable) {
             Log.e(TAG, "Location background request failed requestId=$requestId", error)
         } finally {
@@ -274,7 +281,7 @@ class LocationRequestForegroundService : Service() {
             requesterUserId: String,
             requesterName: String,
             chatId: String
-        ) {
+        ): Boolean {
             val intent = Intent(context, LocationRequestForegroundService::class.java).apply {
                 action = ACTION_HANDLE_REQUEST
                 putExtra(EXTRA_REQUEST_ID, requestId)
@@ -282,11 +289,11 @@ class LocationRequestForegroundService : Service() {
                 putExtra(EXTRA_REQUESTER_NAME, requesterName)
                 putExtra(EXTRA_CHAT_ID, chatId)
             }
-            runCatching {
+            return runCatching {
                 ContextCompat.startForegroundService(context, intent)
             }.onFailure { error ->
                 Log.e(TAG, "Unable to request location foreground service start", error)
-            }
+            }.isSuccess
         }
     }
 }
