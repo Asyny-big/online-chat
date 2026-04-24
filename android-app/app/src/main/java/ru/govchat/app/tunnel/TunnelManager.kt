@@ -96,6 +96,9 @@ class TunnelManager private constructor(private val context: Context) {
 
     companion object {
         private const val TAG = "TunnelManager"
+        private const val NETWORK_LABEL_CELLULAR = "Мобильная сеть"
+        private const val NETWORK_LABEL_WIFI = "Wi-Fi"
+        private const val NETWORK_LABEL_VPN = "VPN"
 
         @Volatile
         private var instance: TunnelManager? = null
@@ -195,42 +198,31 @@ class TunnelManager private constructor(private val context: Context) {
                 }
                 startTunnel()
             } else {
-                Log.w(TAG, "Restricted network, but no cached servers found! Attempting to fetch config anyway...")
+                Log.w(TAG, "Restricted network, but no cached servers found. Waiting for Wi-Fi bootstrap.")
                 updateDiagnostics {
                     it.copy(
-                        stageLabel = "Загрузка конфигов",
-                        lastEvent = "Кэша нет, пытаюсь загрузить VLESS-конфиги с GitHub",
-                        lastError = null
+                        stageLabel = "Нет кэша VPN",
+                        lastEvent = "Для первого запуска VPN нужен Wi-Fi: кэш VLESS ещё пуст",
+                        lastError = "Нет сохранённых VLESS-конфигов. Подключите Wi-Fi один раз, чтобы загрузить кэш."
                     )
-                }
-                val success = serverManager.fetchAndCacheServers()
-                if (success) {
-                    Log.i(TAG, "Config fetched successfully on restricted network. Starting VPN.")
-                    updateDiagnostics {
-                        it.copy(
-                            stageLabel = "Подготовка VPN",
-                            lastEvent = "Конфиги загружены, запускаю sing-box",
-                            lastError = null
-                        )
-                    }
-                    startTunnel()
-                } else {
-                    Log.e(TAG, "Failed to fetch config on restricted network. Cannot connect. (DEAD END)")
-                    updateDiagnostics {
-                        it.copy(
-                            stageLabel = "Ошибка конфигов",
-                            lastEvent = "Не удалось получить конфиги на мобильной сети",
-                            lastError = serverManager.getCacheStats().lastFetchError
-                                ?: "Нет кэша и GitHub-источник недоступен"
-                        )
-                    }
                 }
             }
         } else {
             Log.d(TAG, "Unrestricted network detected.")
+            if (decision.networkLabel == NETWORK_LABEL_VPN && isVpnRunning) {
+                updateDiagnostics {
+                    it.copy(
+                        stageLabel = "VPN активен",
+                        lastEvent = "Приложение работает через встроенный VPN",
+                        lastError = null
+                    )
+                }
+                return
+            }
+
             updateDiagnostics {
                 it.copy(
-                    stageLabel = if (decision.networkLabel == "Мобильная сеть") {
+                    stageLabel = if (decision.networkLabel == NETWORK_LABEL_CELLULAR) {
                         "Мобильная сеть без VPN"
                     } else {
                         "Свободная сеть"
@@ -240,45 +232,59 @@ class TunnelManager private constructor(private val context: Context) {
                 )
             }
             if (!serverManager.hasCachedServers()) {
-                Log.d(TAG, "First time on unrestricted network. Fetching config...")
-                updateDiagnostics {
-                    it.copy(
-                        stageLabel = "Обновление кэша",
-                        lastEvent = "Загружаю VLESS-конфиги по Wi-Fi",
-                        lastError = null
-                    )
-                }
-                val success = serverManager.fetchAndCacheServers()
-                if (success) {
-                    Log.i(TAG, "Config fetched and cached successfully.")
+                if (decision.networkLabel == NETWORK_LABEL_WIFI) {
+                    Log.d(TAG, "First time on Wi-Fi. Fetching config...")
                     updateDiagnostics {
                         it.copy(
-                            stageLabel = "Кэш готов",
-                            lastEvent = "Конфиги успешно обновлены",
+                            stageLabel = "Обновление кэша",
+                            lastEvent = "Загружаю VLESS-конфиги по Wi-Fi",
                             lastError = null
                         )
                     }
+                    val success = serverManager.fetchAndCacheServers()
+                    if (success) {
+                        Log.i(TAG, "Config fetched and cached successfully.")
+                        updateDiagnostics {
+                            it.copy(
+                                stageLabel = "Кэш готов",
+                                lastEvent = "Конфиги успешно обновлены",
+                                lastError = null
+                            )
+                        }
+                    } else {
+                        Log.e(TAG, "Failed to fetch initial config.")
+                        updateDiagnostics {
+                            it.copy(
+                                stageLabel = "Ошибка обновления кэша",
+                                lastEvent = "Не удалось обновить список серверов",
+                                lastError = serverManager.getCacheStats().lastFetchError ?: "Ошибка загрузки конфигов"
+                            )
+                        }
+                    }
                 } else {
-                    Log.e(TAG, "Failed to fetch initial config.")
+                    Log.d(TAG, "Skipping initial config fetch outside Wi-Fi.")
                     updateDiagnostics {
                         it.copy(
-                            stageLabel = "Ошибка обновления кэша",
-                            lastEvent = "Не удалось обновить список серверов",
-                            lastError = serverManager.getCacheStats().lastFetchError ?: "Ошибка загрузки конфигов"
+                            stageLabel = "Ожидание Wi-Fi",
+                            lastEvent = "Первичная загрузка VLESS-конфигов выполняется только по Wi-Fi",
+                            lastError = null
                         )
                     }
                 }
             }
             
-            // If we are on unrestricted network, we might not need VPN.
+            // Direct networks do not need the app VPN; the VPN network itself is handled above.
             stopTunnel()
             updateDiagnostics {
                 it.copy(
                     stageLabel = directNetworkStageLabel(it.networkLabel),
-                    lastEvent = if (it.cachedServerCount > 0) {
-                        "Приложение работает напрямую, кэш серверов доступен"
-                    } else {
-                        "Приложение работает напрямую, кэш серверов пока пуст"
+                    lastEvent = when {
+                        it.cachedServerCount > 0 ->
+                            "Приложение работает напрямую, кэш серверов доступен"
+                        it.networkLabel == NETWORK_LABEL_WIFI ->
+                            "Приложение работает напрямую, кэш серверов пока пуст"
+                        else ->
+                            "Приложение работает напрямую, кэш VPN пуст; первая загрузка только по Wi-Fi"
                     },
                     lastError = serverManager.getCacheStats().lastFetchError
                 )
@@ -406,8 +412,9 @@ class TunnelManager private constructor(private val context: Context) {
 
     private fun directNetworkStageLabel(networkLabel: String): String {
         return when (networkLabel) {
-            "Мобильная сеть" -> "Мобильная сеть без VPN"
-            "Wi-Fi" -> "Wi-Fi без VPN"
+            NETWORK_LABEL_CELLULAR -> "Мобильная сеть без VPN"
+            NETWORK_LABEL_WIFI -> "Wi-Fi без VPN"
+            NETWORK_LABEL_VPN -> "VPN"
             "Ethernet" -> "Ethernet без VPN"
             else -> "Прямое подключение"
         }

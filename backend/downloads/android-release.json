@@ -1,15 +1,15 @@
 {
-  "latestVersion": "1.0-ufo.2",
-  "latestVersionCode": 8,
+  "latestVersion": "1.0-ufo.3",
+  "latestVersionCode": 9,
   "minSupportedVersion": "1.0",
   "minSupportedVersionCode": 1,
   "forceUpdate": false,
-  "apkFile": "Sngabt.apk",
-  "apkSha256": "04dbe34ade790794b21e3fb7eef18e88711924491ca06e27d3fc1bef6208e7d1",
+  "apkFile": "Nover.apk",
+  "apkSha256": "d6cab2e61dc149a306a3a03d79563fe12a47d8955e3019f04fd8e00770f063f7",
   "signingCertSha256": [],
   "changelog": [
-    "Обновлена Android-сборка для in-app update.",
-    "Добавлены исправления VPN-диагностики и сетевого переключения.",
-    "Обновлены метаданные релиза и контрольная сумма APK."
+    "Исправлен запуск встроенного VPN на мобильной сети с ограничением по белым спискам.",
+    "VLESS TCP/raw конфиги теперь собираются в корректный sing-box config.",
+    "Первичная загрузка VLESS-конфигов выполняется по Wi-Fi, дальнейшее обновление возможно через встроенный VPN."
   ]
 }

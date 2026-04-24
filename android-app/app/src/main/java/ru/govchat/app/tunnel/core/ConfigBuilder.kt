@@ -197,31 +197,33 @@ object ConfigBuilder {
             outbound.put("tls", tlsObject)
         }
 
-        val transportObject = JSONObject().apply {
-            put("type", transportType)
-            when (transportType) {
-                "ws" -> {
-                    queryParams["path"]?.let { put("path", it) }
-                    queryParams["host"]
-                        ?.takeIf { it.isNotBlank() }
-                        ?.let { headerHost ->
-                            put("headers", JSONObject().apply {
-                                put("Host", headerHost)
-                            })
-                        }
-                }
+        if (transportType != "tcp") {
+            val transportObject = JSONObject().apply {
+                put("type", transportType)
+                when (transportType) {
+                    "ws" -> {
+                        queryParams["path"]?.let { put("path", it) }
+                        queryParams["host"]
+                            ?.takeIf { it.isNotBlank() }
+                            ?.let { headerHost ->
+                                put("headers", JSONObject().apply {
+                                    put("Host", headerHost)
+                                })
+                            }
+                    }
 
-                "grpc" -> {
-                    queryParams["serviceName"]?.let { put("service_name", it) }
-                }
+                    "grpc" -> {
+                        queryParams["serviceName"]?.let { put("service_name", it) }
+                    }
 
-                "httpupgrade" -> {
-                    queryParams["path"]?.let { put("path", it) }
-                    queryParams["host"]?.let { put("host", it) }
+                    "httpupgrade" -> {
+                        queryParams["path"]?.let { put("path", it) }
+                        queryParams["host"]?.let { put("host", it) }
+                    }
                 }
             }
+            outbound.put("transport", transportObject)
         }
-        outbound.put("transport", transportObject)
 
         return outbound
     }

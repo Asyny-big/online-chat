@@ -271,6 +271,7 @@ class NetworkStateTracker(private val context: Context) {
 
     private fun resolveTransport(capabilities: NetworkCapabilities): TransportKind {
         return when {
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN) -> TransportKind.Vpn
             capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> TransportKind.Cellular
             capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> TransportKind.Wifi
             capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> TransportKind.Ethernet
@@ -302,6 +303,7 @@ class NetworkStateTracker(private val context: Context) {
     }
 
     private enum class TransportKind(val label: String) {
+        Vpn("VPN"),
         Cellular("Мобильная сеть"),
         Wifi("Wi-Fi"),
         Ethernet("Ethernet"),
