@@ -666,7 +666,7 @@ function ChatWindow({
         }
 
         .header-info { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1; }
-        .header-meta { min-width: 0; }
+        .header-meta { min-width: 0; flex: 1; overflow: hidden; }
         .chat-name-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
         
         .back-btn {
@@ -683,12 +683,12 @@ function ChatWindow({
         }
         .chat-avatar.group { background: linear-gradient(135deg, #a855f7, #7e22ce); }
 
-        .chat-name { margin: 0; font-size: 16px; font-weight: 700; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .chat-name { margin: 0; font-size: 16px; font-weight: 700; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
         .presence-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.45); }
         .presence-dot.online { background: #22c55e; }
         .presence-dot.offline { background: rgba(148, 163, 184, 0.75); }
         .participant-count { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
-        .chat-presence { font-size: 12px; margin-top: 2px; }
+        .chat-presence { font-size: 12px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .chat-presence.online { color: #4ade80; }
         .chat-presence.offline { color: var(--text-secondary); }
         .typing-indicator { font-size: 12px; color: var(--accent); margin-top: 2px; }
@@ -1026,8 +1026,40 @@ function ChatWindow({
             }
 
             .chat-header {
+                min-height: 64px;
                 padding-left: 12px;
                 padding-right: 12px;
+                gap: 8px;
+            }
+
+            .header-info {
+                gap: 8px;
+            }
+
+            .header-actions {
+                gap: 6px;
+            }
+
+            .back-btn,
+            .header-action-btn {
+                width: 40px;
+                height: 40px;
+            }
+
+            .chat-avatar {
+                width: 38px;
+                height: 38px;
+            }
+
+            .chat-name {
+                font-size: 15px;
+            }
+
+            .chat-presence,
+            .participant-count,
+            .typing-indicator {
+                max-width: 100%;
+                font-size: 11px;
             }
 
             .chat-location-hint {
@@ -1036,15 +1068,18 @@ function ChatWindow({
 
             .messages-container {
                 padding: 12px 10px 10px;
+                gap: 6px;
             }
 
             .message-bubble {
-                max-width: min(88%, 100%);
+                max-width: min(90%, 100%);
                 padding: 10px 12px;
+                border-radius: 16px;
             }
 
             .text-content {
-                font-size: 14px;
+                font-size: 15px;
+                line-height: 1.45;
             }
 
             .media-wrapper,
@@ -1067,6 +1102,50 @@ function ChatWindow({
                 width: 100%;
                 max-width: 100%;
                 padding: 18px;
+            }
+        }
+
+        @media (max-width: 420px) {
+            .chat-header {
+                min-height: 60px;
+                padding-left: 8px;
+                padding-right: 8px;
+                gap: 6px;
+            }
+
+            .header-info {
+                gap: 7px;
+            }
+
+            .header-actions {
+                gap: 4px;
+            }
+
+            .back-btn,
+            .header-action-btn {
+                width: 36px;
+                height: 36px;
+                font-size: 16px;
+            }
+
+            .back-btn {
+                font-size: 18px;
+                margin-right: 0;
+            }
+
+            .chat-avatar {
+                width: 34px;
+                height: 34px;
+                font-size: 14px;
+            }
+
+            .messages-container {
+                padding-left: 8px;
+                padding-right: 8px;
+            }
+
+            .message-bubble {
+                max-width: min(92%, 100%);
             }
         }
       `}</style>

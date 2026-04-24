@@ -2038,11 +2038,7 @@ function ChatPageInner({
   return (
     <div className="chat-page-layout">
       {/* Сайдбар с чатами */}
-      <div
-        className={`chat-sidebar-backdrop ${selectedChat ? 'visible' : ''}`}
-        onClick={() => setSelectedChat(null)}
-        aria-hidden={selectedChat ? 'false' : 'true'}
-      />
+      <div className="chat-sidebar-backdrop" aria-hidden="true" />
       <div className={`chat-sidebar-wrapper ${selectedChat ? 'is-closed-mobile' : 'is-open-mobile'}`}>
         <Sidebar
           token={token}
@@ -2156,28 +2152,19 @@ function ChatPageInner({
             height: 100%;
             min-width: 0;
             min-height: 0;
+            position: relative;
+            z-index: 1;
         }
 
         @media (max-width: 768px) {
             .chat-page-layout {
                 grid-template-columns: minmax(0, 1fr);
+                height: 100%;
+                max-height: 100%;
             }
 
             .chat-sidebar-backdrop {
-                position: fixed;
-                inset: 0;
-                display: block;
-                z-index: 58;
-                opacity: 0;
-                pointer-events: none;
-                background: rgba(2, 6, 23, 0.62);
-                backdrop-filter: blur(2px);
-                transition: opacity 0.24s ease;
-            }
-
-            .chat-sidebar-backdrop.visible {
-                opacity: 1;
-                pointer-events: auto;
+                display: none;
             }
 
             .chat-sidebar-wrapper {
@@ -2203,6 +2190,13 @@ function ChatPageInner({
 
             .chat-window-wrapper {
                 width: 100%;
+                height: 100%;
+                max-height: 100%;
+                z-index: 1;
+            }
+
+            .chat-window-wrapper.active {
+                z-index: 2;
             }
         }
       `}</style>

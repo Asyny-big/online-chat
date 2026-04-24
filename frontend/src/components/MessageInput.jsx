@@ -360,7 +360,6 @@ function MessageInput({ chat, chatId, socket, token, onTyping }) {
             onClick={handleFileSelect}
             className="icon-btn-circle attachment"
             disabled={uploading}
-            enterKeyHint="send"
             title="Прикрепить файл"
           >
             📎
@@ -374,6 +373,7 @@ function MessageInput({ chat, chatId, socket, token, onTyping }) {
             className="message-input-field"
             maxLength={maxLength}
             disabled={uploading}
+            enterKeyHint="send"
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
@@ -410,6 +410,7 @@ function MessageInput({ chat, chatId, socket, token, onTyping }) {
             border-top: 1px solid var(--border-color);
             background-color: var(--bg-surface);
             position: relative;
+            flex-shrink: 0;
         }
 
         .message-input-container.dragging {
@@ -427,9 +428,10 @@ function MessageInput({ chat, chatId, socket, token, onTyping }) {
         .input-form { display: flex; align-items: center; gap: 8px; min-width: 0; }
 
         .message-input-field {
-            flex: 1; min-width: 0; padding: 12px 16px; background-color: var(--bg-input);
+            flex: 1; min-width: 0; height: 44px; padding: 0 16px; background-color: var(--bg-input);
             border: 1px solid var(--border-input); border-radius: 24px;
             color: var(--text-primary); font-size: 14px; outline: none; transition: border-color 0.2s;
+            line-height: 44px;
         }
         .message-input-field:focus { border-color: var(--accent); }
 
@@ -471,8 +473,8 @@ function MessageInput({ chat, chatId, socket, token, onTyping }) {
 
         @media (max-width: 768px) {
             .message-input-container {
-                padding-left: 10px;
-                padding-right: 10px;
+                padding: 8px 10px max(8px, var(--safe-area-bottom));
+                background: rgba(15, 23, 40, 0.98);
             }
 
             .input-form,
@@ -481,7 +483,40 @@ function MessageInput({ chat, chatId, socket, token, onTyping }) {
             }
 
             .message-input-field {
-                padding: 12px 14px;
+                height: 42px;
+                padding: 0 14px;
+                font-size: 16px;
+                line-height: 42px;
+                border-radius: 21px;
+            }
+
+            .icon-btn-circle {
+                width: 42px;
+                height: 42px;
+            }
+        }
+
+        @media (max-width: 420px) {
+            .message-input-container {
+                padding-left: 8px;
+                padding-right: 8px;
+            }
+
+            .input-form,
+            .recording-row {
+                gap: 5px;
+            }
+
+            .icon-btn-circle {
+                width: 38px;
+                height: 38px;
+                font-size: 18px;
+            }
+
+            .message-input-field {
+                height: 40px;
+                padding: 0 12px;
+                line-height: 40px;
             }
         }
       `}</style>
