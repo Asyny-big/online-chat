@@ -28,14 +28,8 @@ function AndroidAppDownloadModal() {
   if (!isOpen) return null;
 
   return (
-    <div 
-      className="apk-modal-overlay" 
-      role="dialog" 
-      aria-modal="true" 
-      aria-label="Скачать GovChat для Android"
-      onClick={() => setIsOpen(false)}
-    >
-      <div className="apk-modal-card" onClick={(e) => e.stopPropagation()}>
+    <div className="apk-modal-overlay" role="dialog" aria-modal="true" aria-label="Скачать GovChat для Android">
+      <div className="apk-modal-card">
         <div className="apk-modal-glow apk-modal-glow-top" />
         <div className="apk-modal-glow apk-modal-glow-bottom" />
 
@@ -45,7 +39,7 @@ function AndroidAppDownloadModal() {
           className="apk-modal-close"
           aria-label="Закрыть"
         >
-          ✕
+          x
         </button>
 
         <div className="apk-modal-pill">GovChat Android</div>
