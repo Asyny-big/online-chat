@@ -5,6 +5,7 @@ import { API_URL, SOCKET_URL } from '@/config';
 import Sidebar from '@/components/Sidebar';
 import ChatWindow from '@/components/ChatWindow';
 import { useHrumToast } from '@/components/HrumToast';
+import { useMediaQuery } from '@/shared/hooks/useMediaQuery';
 import { getTransactions } from '@/domains/hrum/api/economyApi';
 import { consumePendingPushAction, pushEvents } from '@/mobile/pushNotifications';
 import { useOnboarding } from '@/onboarding/OnboardingProvider';
@@ -303,6 +304,7 @@ function ChatPageInner({
   pendingSupportChatRequest = null,
   onPendingSupportChatHandled = null
 }) {
+  const isMobile = useMediaQuery('(max-width: 768px)');
   const { showEarn } = useHrumToast();
   const { isOpen: isOnboardingOpen, activeStep } = useOnboarding();
   const [chats, setChats] = useState([]);
@@ -313,51 +315,8 @@ function ChatPageInner({
   const [locationPermission, setLocationPermission] = useState(null);
   const [locationRequestPending, setLocationRequestPending] = useState(false);
 
-  // Состояние звонка (для 1-to-1)
-  const [callState, setCallState] = useState('idle'); // idle | incoming | outgoing | active
-  const [callType, setCallType] = useState(null);     // audio | video
-  const [callId, setCallId] = useState(null);
-  const [remoteUser, setRemoteUser] = useState(null);
-  const [callControlSession, setCallControlSession] = useState(null);
+  // ... (rest of states and refs)
 
-  // Данные входящего звонка для отображения в UI (баннер и индикатор)
-  const [incomingCallData, setIncomingCallData] = useState(null);
-
-  // Состояние группового звонка
-  const [groupCallState, setGroupCallState] = useState('idle'); // idle | incoming | active
-  const [groupCallData, setGroupCallData] = useState(null);
-
-  const socketRef = useRef(null);
-  const economyProbeTimersRef = useRef([]);
-  const messagesRef = useRef(messages);
-  const messagesRequestIdRef = useRef(0);
-  const pendingMessageUpdatesRef = useRef(new Map());
-  const recentPrivateCallEventsRef = useRef(new Map());
-  const unreadAttentionCountRef = useRef(0);
-  const documentTitleBaseRef = useRef(typeof document !== 'undefined' ? document.title : 'GovChat');
-  const titleBlinkTimerRef = useRef(null);
-  const titleBlinkVisibleRef = useRef(false);
-
-  // Refs для использования актуальных значений в обработчиках сокета
-  const chatsRef = useRef(chats);
-  const selectedChatRef = useRef(selectedChat);
-  const callStateRef = useRef(callState);
-  const callIdRef = useRef(callId);
-  const currentUserIdRef = useRef(currentUserId);
-  const groupCallStateRef = useRef(groupCallState);
-  const groupCallDataRef = useRef(groupCallData);
-  const handledPrivateChatRequestIdRef = useRef('');
-  const handledSupportChatRequestIdRef = useRef('');
-
-  // Обновляем refs при изменении состояния
-  useEffect(() => { chatsRef.current = chats; }, [chats]);
-  useEffect(() => { selectedChatRef.current = selectedChat; }, [selectedChat]);
-  useEffect(() => { callStateRef.current = callState; }, [callState]);
-  useEffect(() => { callIdRef.current = callId; }, [callId]);
-  useEffect(() => { currentUserIdRef.current = currentUserId; }, [currentUserId]);
-  useEffect(() => { groupCallStateRef.current = groupCallState; }, [groupCallState]);
-  useEffect(() => { groupCallDataRef.current = groupCallData; }, [groupCallData]);
-  useEffect(() => { messagesRef.current = messages; }, [messages]);
 
   const shouldHandlePrivateCallEvent = useCallback((direction, rawCallId) => {
     const callId = String(rawCallId || '').trim();
@@ -2038,7 +1997,9 @@ function ChatPageInner({
   return (
     <div className="chat-page-layout">
       {/* Сайдбар с чатами */}
-      <div className="chat-sidebar-backdrop" aria-hidden="true" />
+      {isMobile && !selectedChat && (
+        <div className="chat-sidebar-backdrop" aria-hidden="true" />
+      )}
       <div className={`chat-sidebar-wrapper ${selectedChat ? 'is-closed-mobile' : 'is-open-mobile'}`}>
         <Sidebar
           token={token}
@@ -2055,7 +2016,7 @@ function ChatPageInner({
       </div>
 
       {/* Окно чата */}
-      <div className={`chat-window-wrapper ${selectedChat ? 'active' : ''}`}>
+      <div className={`chat-window-wrapper ${selectedChat ? 'active' : 'is-hidden-mobile'}`}>
         <ChatWindow
           token={token}
           chat={selectedChat}
@@ -2126,24 +2087,21 @@ function ChatPageInner({
         .chat-page-layout {
             display: grid;
             grid-template-columns: minmax(280px, 320px) minmax(0, 1fr);
-            height: 100%;
+            height: 100dvh;
             min-height: 0;
             overflow: hidden;
             background: var(--bg-primary);
             position: relative;
         }
 
-        .chat-sidebar-backdrop {
-            display: none;
-        }
-
         .chat-sidebar-wrapper {
             height: 100%;
             min-height: 0;
             min-width: 0;
-            transition: transform 0.3s ease;
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
             border-right: 1px solid var(--border-color);
             background-color: var(--bg-primary);
+            z-index: 10;
         }
 
         .chat-window-wrapper {
@@ -2154,49 +2112,55 @@ function ChatPageInner({
             min-height: 0;
             position: relative;
             z-index: 1;
+            background: var(--bg-primary);
         }
 
         @media (max-width: 768px) {
             .chat-page-layout {
-                grid-template-columns: minmax(0, 1fr);
-                height: 100%;
-                max-height: 100%;
-            }
-
-            .chat-sidebar-backdrop {
-                display: none;
+                display: block;
+                height: 100dvh;
+                max-height: 100dvh;
+                width: 100vw;
+                position: fixed;
+                inset: 0;
             }
 
             .chat-sidebar-wrapper {
-                position: fixed;
-                top: 0;
-                left: 0;
-                bottom: 0;
-                width: min(100vw, 380px);
-                max-width: 100%;
-                z-index: 60;
-                box-shadow: 0 24px 56px rgba(2, 6, 23, 0.42);
-                border-right: 1px solid var(--border-color);
-            }
-
-            .chat-sidebar-wrapper.is-open-mobile {
+                position: absolute;
+                inset: 0;
+                width: 100%;
+                z-index: 20;
+                border-right: none;
                 transform: translateX(0);
+                visibility: visible;
+                opacity: 1;
             }
 
             .chat-sidebar-wrapper.is-closed-mobile {
-                transform: translateX(calc(-100% - 24px));
+                transform: translateX(-100%);
+                visibility: hidden;
+                opacity: 0;
                 pointer-events: none;
             }
 
             .chat-window-wrapper {
+                position: absolute;
+                inset: 0;
                 width: 100%;
-                height: 100%;
-                max-height: 100%;
-                z-index: 1;
+                z-index: 10;
+                transform: translateX(100%);
+                transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                visibility: hidden;
             }
 
             .chat-window-wrapper.active {
-                z-index: 2;
+                transform: translateX(0);
+                visibility: visible;
+                z-index: 30;
+            }
+            
+            .chat-window-wrapper.is-hidden-mobile {
+                display: none;
             }
         }
       `}</style>

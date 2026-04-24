@@ -670,16 +670,19 @@ function ChatWindow({
         .chat-name-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
         
         .back-btn {
-            width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;
-            background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-light); border-radius: 50%;
-            font-size: 20px; color: var(--text-primary); cursor: pointer; margin-right: 2px; flex-shrink: 0;
+            width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;
+            background: rgba(15, 23, 42, 0.4); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 50%;
+            font-size: 18px; color: var(--text-primary); cursor: pointer; margin-right: 4px; flex-shrink: 0;
+            transition: var(--transition-fast);
         }
+        .back-btn:hover { background: rgba(15, 23, 42, 0.6); }
 
         .chat-avatar {
-            width: 40px; height: 40px; border-radius: 50%;
+            width: 42px; height: 42px; border-radius: 50%;
             background: linear-gradient(135deg, #3b82f6, #8b5cf6);
             display: flex; align-items: center; justify-content: center;
             color: white; font-weight: 700; font-size: 16px; flex-shrink: 0;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
         }
         .chat-avatar.group { background: linear-gradient(135deg, #a855f7, #7e22ce); }
 
