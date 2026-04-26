@@ -3,13 +3,11 @@ package ru.govchat.app.tunnel.core
 import android.content.Context
 import android.os.Build
 import android.util.Log
-import io.nekohasekai.libbox.BoxService
-import io.nekohasekai.libbox.Libbox
-import io.nekohasekai.libbox.PlatformInterface
-import io.nekohasekai.libbox.SetupOptions
+import libbox.BoxService
+import libbox.Libbox
+import libbox.PlatformInterface
 import ru.govchat.app.BuildConfig
 import java.io.File
-import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 
 class SingBoxRunner private constructor() {
@@ -46,21 +44,12 @@ class SingBoxRunner private constructor() {
             stderrLogFile = File(logDir, "sing-box-stderr.log")
 
             try {
-                runCatching {
-                    Libbox.setLocale(
-                        Locale.getDefault().toLanguageTag().replace("-", "_")
-                    )
-                }.onFailure { error ->
-                    Log.w(TAG, "Failed to set libbox locale", error)
-                }
-
-                val setupOptions = SetupOptions().apply {
-                    basePath = baseDir.absolutePath
-                    workingPath = workingDir.absolutePath
-                    tempPath = tempDir.absolutePath
-                    fixAndroidStack = true
-                }
-                Libbox.setup(setupOptions)
+                Libbox.setup(
+                    baseDir.absolutePath,
+                    workingDir.absolutePath,
+                    tempDir.absolutePath,
+                    false
+                )
                 stderrLogFile?.let { Libbox.redirectStderr(it.absolutePath) }
 
                 initialized.set(true)

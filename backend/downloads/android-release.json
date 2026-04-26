@@ -4,8 +4,8 @@
   "minSupportedVersion": "1.0",
   "minSupportedVersionCode": 1,
   "forceUpdate": false,
-  "apkFile": "HappyNew.apk",
-  "apkSha256": "122fd3ef4e20a648dd7dd0393ff9615f62d82b8f1a0fc92c7cfc10d351c02301",
+  "apkFile": "HenYrt.apk",
+  "apkSha256": "e87b2f9e4c53186f54ab5a52933c2bc71c8a70e06abd8183c9e22c0ddff321b8",
   "signingCertSha256": [],
   "changelog": [
     "Исправлена ошибка запуска VPN на мобильной сети: uTLS fingerprint из VLESS-кэша нормализуется перед запуском sing-box.",

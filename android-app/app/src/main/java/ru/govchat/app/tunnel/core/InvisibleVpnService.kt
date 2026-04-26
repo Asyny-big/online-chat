@@ -16,14 +16,13 @@ import android.os.ParcelFileDescriptor
 import android.os.Process
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import io.nekohasekai.libbox.InterfaceUpdateListener
-import io.nekohasekai.libbox.NetworkInterfaceIterator
-import io.nekohasekai.libbox.Notification as LibboxNotification
-import io.nekohasekai.libbox.PlatformInterface
-import io.nekohasekai.libbox.RoutePrefix
-import io.nekohasekai.libbox.RoutePrefixIterator
-import io.nekohasekai.libbox.TunOptions
-import io.nekohasekai.libbox.WIFIState
+import libbox.InterfaceUpdateListener
+import libbox.NetworkInterface
+import libbox.NetworkInterfaceIterator
+import libbox.PlatformInterface
+import libbox.RoutePrefixIterator
+import libbox.TunOptions
+import libbox.WIFIState
 import ru.govchat.app.tunnel.TunnelManager
 import java.io.IOException
 
@@ -195,8 +194,6 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
         return EmptyNetworkInterfaceIterator
     }
 
-    override fun includeAllNetworks(): Boolean = false
-
     override fun openTun(options: TunOptions): Int {
         if (prepare(this) != null) {
             error("android: missing vpn permission")
@@ -217,18 +214,13 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
         val hasInet6 = addAddresses(builder, options.inet6Address)
 
         if (options.autoRoute) {
-            val dnsAddress = runCatching { options.dnsServerAddress.value }.getOrNull()
+            val dnsAddress = runCatching { options.dnsServerAddress }.getOrNull()
             if (!dnsAddress.isNullOrBlank()) {
                 builder.addDnsServer(dnsAddress)
             }
 
             addRoutes(builder, options.inet4RouteAddress, "0.0.0.0", hasInet4)
             addRoutes(builder, options.inet6RouteAddress, "::", hasInet6)
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                excludeRoutes(builder, options.inet4RouteExcludeAddress)
-                excludeRoutes(builder, options.inet6RouteExcludeAddress)
-            }
         }
 
         try {
@@ -267,16 +259,6 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
         return WIFIState(ssid, wifiInfo.bssid.orEmpty())
     }
 
-    override fun sendNotification(notification: LibboxNotification) {
-        Log.i(TAG, "sing-box notification: ${notification.title} ${notification.body}")
-        TunnelManager.getInstance(applicationContext).reportTunnelEvent(
-            listOf(notification.title, notification.body)
-                .filter { it.isNotBlank() }
-                .joinToString(" • ")
-                .ifBlank { "sing-box отправил системное уведомление" }
-        )
-    }
-
     override fun startDefaultInterfaceMonitor(listener: InterfaceUpdateListener) = Unit
 
     override fun uidByPackageName(packageName: String): Int {
@@ -310,7 +292,7 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
         while (iterator.hasNext()) {
             hasItems = true
             val prefix = iterator.next()
-            builder.addAddress(prefix.address(), prefix.prefix())
+            builder.addAddress(prefix.address, prefix.prefix)
         }
         return hasItems
     }
@@ -324,7 +306,7 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
         if (iterator.hasNext()) {
             while (iterator.hasNext()) {
                 val prefix = iterator.next()
-                builder.addRoute(prefix.address(), prefix.prefix())
+                builder.addRoute(prefix.address, prefix.prefix)
             }
             return
         }
@@ -334,25 +316,9 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
         }
     }
 
-    private fun excludeRoutes(builder: Builder, iterator: RoutePrefixIterator) {
-        while (iterator.hasNext()) {
-            val prefix = iterator.next()
-            runCatching {
-                builder.excludeRoute(
-                    android.net.IpPrefix(
-                        java.net.InetAddress.getByName(prefix.address()),
-                        prefix.prefix()
-                    )
-                )
-            }.onFailure { error ->
-                Log.w(TAG, "Failed to exclude route ${prefix.address()}/${prefix.prefix()}", error)
-            }
-        }
-    }
-
     private object EmptyNetworkInterfaceIterator : NetworkInterfaceIterator {
         override fun hasNext(): Boolean = false
-        override fun next(): io.nekohasekai.libbox.NetworkInterface {
+        override fun next(): NetworkInterface {
             throw NoSuchElementException("No network interface data exposed")
         }
     }

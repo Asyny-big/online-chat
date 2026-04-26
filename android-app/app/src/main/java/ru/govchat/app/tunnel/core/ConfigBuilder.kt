@@ -13,6 +13,8 @@ object ConfigBuilder {
 
     private const val TAG = "ConfigBuilder"
     private val supportedTransportTypes = setOf("tcp", "ws", "grpc", "httpupgrade")
+    private const val currentLibboxSupportsUtls = false
+    private const val currentLibboxSupportsReality = false
     private val supportedUtlsFingerprints = setOf(
         "chrome",
         "firefox",
@@ -197,6 +199,9 @@ object ConfigBuilder {
         require(transportType in supportedTransportTypes) {
             "Unsupported transport type: $transportType"
         }
+        require(securityType != "reality" || currentLibboxSupportsReality) {
+            "Reality requires uTLS, but current libbox.aar was built without with_utls"
+        }
 
         val outbound = JSONObject().apply {
             put("type", "vless")
@@ -224,14 +229,16 @@ object ConfigBuilder {
                     ?.filter(String::isNotEmpty)
                     ?.takeIf { it.isNotEmpty() }
                     ?.let { put("alpn", JSONArray(it)) }
-                queryParams["fp"]
-                    ?.let { normalizeUtlsFingerprint(it, tag, stats) }
-                    ?.let { fingerprint ->
-                        put("utls", JSONObject().apply {
-                            put("enabled", true)
-                            put("fingerprint", fingerprint)
-                        })
-                    }
+                if (currentLibboxSupportsUtls) {
+                    queryParams["fp"]
+                        ?.let { normalizeUtlsFingerprint(it, tag, stats) }
+                        ?.let { fingerprint ->
+                            put("utls", JSONObject().apply {
+                                put("enabled", true)
+                                put("fingerprint", fingerprint)
+                            })
+                        }
+                }
                 if (securityType == "reality") {
                     put("reality", JSONObject().apply {
                         put("enabled", true)
