@@ -1,11 +1,11 @@
 {
-  "latestVersion": "1.0-ufo.5",
-  "latestVersionCode": 11,
+  "latestVersion": "1.0-ufo.6",
+  "latestVersionCode": 12,
   "minSupportedVersion": "1.0",
   "minSupportedVersionCode": 1,
   "forceUpdate": false,
-  "apkFile": "HenYrt.apk",
-  "apkSha256": "e87b2f9e4c53186f54ab5a52933c2bc71c8a70e06abd8183c9e22c0ddff321b8",
+  "apkFile": "BotikYa.apk",
+  "apkSha256": "817d966dd3f38350e65827b39d6d14665b19c8cfc6410652bd3b5378e7af667c",
   "signingCertSha256": [],
   "changelog": [
     "Исправлена ошибка запуска VPN на мобильной сети: uTLS fingerprint из VLESS-кэша нормализуется перед запуском sing-box.",
