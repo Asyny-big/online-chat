@@ -5,7 +5,7 @@ const Chat = require('../models/Chat');
 const Message = require('../models/Message');
 const Call = require('../models/Call');
 const config = require('../config.local');
-const { maybeRewardMessage } = require('../economy/rewardsService');
+const { maybeRewardMessage, maybeRewardCallStart } = require('../economy/rewardsService');
 const { NotificationService } = require('../services/notificationService');
 const {
   createBulkNotifications,
