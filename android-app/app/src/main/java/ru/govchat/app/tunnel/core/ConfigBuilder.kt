@@ -6,15 +6,38 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URI
 import java.net.URLDecoder
-import ru.govchat.app.BuildConfig
+import java.util.Locale
 import ru.govchat.app.tunnel.data.ServerManager
 
 object ConfigBuilder {
 
     private const val TAG = "ConfigBuilder"
     private val supportedTransportTypes = setOf("tcp", "ws", "grpc", "httpupgrade")
+    private val supportedUtlsFingerprints = setOf(
+        "chrome",
+        "firefox",
+        "edge",
+        "safari",
+        "360",
+        "qq",
+        "ios",
+        "android",
+        "random",
+        "randomized"
+    )
+    private val legacyChromeFingerprints = setOf(
+        "chrome_psk",
+        "chrome_psk_shuffle",
+        "chrome_padding_psk_shuffle",
+        "chrome_pq",
+        "chrome_pq_psk"
+    )
 
     fun buildConfig(context: Context): String {
+        return buildConfigResult(context).configJson
+    }
+
+    fun buildConfigResult(context: Context): ConfigBuildResult {
         val serverManager = ServerManager(context)
         val vlessLinks = serverManager.getCachedServers()
 
@@ -24,6 +47,7 @@ object ConfigBuilder {
 
         val outboundsArray = JSONArray()
         val serverTags = mutableListOf<String>()
+        val stats = MutableConfigBuildStats(totalLinks = vlessLinks.size)
 
         val directOutbound = JSONObject().apply {
             put("type", "direct")
@@ -41,11 +65,13 @@ object ConfigBuilder {
             val tag = "proxy-$index"
 
             try {
-                val outbound = parseVlessLink(link, tag)
+                val outbound = parseVlessLink(link, tag, stats)
                 outboundsArray.put(outbound)
                 serverTags.add(tag)
             } catch (e: Exception) {
-                Log.e(TAG, "Error parsing VLESS link: $link", e)
+                stats.skippedLinks += 1
+                stats.addWarning("$tag: ${e.message ?: e.javaClass.simpleName}")
+                Log.e(TAG, "Error parsing VLESS link for $tag", e)
             }
         }
 
@@ -130,11 +156,31 @@ object ConfigBuilder {
             put("route", routeObject)
         }
 
-        Log.i(TAG, "Built sing-box config. servers=${serverTags.size}, logLevel=${SingBoxRunner.getInstance().logLevel()}")
-        return finalConfig.toString()
+        val result = ConfigBuildResult(
+            configJson = finalConfig.toString(),
+            totalLinks = stats.totalLinks,
+            acceptedLinks = serverTags.size,
+            skippedLinks = stats.skippedLinks,
+            normalizedFingerprintCount = stats.normalizedFingerprintCount,
+            fallbackFingerprintCount = stats.fallbackFingerprintCount,
+            warnings = stats.warnings.toList()
+        )
+        Log.i(TAG, "Built sing-box config. ${result.logSummary()}, logLevel=${SingBoxRunner.getInstance().logLevel()}")
+        if (result.warnings.isNotEmpty()) {
+            Log.w(TAG, "Config build warnings: ${result.warnings.joinToString("; ")}")
+        }
+        return result
     }
 
-    private fun parseVlessLink(link: String, tag: String): JSONObject {
+    internal fun parseVlessLinkForTest(link: String, tag: String): JSONObject {
+        return parseVlessLink(link, tag, null)
+    }
+
+    private fun parseVlessLink(
+        link: String,
+        tag: String,
+        stats: MutableConfigBuildStats?
+    ): JSONObject {
         val uri = URI(link)
         if (uri.scheme != "vless") throw IllegalArgumentException("Invalid scheme: ${uri.scheme}")
 
@@ -147,7 +193,7 @@ object ConfigBuilder {
         require(port > 0) { "VLESS port is invalid: $port" }
 
         val transportType = normalizeTransportType(queryParams["type"])
-        val securityType = queryParams["security"] ?: "none"
+        val securityType = normalizeSecurityType(queryParams["security"])
         require(transportType in supportedTransportTypes) {
             "Unsupported transport type: $transportType"
         }
@@ -179,11 +225,11 @@ object ConfigBuilder {
                     ?.takeIf { it.isNotEmpty() }
                     ?.let { put("alpn", JSONArray(it)) }
                 queryParams["fp"]
-                    ?.takeIf { it.isNotBlank() }
-                    ?.let {
+                    ?.let { normalizeUtlsFingerprint(it, tag, stats) }
+                    ?.let { fingerprint ->
                         put("utls", JSONObject().apply {
                             put("enabled", true)
-                            put("fingerprint", it)
+                            put("fingerprint", fingerprint)
                         })
                     }
                 if (securityType == "reality") {
@@ -243,14 +289,87 @@ object ConfigBuilder {
     }
 
     private fun normalizeTransportType(rawType: String?): String {
-        return when (rawType?.trim()?.lowercase()) {
+        return when (rawType?.trim()?.lowercase(Locale.ROOT)) {
             null, "", "tcp" -> "tcp"
             "raw" -> "tcp"
             "ws" -> "ws"
             "grpc" -> "grpc"
             "httpupgrade" -> "httpupgrade"
             "xhttp" -> "xhttp"
-            else -> rawType.trim().lowercase()
+            else -> rawType.trim().lowercase(Locale.ROOT)
         }
+    }
+
+    private fun normalizeSecurityType(rawSecurity: String?): String {
+        return rawSecurity?.trim()?.lowercase(Locale.ROOT).orEmpty().ifBlank { "none" }
+    }
+
+    private fun normalizeUtlsFingerprint(
+        rawFingerprint: String,
+        tag: String,
+        stats: MutableConfigBuildStats?
+    ): String? {
+        val trimmed = rawFingerprint.trim()
+        if (trimmed.isBlank()) return null
+
+        val normalized = trimmed.lowercase(Locale.ROOT)
+        val fingerprint = when {
+            normalized in legacyChromeFingerprints -> "chrome"
+            normalized in supportedUtlsFingerprints -> normalized
+            normalized in setOf("none", "off", "false") -> return null
+            else -> {
+                stats?.let {
+                    it.fallbackFingerprintCount += 1
+                    it.addWarning("$tag: unsupported uTLS fingerprint '$trimmed', fallback=chrome")
+                }
+                Log.w(TAG, "$tag has unsupported uTLS fingerprint '$trimmed'; using chrome")
+                "chrome"
+            }
+        }
+
+        if (fingerprint != trimmed) {
+            stats?.let {
+                it.normalizedFingerprintCount += 1
+            }
+            Log.i(TAG, "$tag normalized uTLS fingerprint '$trimmed' -> '$fingerprint'")
+        }
+
+        return fingerprint
+    }
+
+    private data class MutableConfigBuildStats(
+        val totalLinks: Int,
+        var skippedLinks: Int = 0,
+        var normalizedFingerprintCount: Int = 0,
+        var fallbackFingerprintCount: Int = 0,
+        val warnings: MutableList<String> = mutableListOf()
+    ) {
+        fun addWarning(message: String) {
+            if (warnings.size < MAX_WARNING_COUNT) {
+                warnings.add(message)
+            }
+        }
+    }
+
+    private const val MAX_WARNING_COUNT = 8
+}
+
+data class ConfigBuildResult(
+    val configJson: String,
+    val totalLinks: Int,
+    val acceptedLinks: Int,
+    val skippedLinks: Int,
+    val normalizedFingerprintCount: Int,
+    val fallbackFingerprintCount: Int,
+    val warnings: List<String>
+) {
+    fun logSummary(): String {
+        return "servers=$acceptedLinks/$totalLinks, skipped=$skippedLinks, " +
+            "normalizedFp=$normalizedFingerprintCount, fallbackFp=$fallbackFingerprintCount"
+    }
+
+    fun userSummary(): String {
+        return "Конфиг sing-box готов: серверов $acceptedLinks/$totalLinks, " +
+            "исправлено fp: $normalizedFingerprintCount, fallback fp: $fallbackFingerprintCount"
     }
 }

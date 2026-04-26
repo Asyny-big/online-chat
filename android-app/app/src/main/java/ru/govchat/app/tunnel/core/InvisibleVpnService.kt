@@ -65,8 +65,9 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
         try {
             startTunnelForeground()
             TunnelManager.getInstance(applicationContext).reportTunnelEvent("Сервис VPN запущен, собираю конфиг sing-box")
-            val configJson = ConfigBuilder.buildConfig(applicationContext)
-            singBoxRunner.start(applicationContext, configJson, this)
+            val configResult = ConfigBuilder.buildConfigResult(applicationContext)
+            TunnelManager.getInstance(applicationContext).reportTunnelEvent(configResult.userSummary())
+            singBoxRunner.start(applicationContext, configResult.configJson, this)
             TunnelManager.getInstance(applicationContext).markTunnelRunning(true)
             TunnelManager.getInstance(applicationContext)
                 .reportTunnelEvent("sing-box запущен, журнал ошибок: ${singBoxRunner.stderrLogPath()}")
