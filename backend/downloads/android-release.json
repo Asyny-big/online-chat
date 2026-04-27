@@ -1,11 +1,11 @@
 {
-  "latestVersion": "1.0-ufo.9",
-  "latestVersionCode": 15,
+  "latestVersion": "1.0-ufo.10",
+  "latestVersionCode": 16,
   "minSupportedVersion": "1.0",
   "minSupportedVersionCode": 1,
   "forceUpdate": false,
-  "apkFile": "XelloYbig.apk",
-  "apkSha256": "411087dd4e327ba426d8e86e9576bdb3e2cbbaa534c01264caf58f78f20c6550",
+  "apkFile": "Zadalbok.apk",
+  "apkSha256": "0de5e780716e3150f44ccb49745e78e6e94e838c7df7232d5cf0df04b79b118d",
   "signingCertSha256": [],
   "changelog": [
     "Исправлена ошибка запуска VPN на мобильной сети: uTLS fingerprint из VLESS-кэша нормализуется перед запуском sing-box."
