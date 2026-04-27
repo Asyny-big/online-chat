@@ -81,8 +81,12 @@ class SingBoxRunner private constructor() {
             }
 
             try {
+                Log.i(TAG, "Checking sing-box config. configLength=${configJson.length}")
                 Libbox.checkConfig(configJson)
-                boxService = Libbox.newService(configJson, platformInterface).also { it.start() }
+                Log.i(TAG, "Creating sing-box service")
+                boxService = Libbox.newService(configJson, platformInterface)
+                Log.i(TAG, "Starting sing-box service")
+                boxService?.start()
                 running.set(true)
                 Log.i(
                     TAG,

@@ -10,6 +10,7 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -82,6 +83,10 @@ class TunnelManager private constructor(private val context: Context) {
     private var socketDisconnectedAtMillis: Long? = null
     private var socketFallbackJob: Job? = null
     private var socketFallbackActive = false
+    private var tunnelStartInFlight = false
+    private var tunnelRestartJob: Job? = null
+    private var tunnelStartWatchdogJob: Job? = null
+    private var tunnelStartAttempts = 0
     private var lastDecision: NetworkStateDecision? = null
     private val _diagnostics = MutableStateFlow(
         TunnelDiagnosticsSnapshot(
@@ -109,6 +114,8 @@ class TunnelManager private constructor(private val context: Context) {
         private const val NETWORK_LABEL_WIFI = "Wi-Fi"
         private const val NETWORK_LABEL_VPN = "VPN"
         private const val SOCKET_FALLBACK_GRACE_MS = 12_000L
+        private const val TUNNEL_START_TIMEOUT_MS = 10_000L
+        private const val MAX_TUNNEL_START_ATTEMPTS = 2
 
         @Volatile
         private var instance: TunnelManager? = null
@@ -155,7 +162,11 @@ class TunnelManager private constructor(private val context: Context) {
                 )
             }
             .onEach { decision ->
-                handleNetworkStateChange(decision)
+                runCatching {
+                    handleNetworkStateChange(decision)
+                }.onFailure { error ->
+                    handleManagerError("network state change", error)
+                }
             }
             .launchIn(scope)
 
@@ -330,8 +341,17 @@ class TunnelManager private constructor(private val context: Context) {
     }
 
     private fun startTunnel() {
-        if (isVpnRunning) return
-        if (VpnService.prepare(applicationContext) != null) {
+        if (isVpnRunning || tunnelStartInFlight) {
+            Log.d(TAG, "Tunnel start skipped. running=$isVpnRunning inFlight=$tunnelStartInFlight")
+            return
+        }
+
+        val permissionIntent = runCatching { VpnService.prepare(applicationContext) }
+            .getOrElse { error ->
+                handleManagerError("vpn permission check", error)
+                return
+            }
+        if (permissionIntent != null) {
             pendingTunnelStart = true
             _vpnPermissionRequired.value = true
             Log.w(TAG, "VPN permission has not been granted yet")
@@ -345,6 +365,9 @@ class TunnelManager private constructor(private val context: Context) {
             return
         }
 
+        tunnelStartInFlight = true
+        tunnelStartAttempts += 1
+        val attempt = tunnelStartAttempts
         val intent = Intent(applicationContext, InvisibleVpnService::class.java).apply {
             action = InvisibleVpnService.ACTION_START
         }
@@ -356,11 +379,27 @@ class TunnelManager private constructor(private val context: Context) {
                 lastError = null
             )
         }
-        ContextCompat.startForegroundService(applicationContext, intent)
+        try {
+            Log.i(TAG, "Starting VPN foreground service. attempt=$attempt")
+            ContextCompat.startForegroundService(applicationContext, intent)
+            scheduleTunnelStartWatchdog(attempt)
+        } catch (error: Throwable) {
+            tunnelStartInFlight = false
+            handleManagerError("start VPN service", error)
+        }
     }
 
     private fun stopTunnel() {
-        if (!isVpnRunning) return
+        val wasStarting = tunnelStartInFlight
+        tunnelStartWatchdogJob?.cancel()
+        tunnelStartWatchdogJob = null
+        tunnelRestartJob?.cancel()
+        tunnelRestartJob = null
+        tunnelStartInFlight = false
+        if (!isVpnRunning && !wasStarting) {
+            Log.d(TAG, "Tunnel stop skipped because manager does not mark it running")
+            return
+        }
         val intent = Intent(applicationContext, InvisibleVpnService::class.java).apply {
             action = InvisibleVpnService.ACTION_STOP
         }
@@ -370,13 +409,22 @@ class TunnelManager private constructor(private val context: Context) {
                 lastEvent = "Останавливаю VPN-сервис"
             )
         }
-        ContextCompat.startForegroundService(applicationContext, intent)
+        try {
+            Log.i(TAG, "Stopping VPN foreground service")
+            ContextCompat.startForegroundService(applicationContext, intent)
+        } catch (error: Throwable) {
+            handleManagerError("stop VPN service", error)
+            markTunnelRunning(false)
+        }
     }
     
     fun restartTunnel() {
+        if (tunnelRestartJob?.isActive == true) {
+            Log.d(TAG, "Tunnel restart already scheduled")
+            return
+        }
         stopTunnel()
-        // Simple delay to ensure previous instance is cleaned up, in production use proper binding/callbacks
-        scope.launch {
+        tunnelRestartJob = scope.launch {
             delay(1000)
             startTunnel()
         }
@@ -418,6 +466,12 @@ class TunnelManager private constructor(private val context: Context) {
 
     fun markTunnelRunning(isRunning: Boolean) {
         isVpnRunning = isRunning
+        tunnelStartInFlight = false
+        tunnelStartWatchdogJob?.cancel()
+        tunnelStartWatchdogJob = null
+        if (isRunning) {
+            tunnelStartAttempts = 0
+        }
         _isTunnelRunningState.value = isRunning
         if (isRunning) {
             pendingTunnelStart = false
@@ -445,6 +499,13 @@ class TunnelManager private constructor(private val context: Context) {
                 lastTunnelStopAtMillis = if (isRunning) current.lastTunnelStopAtMillis else System.currentTimeMillis()
             )
         }
+    }
+
+    fun markTunnelStartFinishedWithoutRunning(message: String) {
+        tunnelStartInFlight = false
+        tunnelStartWatchdogJob?.cancel()
+        tunnelStartWatchdogJob = null
+        reportTunnelFailure(message)
     }
 
     private fun directNetworkStageLabel(networkLabel: String): String {
@@ -558,6 +619,45 @@ class TunnelManager private constructor(private val context: Context) {
     private fun cancelSocketFallbackTimer() {
         socketFallbackJob?.cancel()
         socketFallbackJob = null
+    }
+
+    private fun scheduleTunnelStartWatchdog(attempt: Int) {
+        tunnelStartWatchdogJob?.cancel()
+        tunnelStartWatchdogJob = scope.launch {
+            delay(TUNNEL_START_TIMEOUT_MS)
+            if (isVpnRunning || !tunnelStartInFlight || attempt != tunnelStartAttempts) return@launch
+
+            tunnelStartInFlight = false
+            Log.e(TAG, "VPN start timed out. attempt=$attempt")
+            updateDiagnostics {
+                it.copy(
+                    stageLabel = "Таймаут VPN",
+                    lastEvent = "VPN не поднялся за ${TUNNEL_START_TIMEOUT_MS / 1000} с",
+                    lastError = "Таймаут запуска VPN"
+                )
+            }
+
+            if (attempt < MAX_TUNNEL_START_ATTEMPTS) {
+                Log.w(TAG, "Retrying VPN start after timeout. nextAttempt=${attempt + 1}")
+                restartTunnel()
+            } else {
+                reportTunnelFailure("VPN не поднялся после $MAX_TUNNEL_START_ATTEMPTS попыток")
+            }
+        }
+    }
+
+    private fun handleManagerError(operation: String, error: Throwable) {
+        if (error is CancellationException) throw error
+        val message = error.message ?: error.javaClass.simpleName
+        Log.e(TAG, "TunnelManager $operation failed", error)
+        updateDiagnostics {
+            it.copy(
+                stageLabel = "Ошибка VPN",
+                lastEvent = "Ошибка $operation: $message",
+                lastError = message,
+                isVpnPermissionRequired = false
+            )
+        }
     }
 
     private fun scheduleConfigUpdate() {

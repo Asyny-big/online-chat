@@ -3114,6 +3114,14 @@ class MainViewModel(
                         "backend=${diagnostics.isBackendReachable} restricted=$restricted vpn=$tunnelRunning. " +
                         "Continuing bootstrap."
                 )
+                mutableState.update {
+                    it.copy(
+                        tunnelDiagnostics = diagnostics.copy(
+                            lastEvent = "Ожидание сети истекло, продолжаю запуск приложения",
+                            lastError = diagnostics.lastError ?: "Таймаут ожидания готовности сети"
+                        )
+                    )
+                }
                 return
             }
 
@@ -3166,7 +3174,7 @@ class MainViewModel(
         private const val MAX_HANDLED_NOTIFICATION_EVENTS = 128
         private const val MESSAGES_PAGE_SIZE = 30
         private const val DISK_CACHE_MESSAGES_LIMIT = 100
-        private const val NETWORK_PATH_READY_TIMEOUT_MS = 45_000L
+        private const val NETWORK_PATH_READY_TIMEOUT_MS = 10_000L
         private const val NETWORK_PATH_WAIT_LOG_INTERVAL_MS = 2_000L
         private const val NETWORK_LABEL_UNKNOWN = "Неизвестная сеть"
         private const val NETWORK_LABEL_CELLULAR = "Мобильная сеть"
@@ -3266,6 +3274,5 @@ private fun ChatMessage.toChatSubtitle(): String {
         MessageType.Text -> text.ifBlank { "Р В Р Р‹Р В РЎвЂўР В РЎвЂўР В Р’В±Р РЋРІР‚В°Р В Р’ВµР В Р вЂ¦Р В РЎвЂР В Р’Вµ" }
     }
 }
-
 
 

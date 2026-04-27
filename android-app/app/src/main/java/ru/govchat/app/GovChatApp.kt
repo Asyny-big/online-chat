@@ -1,6 +1,7 @@
 package ru.govchat.app
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.ProcessLifecycleOwner
 import ru.govchat.app.core.AppContainer
 import ru.govchat.app.core.lifecycle.RealtimeLifecycleObserver
@@ -19,10 +20,17 @@ class GovChatApp : Application() {
         container = AppContainer(this)
         NotificationChannels.ensureCreated(this)
         CallNotificationManager.ensureInitialized(this)
-        SingBoxRunner.getInstance().initialize(this)
+        runCatching {
+            SingBoxRunner.getInstance().initialize(this)
+        }.onFailure { error ->
+            Log.e(TAG, "Failed to initialize sing-box during app startup", error)
+        }
 
-        // Initialize VLESS secure tunnel manager
-        ru.govchat.app.tunnel.TunnelManager.getInstance(this).initialize()
+        runCatching {
+            ru.govchat.app.tunnel.TunnelManager.getInstance(this).initialize()
+        }.onFailure { error ->
+            Log.e(TAG, "Failed to initialize tunnel manager during app startup", error)
+        }
 
         ProcessLifecycleOwner.get().lifecycle.addObserver(
             RealtimeLifecycleObserver(
@@ -32,5 +40,8 @@ class GovChatApp : Application() {
             )
         )
     }
-}
 
+    private companion object {
+        private const val TAG = "GovChatApp"
+    }
+}

@@ -31,6 +31,7 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
     private var vpnInterface: ParcelFileDescriptor? = null
     private val singBoxRunner = SingBoxRunner.getInstance()
     private var stopRequested = false
+    private var startRequested = false
 
     companion object {
         const val ACTION_START = "ru.govchat.app.START_VPN"
@@ -54,12 +55,13 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
     }
 
     private fun startTunnel() {
-        if (singBoxRunner.isRunning()) {
+        if (startRequested || singBoxRunner.isRunning()) {
             Log.w(TAG, "VPN tunnel is already running")
             TunnelManager.getInstance(applicationContext).reportTunnelEvent("VPN уже активен, повторный запуск пропущен")
             return
         }
 
+        startRequested = true
         stopRequested = false
         val tunnelManager = TunnelManager.getInstance(applicationContext)
         try {
@@ -93,6 +95,9 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
             tunnelManager.reportTunnelFailure(
                 "Не удалось запустить VPN: ${error.message ?: error.javaClass.simpleName}"
             )
+            tunnelManager.markTunnelStartFinishedWithoutRunning(
+                "Запуск VPN остановлен: ${error.message ?: error.javaClass.simpleName}"
+            )
             stopTunnel()
         }
     }
@@ -118,6 +123,7 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
     private fun stopTunnel() {
         if (stopRequested) return
         stopRequested = true
+        startRequested = false
 
         singBoxRunner.stop()
         TunnelManager.getInstance(applicationContext).markTunnelRunning(false)
@@ -161,7 +167,8 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
     }
 
     override fun onDestroy() {
-        stopTunnel()
+        runCatching { stopTunnel() }
+            .onFailure { error -> Log.e(TAG, "Error while destroying VPN service", error) }
         super.onDestroy()
     }
 
@@ -174,7 +181,9 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
     }
 
     override fun autoDetectInterfaceControl(fd: Int) {
-        protect(fd)
+        if (!protect(fd)) {
+            Log.w(TAG, "protect(fd=$fd) returned false")
+        }
     }
 
     override fun clearDNSCache() = Unit
@@ -216,46 +225,55 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
             error("android: missing vpn permission")
         }
 
-        val mtu = options.mtu.coerceIn(1280, 1500)
-        val builder = Builder()
-            .setSession("GovChat Secure Tunnel")
-            .setMtu(mtu)
+        try {
+            val mtu = options.mtu.coerceIn(1280, 1500)
+            val builder = Builder()
+                .setSession("GovChat Secure Tunnel")
+                .setMtu(mtu)
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            builder.setBlocking(true)
-            builder.setMetered(false)
-            builder.allowBypass()
-        }
-
-        val hasInet4 = addAddresses(builder, options.inet4Address)
-        val hasInet6 = addAddresses(builder, options.inet6Address)
-
-        if (options.autoRoute) {
-            val dnsAddress = runCatching { options.dnsServerAddress }.getOrNull()
-            if (!dnsAddress.isNullOrBlank()) {
-                builder.addDnsServer(dnsAddress)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                builder.setBlocking(true)
+                builder.setMetered(false)
+                builder.allowBypass()
             }
 
-            addRoutes(builder, options.inet4RouteAddress, "0.0.0.0", hasInet4)
-            addRoutes(builder, options.inet6RouteAddress, "::", hasInet6)
+            val hasInet4 = addAddresses(builder, options.inet4Address)
+            val hasInet6 = addAddresses(builder, options.inet6Address)
+
+            if (options.autoRoute) {
+                val dnsAddress = runCatching { options.dnsServerAddress }.getOrNull()
+                if (!dnsAddress.isNullOrBlank()) {
+                    builder.addDnsServer(dnsAddress)
+                }
+
+                addRoutes(builder, options.inet4RouteAddress, "0.0.0.0", hasInet4)
+                addRoutes(builder, options.inet6RouteAddress, "::", hasInet6)
+            }
+
+            try {
+                builder.addAllowedApplication(packageName)
+            } catch (error: PackageManager.NameNotFoundException) {
+                Log.e(TAG, "Failed to configure split tunneling for package $packageName", error)
+            }
+
+            runCatching { vpnInterface?.close() }
+                .onFailure { error -> Log.w(TAG, "Failed to close previous VPN interface", error) }
+            vpnInterface = builder.establish()
+                ?: error("android: failed to establish VPN interface")
+
+            val fd = vpnInterface?.fd ?: error("android: VPN interface fd is unavailable")
+            Log.i(
+                TAG,
+                "openTun established. fd=$fd, mtu=$mtu, autoRoute=${options.autoRoute}, strictRoute=${options.strictRoute}"
+            )
+            return fd
+        } catch (error: Throwable) {
+            Log.e(TAG, "openTun failed", error)
+            TunnelManager.getInstance(applicationContext).reportTunnelFailure(
+                "Не удалось открыть TUN-интерфейс: ${error.message ?: error.javaClass.simpleName}"
+            )
+            throw error
         }
-
-        try {
-            builder.addAllowedApplication(packageName)
-        } catch (error: PackageManager.NameNotFoundException) {
-            Log.e(TAG, "Failed to configure split tunneling for package $packageName", error)
-        }
-
-        runCatching { vpnInterface?.close() }
-            .onFailure { error -> Log.w(TAG, "Failed to close previous VPN interface", error) }
-        vpnInterface = builder.establish()
-            ?: error("android: failed to establish VPN interface")
-
-        Log.i(
-            TAG,
-            "openTun established. fd=${vpnInterface!!.fd}, mtu=$mtu, autoRoute=${options.autoRoute}, strictRoute=${options.strictRoute}"
-        )
-        return vpnInterface!!.fd
     }
 
     override fun packageNameByUid(uid: Int): String {

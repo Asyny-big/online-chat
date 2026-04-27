@@ -6,6 +6,7 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -14,6 +15,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import ru.govchat.app.BuildConfig
 import java.net.HttpURLConnection
 import java.net.SocketTimeoutException
@@ -49,31 +51,42 @@ class NetworkStateTracker(private val context: Context) {
     val lastProbeError: StateFlow<String?> = _lastProbeError
 
     private var probeJob: Job? = null
+    private var activeProbeNetwork: Network? = null
+    private var probeGeneration = 0
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
-            _isConnected.value = true
-            updateNetworkState(network)
+            runCatching {
+                _isConnected.value = true
+                updateNetworkState(network)
+            }.onFailure { error ->
+                handleCallbackError("onAvailable", error)
+            }
         }
 
         override fun onLost(network: Network) {
-            if (network != connectivityManager.activeNetwork) return
+            runCatching {
+                val activeNetwork = connectivityManager.activeNetwork
+                if (activeNetwork != null && activeNetwork != network) {
+                    Log.d(TAG, "Ignoring lost non-active network=$network active=$activeNetwork")
+                    return
+                }
 
-            probeJob?.cancel()
-            _isConnected.value = false
-            _isRestrictedNetwork.value = false
-            _networkLabel.value = "Нет сети"
-            _isBackendReachable.value = null
-            _isPublicInternetReachable.value = null
-            _lastProbeSummary.value = "Нет активного подключения"
-            _lastProbeError.value = null
+                clearActiveNetwork("Нет активного подключения")
+            }.onFailure { error ->
+                handleCallbackError("onLost", error)
+            }
         }
 
         override fun onCapabilitiesChanged(
             network: Network,
             networkCapabilities: NetworkCapabilities
         ) {
-            updateNetworkState(network, networkCapabilities)
+            runCatching {
+                updateNetworkState(network, networkCapabilities)
+            }.onFailure { error ->
+                handleCallbackError("onCapabilitiesChanged", error)
+            }
         }
     }
 
@@ -81,7 +94,13 @@ class NetworkStateTracker(private val context: Context) {
         val request = NetworkRequest.Builder()
             .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             .build()
-        connectivityManager.registerNetworkCallback(request, networkCallback)
+        runCatching {
+            connectivityManager.registerNetworkCallback(request, networkCallback)
+        }.onFailure { error ->
+            _lastProbeError.value = error.message ?: error.javaClass.simpleName
+            _lastProbeSummary.value = "Не удалось включить мониторинг сети"
+            Log.e(TAG, "Failed to register network callback", error)
+        }
 
         val activeNetwork = connectivityManager.activeNetwork
         if (activeNetwork != null) {
@@ -113,55 +132,103 @@ class NetworkStateTracker(private val context: Context) {
         _isConnected.value = true
         _networkLabel.value = transport.label
         _lastProbeSummary.value = "Проверяю доступность сети: ${transport.label.lowercase()}"
+        Log.d(
+            TAG,
+            "Network state changed. network=$network transport=${transport.label} " +
+                "validated=${caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)}"
+        )
         scheduleReachabilityProbe(network, transport)
     }
 
     private fun scheduleReachabilityProbe(network: Network, transport: TransportKind) {
-        probeJob?.cancel()
-        probeJob = scope.launch {
-            _lastProbeSummary.value =
-                "Проверяю ${transport.label.lowercase()}: жду стабилизации сети…"
-            delay(PROBE_DEBOUNCE_MS)
-
-            val result = probeReachability(network, transport)
-            _isBackendReachable.value = result.backendReachable
-            _isPublicInternetReachable.value = result.publicInternetReachable
-            _lastProbeError.value = result.lastError
-
-            val backendBlockedByCarrier = result.backendFailureKind in setOf(
-                ProbeFailureKind.Dns,
-                ProbeFailureKind.Timeout,
-                ProbeFailureKind.Connection,
-                ProbeFailureKind.Ssl
-            )
-
-            val restricted = transport == TransportKind.Cellular &&
-                !result.backendReachable &&
-                (result.publicInternetReachable || backendBlockedByCarrier)
-
-            _isRestrictedNetwork.value = restricted
-            _lastProbeSummary.value = when {
-                result.backendReachable && transport == TransportKind.Cellular ->
-                    "Сервер доступен через мобильную сеть, VPN не нужен"
-                result.backendReachable ->
-                    "Сервер доступен напрямую, VPN не нужен"
-                restricted && result.backendFailureKind == ProbeFailureKind.Dns ->
-                    "DNS ${backendHostLabel()} недоступен в мобильной сети, запускаю VPN"
-                restricted ->
-                    "Сервер недоступен в мобильной сети, VPN нужен"
-                result.publicInternetReachable ->
-                    "Интернет работает, но сервер не ответил"
-                else ->
-                    "Интернет нестабилен или сеть ещё переключается"
-            }
-
-            Log.i(
-                TAG,
-                "Probe completed. network=${transport.label} backend=${result.backendReachable} " +
-                    "public=${result.publicInternetReachable} restricted=$restricted " +
-                    "backendFailure=${result.backendFailureKind} error=${result.lastError}"
-            )
+        if (activeProbeNetwork == network && probeJob?.isActive == true) {
+            Log.d(TAG, "Reachability probe already active for network=$network, keeping original debounce")
+            return
         }
+
+        probeJob?.cancel()
+        activeProbeNetwork = network
+        val generation = ++probeGeneration
+        probeJob = scope.launch {
+            try {
+                _lastProbeSummary.value =
+                    "Проверяю ${transport.label.lowercase()}: жду стабилизации сети…"
+
+                val result = withTimeoutOrNull(PROBE_STABILIZATION_TIMEOUT_MS) {
+                    delay(PROBE_DEBOUNCE_MS)
+                    probeReachability(network, transport)
+                } ?: ProbeResult(
+                    backendReachable = false,
+                    publicInternetReachable = false,
+                    lastError = "Таймаут проверки сети ${PROBE_STABILIZATION_TIMEOUT_MS / 1000} с",
+                    backendFailureKind = ProbeFailureKind.Timeout
+                )
+
+                if (generation != probeGeneration) return@launch
+                applyProbeResult(transport, result)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                Log.e(TAG, "Reachability probe failed", error)
+                if (generation == probeGeneration) {
+                    applyProbeResult(
+                        transport = transport,
+                        result = ProbeResult(
+                            backendReachable = false,
+                            publicInternetReachable = false,
+                            lastError = error.message ?: error.javaClass.simpleName,
+                            backendFailureKind = ProbeFailureKind.Other
+                        )
+                    )
+                }
+            } finally {
+                if (generation == probeGeneration) {
+                    activeProbeNetwork = null
+                }
+            }
+        }
+    }
+
+    private fun applyProbeResult(transport: TransportKind, result: ProbeResult) {
+        _isBackendReachable.value = result.backendReachable
+        _isPublicInternetReachable.value = result.publicInternetReachable
+        _lastProbeError.value = result.lastError
+
+        val backendBlockedByCarrier = result.backendFailureKind in setOf(
+            ProbeFailureKind.Dns,
+            ProbeFailureKind.Timeout,
+            ProbeFailureKind.Connection,
+            ProbeFailureKind.Ssl
+        )
+
+        val restricted = transport == TransportKind.Cellular &&
+            !result.backendReachable &&
+            (result.publicInternetReachable || backendBlockedByCarrier)
+
+        _isRestrictedNetwork.value = restricted
+        _lastProbeSummary.value = when {
+            result.backendReachable && transport == TransportKind.Cellular ->
+                "Сервер доступен через мобильную сеть, VPN не нужен"
+            result.backendReachable ->
+                "Сервер доступен напрямую, VPN не нужен"
+            restricted && result.backendFailureKind == ProbeFailureKind.Dns ->
+                "DNS ${backendHostLabel()} недоступен в мобильной сети, запускаю VPN"
+            restricted && result.backendFailureKind == ProbeFailureKind.Timeout ->
+                "Проверка мобильной сети истекла, запускаю VPN"
+            restricted ->
+                "Сервер недоступен в мобильной сети, VPN нужен"
+            result.publicInternetReachable ->
+                "Интернет работает, но сервер не ответил"
+            else ->
+                "Интернет нестабилен или сеть ещё переключается"
+        }
+
+        Log.i(
+            TAG,
+            "Probe completed. network=${transport.label} backend=${result.backendReachable} " +
+                "public=${result.publicInternetReachable} restricted=$restricted " +
+                "backendFailure=${result.backendFailureKind} error=${result.lastError}"
+        )
     }
 
     private suspend fun probeReachability(
@@ -314,6 +381,28 @@ class NetworkStateTracker(private val context: Context) {
         }
     }
 
+    private fun clearActiveNetwork(summary: String) {
+        probeJob?.cancel()
+        activeProbeNetwork = null
+        probeGeneration += 1
+        _isConnected.value = false
+        _isRestrictedNetwork.value = false
+        _networkLabel.value = "Нет сети"
+        _isBackendReachable.value = null
+        _isPublicInternetReachable.value = null
+        _lastProbeSummary.value = summary
+        _lastProbeError.value = null
+        Log.i(TAG, summary)
+    }
+
+    private fun handleCallbackError(callbackName: String, error: Throwable) {
+        if (error is CancellationException) throw error
+        val message = error.message ?: error.javaClass.simpleName
+        _lastProbeError.value = message
+        _lastProbeSummary.value = "Ошибка мониторинга сети: $callbackName"
+        Log.e(TAG, "Network callback $callbackName failed", error)
+    }
+
     private data class ProbeResult(
         val backendReachable: Boolean,
         val publicInternetReachable: Boolean,
@@ -347,10 +436,11 @@ class NetworkStateTracker(private val context: Context) {
 
     private companion object {
         private const val TAG = "NetworkStateTracker"
-        private const val PROBE_TIMEOUT_MS = 2_500
-        private const val PROBE_ATTEMPTS = 3
+        private const val PROBE_TIMEOUT_MS = 2_000
+        private const val PROBE_ATTEMPTS = 2
         private const val PROBE_DEBOUNCE_MS = 1_500L
-        private const val PROBE_RETRY_DELAY_MS = 1_500L
+        private const val PROBE_RETRY_DELAY_MS = 1_000L
+        private const val PROBE_STABILIZATION_TIMEOUT_MS = 9_000L
         private const val PUBLIC_PROBE_URL = "https://cp.cloudflare.com/generate_204"
     }
 }
