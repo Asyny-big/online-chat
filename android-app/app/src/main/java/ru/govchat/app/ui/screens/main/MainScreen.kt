@@ -2039,7 +2039,15 @@ private fun ConnectionStatusBanner(
                 text = buildString {
                     append(diagnostics.networkLabel)
                     append(" • ")
-                    append(if (diagnostics.isTunnelRunning) "VPN активен" else if (diagnostics.isRestrictedNetwork) "VPN не поднят" else "VPN не требуется")
+                    append(
+                        when {
+                            diagnostics.isTunnelRunning -> "VPN активен"
+                            diagnostics.isRestrictedNetwork -> "VPN не поднят"
+                            diagnostics.networkLabel == "Мобильная сеть" &&
+                                diagnostics.isBackendReachable == null -> "Проверяю сеть…"
+                            else -> "VPN не требуется"
+                        }
+                    )
                     append(" • ")
                     append(if (state.isRealtimeConnected) "Сокет подключён" else "Сокет отключён")
                     append(" • Кэш: ")

@@ -87,10 +87,12 @@ class SocketGateway(
 
         socket.on(Socket.EVENT_CONNECT_ERROR) {
             Log.e(TAG, "Socket connect_error: ${it.joinToString(limit = 3)}")
+            emit(RealtimeEvent.SocketDisconnected)
         }
 
         socket.on("connect_timeout") {
             Log.e(TAG, "Socket connect_timeout: ${it.joinToString(limit = 3)}")
+            emit(RealtimeEvent.SocketDisconnected)
         }
 
         socket.on("reconnect_attempt") {

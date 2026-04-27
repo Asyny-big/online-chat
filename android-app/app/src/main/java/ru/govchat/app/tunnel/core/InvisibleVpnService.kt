@@ -61,19 +61,36 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
         }
 
         stopRequested = false
+        val tunnelManager = TunnelManager.getInstance(applicationContext)
         try {
             startTunnelForeground()
-            TunnelManager.getInstance(applicationContext).reportTunnelEvent("Сервис VPN запущен, собираю конфиг sing-box")
-            val configResult = ConfigBuilder.buildConfigResult(applicationContext)
-            TunnelManager.getInstance(applicationContext).reportTunnelEvent(configResult.userSummary())
+            tunnelManager.reportTunnelEvent("Сервис VPN запущен, собираю конфиг sing-box…")
+
+            val configResult = try {
+                ConfigBuilder.buildConfigResult(applicationContext)
+            } catch (error: Throwable) {
+                tunnelManager.reportTunnelFailure(
+                    "Не удалось собрать конфиг sing-box: ${error.message ?: error.javaClass.simpleName}"
+                )
+                throw error
+            }
+            tunnelManager.reportTunnelEvent(configResult.userSummary())
+            if (configResult.warnings.isNotEmpty()) {
+                tunnelManager.reportTunnelEvent(
+                    "Предупреждения парсера: ${configResult.warnings.take(2).joinToString(" | ")}"
+                )
+            }
+
+            tunnelManager.reportTunnelEvent("Запускаю sing-box (валидация конфига и handshake)…")
             singBoxRunner.start(applicationContext, configResult.configJson, this)
-            TunnelManager.getInstance(applicationContext).markTunnelRunning(true)
-            TunnelManager.getInstance(applicationContext)
-                .reportTunnelEvent("sing-box запущен, журнал ошибок: ${singBoxRunner.stderrLogPath()}")
+            tunnelManager.markTunnelRunning(true)
+            tunnelManager.reportTunnelEvent(
+                "sing-box запущен, жду первый handshake. Лог: ${singBoxRunner.stderrLogPath()}"
+            )
             Log.i(TAG, "VPN tunnel started. stderr=${singBoxRunner.stderrLogPath()}")
         } catch (error: Throwable) {
             Log.e(TAG, "Error starting VPN tunnel", error)
-            TunnelManager.getInstance(applicationContext).reportTunnelFailure(
+            tunnelManager.reportTunnelFailure(
                 "Не удалось запустить VPN: ${error.message ?: error.javaClass.simpleName}"
             )
             stopTunnel()

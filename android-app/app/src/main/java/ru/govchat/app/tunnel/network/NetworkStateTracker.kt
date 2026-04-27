@@ -119,9 +119,11 @@ class NetworkStateTracker(private val context: Context) {
     private fun scheduleReachabilityProbe(network: Network, transport: TransportKind) {
         probeJob?.cancel()
         probeJob = scope.launch {
+            _lastProbeSummary.value =
+                "Проверяю ${transport.label.lowercase()}: жду стабилизации сети…"
             delay(PROBE_DEBOUNCE_MS)
 
-            val result = probeReachability(network)
+            val result = probeReachability(network, transport)
             _isBackendReachable.value = result.backendReachable
             _isPublicInternetReachable.value = result.publicInternetReachable
             _lastProbeError.value = result.lastError
@@ -162,13 +164,23 @@ class NetworkStateTracker(private val context: Context) {
         }
     }
 
-    private suspend fun probeReachability(network: Network): ProbeResult {
+    private suspend fun probeReachability(
+        network: Network,
+        transport: TransportKind
+    ): ProbeResult {
         var backendReachable = false
         var publicInternetReachable = false
         var lastError: String? = null
         var backendFailureKind = ProbeFailureKind.None
+        val backendHost = backendHostLabel()
+        val networkLabel = transport.label.lowercase()
 
         repeat(PROBE_ATTEMPTS) { attempt ->
+            val attemptLabel = "${attempt + 1}/$PROBE_ATTEMPTS"
+
+            _lastProbeSummary.value =
+                "Проверяю $networkLabel ($attemptLabel): пингую $backendHost…"
+
             val backend = probeUrl(
                 network = network,
                 url = buildBackendPingUrl(),
@@ -177,6 +189,8 @@ class NetworkStateTracker(private val context: Context) {
             backendReachable = backend.isSuccess
             backendFailureKind = if (backend.isSuccess) ProbeFailureKind.None else backend.failureKind
             if (backendReachable) {
+                _lastProbeSummary.value =
+                    "Сервер $backendHost ответил с попытки $attemptLabel"
                 return ProbeResult(
                     backendReachable = true,
                     publicInternetReachable = true,
@@ -184,6 +198,10 @@ class NetworkStateTracker(private val context: Context) {
                     backendFailureKind = ProbeFailureKind.None
                 )
             }
+
+            val backendFailureLabel = humanFailureLabel(backend.failureKind)
+            _lastProbeSummary.value =
+                "$backendHost не отвечает ($attemptLabel, $backendFailureLabel), проверяю публичный интернет…"
 
             val publicProbe = probeUrl(
                 network = network,
@@ -194,6 +212,11 @@ class NetworkStateTracker(private val context: Context) {
             lastError = backend.error ?: publicProbe.error
 
             if (attempt < PROBE_ATTEMPTS - 1) {
+                _lastProbeSummary.value = if (publicProbe.isSuccess) {
+                    "$backendHost не доступен ($backendFailureLabel), интернет работает; жду перед попыткой ${attempt + 2}/$PROBE_ATTEMPTS…"
+                } else {
+                    "Сеть нестабильна ($backendFailureLabel); жду перед попыткой ${attempt + 2}/$PROBE_ATTEMPTS…"
+                }
                 delay(PROBE_RETRY_DELAY_MS)
             }
         }
@@ -204,6 +227,18 @@ class NetworkStateTracker(private val context: Context) {
             lastError = lastError,
             backendFailureKind = backendFailureKind
         )
+    }
+
+    private fun humanFailureLabel(kind: ProbeFailureKind): String {
+        return when (kind) {
+            ProbeFailureKind.Dns -> "DNS заблокирован"
+            ProbeFailureKind.Timeout -> "таймаут"
+            ProbeFailureKind.Connection -> "соединение отклонено"
+            ProbeFailureKind.Ssl -> "ошибка TLS"
+            ProbeFailureKind.Http -> "ошибка HTTP"
+            ProbeFailureKind.Other -> "сетевая ошибка"
+            ProbeFailureKind.None -> "нет ошибок"
+        }
     }
 
     private fun probeUrl(

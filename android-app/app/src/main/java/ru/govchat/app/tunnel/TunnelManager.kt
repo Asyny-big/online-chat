@@ -13,6 +13,7 @@ import androidx.work.WorkManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.launchIn
@@ -77,6 +78,11 @@ class TunnelManager private constructor(private val context: Context) {
     val isRestrictedNetworkState: StateFlow<Boolean> = _isRestrictedNetworkState
     private val _isTunnelRunningState = MutableStateFlow(false)
     val isTunnelRunningState: StateFlow<Boolean> = _isTunnelRunningState
+    private val _isSocketConnected = MutableStateFlow(false)
+    private var socketDisconnectedAtMillis: Long? = null
+    private var socketFallbackJob: Job? = null
+    private var socketFallbackActive = false
+    private var lastDecision: NetworkStateDecision? = null
     private val _diagnostics = MutableStateFlow(
         TunnelDiagnosticsSnapshot(
             networkLabel = networkStateTracker.networkLabel.value,
@@ -102,6 +108,7 @@ class TunnelManager private constructor(private val context: Context) {
         private const val NETWORK_LABEL_CELLULAR = "Мобильная сеть"
         private const val NETWORK_LABEL_WIFI = "Wi-Fi"
         private const val NETWORK_LABEL_VPN = "VPN"
+        private const val SOCKET_FALLBACK_GRACE_MS = 12_000L
 
         @Volatile
         private var instance: TunnelManager? = null
@@ -156,12 +163,19 @@ class TunnelManager private constructor(private val context: Context) {
     }
 
     private suspend fun handleNetworkStateChange(decision: NetworkStateDecision) {
+        lastDecision = decision
         val isCellularNetwork = decision.networkLabel == NETWORK_LABEL_CELLULAR
         val isCellularProbePending = isCellularNetwork &&
             decision.backendReachable == null &&
             !isVpnRunning
         val shouldUseTunnel = decision.isRestricted ||
-            (isCellularNetwork && decision.backendReachable == false)
+            (isCellularNetwork && decision.backendReachable == false) ||
+            (isCellularNetwork && socketFallbackActive)
+        if (decision.networkLabel != NETWORK_LABEL_CELLULAR) {
+            // Reset fallback state when leaving cellular (Wi-Fi/VPN/none).
+            cancelSocketFallbackTimer()
+            socketFallbackActive = false
+        }
 
         _isRestrictedNetworkState.value = shouldUseTunnel
         updateDiagnostics {
@@ -460,6 +474,90 @@ class TunnelManager private constructor(private val context: Context) {
                 isVpnPermissionRequired = false
             )
         }
+    }
+
+    /**
+     * Called by realtime layer (SocketGateway/MainViewModel) whenever the WebSocket
+     * to the backend connects or disconnects. We use this as a secondary signal to
+     * detect whitelist mobile networks: in some carriers /api/ping (HTTP/HTTPS)
+     * is reachable because the host is whitelisted, but socket.io / WebSocket
+     * upgrades are blocked. In that case the basic reachability probe says
+     * "VPN не нужен" but the user actually has no realtime working — we still
+     * need to bring up the in-app VPN.
+     */
+    fun setSocketConnected(connected: Boolean) {
+        val previous = _isSocketConnected.value
+        _isSocketConnected.value = connected
+        if (connected) {
+            socketDisconnectedAtMillis = null
+            cancelSocketFallbackTimer()
+            if (socketFallbackActive) {
+                socketFallbackActive = false
+                Log.i(TAG, "Realtime socket recovered. Clearing socket-fallback flag.")
+                updateDiagnostics {
+                    it.copy(
+                        lastEvent = "Сокет realtime поднялся, фоновое наблюдение продолжается"
+                    )
+                }
+            }
+            return
+        }
+
+        if (previous) {
+            socketDisconnectedAtMillis = System.currentTimeMillis()
+        }
+        scheduleSocketFallbackCheck()
+    }
+
+    private fun scheduleSocketFallbackCheck() {
+        if (socketFallbackJob?.isActive == true) return
+        if (socketFallbackActive) return
+        val networkLabel = lastDecision?.networkLabel ?: return
+        if (networkLabel != NETWORK_LABEL_CELLULAR) return
+        if (isVpnRunning) return
+
+        socketFallbackJob = scope.launch {
+            delay(SOCKET_FALLBACK_GRACE_MS)
+            evaluateSocketFallback()
+        }
+    }
+
+    private fun evaluateSocketFallback() {
+        val decision = lastDecision ?: return
+        if (decision.networkLabel != NETWORK_LABEL_CELLULAR) return
+        if (_isSocketConnected.value) return
+        if (isVpnRunning) return
+        if (!serverManager.hasCachedServers()) {
+            updateDiagnostics {
+                it.copy(
+                    stageLabel = "Сокет не поднимается",
+                    lastEvent = "Сокет realtime молчит ${SOCKET_FALLBACK_GRACE_MS / 1000} с, но кэш VPN пуст. Подключите Wi-Fi один раз, чтобы скачать конфиги.",
+                    lastError = "Realtime недоступен на мобильной сети, нужен VPN, но кэш VLESS-конфигов пуст."
+                )
+            }
+            return
+        }
+        Log.w(
+            TAG,
+            "Cellular socket has been silent for >${SOCKET_FALLBACK_GRACE_MS / 1000}s while " +
+                "backend HTTP is reachable=${decision.backendReachable}. Forcing in-app VPN."
+        )
+        socketFallbackActive = true
+        _isRestrictedNetworkState.value = true
+        updateDiagnostics {
+            it.copy(
+                isRestrictedNetwork = true,
+                stageLabel = "Сокет молчит → поднимаю VPN",
+                lastEvent = "Сервер доступен по HTTP, но realtime-сокет не подключается ${SOCKET_FALLBACK_GRACE_MS / 1000} с. Включаю встроенный VPN автоматически.",
+                lastError = null
+            )
+        }
+        startTunnel()
+    }
+
+    private fun cancelSocketFallbackTimer() {
+        socketFallbackJob?.cancel()
+        socketFallbackJob = null
     }
 
     private fun scheduleConfigUpdate() {

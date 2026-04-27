@@ -1605,6 +1605,7 @@ class MainViewModel(
             when (event) {
                 is RealtimeEvent.SocketConnected -> {
                     Log.i(TAG, "Realtime socket connected")
+                    tunnelManager.setSocketConnected(true)
                     mutableState.update { it.copy(isRealtimeConnected = true) }
                     if (mutableState.value.currentUserId.isNullOrBlank()) {
                         viewModelScope.launch {
@@ -1623,6 +1624,7 @@ class MainViewModel(
 
                 is RealtimeEvent.SocketDisconnected -> {
                     Log.w(TAG, "Realtime socket disconnected")
+                    tunnelManager.setSocketConnected(false)
                     mutableState.update { it.copy(isRealtimeConnected = false) }
                 }
 
