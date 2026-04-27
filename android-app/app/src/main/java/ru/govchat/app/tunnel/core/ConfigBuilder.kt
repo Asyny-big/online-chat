@@ -13,8 +13,8 @@ object ConfigBuilder {
 
     private const val TAG = "ConfigBuilder"
     private val supportedTransportTypes = setOf("tcp", "ws", "grpc", "httpupgrade")
-    private const val currentLibboxSupportsUtls = false
-    private const val currentLibboxSupportsReality = false
+    private const val currentLibboxSupportsUtls = true
+    private const val currentLibboxSupportsReality = true
     private val supportedUtlsFingerprints = setOf(
         "chrome",
         "firefox",

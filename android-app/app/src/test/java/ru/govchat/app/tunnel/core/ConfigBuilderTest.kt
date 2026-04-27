@@ -2,34 +2,41 @@ package ru.govchat.app.tunnel.core
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ConfigBuilderTest {
 
     @Test
-    fun parseVlessLink_omitsUtlsFingerprintForCurrentLibboxBuild() {
+    fun parseVlessLink_includesUtlsFingerprintForCurrentLibboxBuild() {
         val outbound = ConfigBuilder.parseVlessLinkForTest(
-            vlessLink(security = "tls", fp = "QQ"),
+            vlessLink(security = "tls", fp = "chrome"),
             tag = "proxy-test"
         )
 
-        assertFalse(outbound.getJSONObject("tls").has("utls"))
+        val tls = outbound.getJSONObject("tls")
+        assertTrue(tls.has("utls"))
+        val utls = tls.getJSONObject("utls")
+        assertTrue(utls.getBoolean("enabled"))
+        assertEquals("chrome", utls.getString("fingerprint"))
     }
 
     @Test
-    fun parseVlessLink_rejectsRealityWhenCurrentLibboxHasNoUtls() {
-        val error = assertThrows(IllegalArgumentException::class.java) {
-            ConfigBuilder.parseVlessLinkForTest(
-                vlessLink(security = "reality"),
-                tag = "proxy-test"
-            )
-        }
-
-        assertEquals(
-            "Reality requires uTLS, but current libbox.aar was built without with_utls",
-            error.message
+    fun parseVlessLink_acceptsRealityWithUtls() {
+        val outbound = ConfigBuilder.parseVlessLinkForTest(
+            vlessLink(security = "reality"),
+            tag = "proxy-test"
         )
+
+        val tls = outbound.getJSONObject("tls")
+        assertTrue(tls.getBoolean("enabled"))
+        val reality = tls.getJSONObject("reality")
+        assertTrue(reality.getBoolean("enabled"))
+        assertEquals("public-key", reality.getString("public_key"))
+        assertEquals("abcd", reality.getString("short_id"))
+        val utls = tls.getJSONObject("utls")
+        assertTrue(utls.getBoolean("enabled"))
+        assertEquals("chrome", utls.getString("fingerprint"))
     }
 
     @Test
