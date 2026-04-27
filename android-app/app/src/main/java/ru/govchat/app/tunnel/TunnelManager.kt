@@ -176,6 +176,11 @@ class TunnelManager private constructor(private val context: Context) {
     private suspend fun handleNetworkStateChange(decision: NetworkStateDecision) {
         lastDecision = decision
         val isCellularNetwork = decision.networkLabel == NETWORK_LABEL_CELLULAR
+        val lastNetworkWasCellular = _diagnostics.value.networkLabel == NETWORK_LABEL_CELLULAR
+        val cellularLossDuringServerBlock = !decision.isConnected &&
+            lastNetworkWasCellular &&
+            !isVpnRunning &&
+            serverManager.hasCachedServers()
         val isCellularProbePending = isCellularNetwork &&
             decision.backendReachable == null &&
             !isVpnRunning
@@ -186,6 +191,23 @@ class TunnelManager private constructor(private val context: Context) {
             // Reset fallback state when leaving cellular (Wi-Fi/VPN/none).
             cancelSocketFallbackTimer()
             socketFallbackActive = false
+        }
+
+        if (cellularLossDuringServerBlock) {
+            Log.w(TAG, "Active network disappeared after cellular block. Starting VPN from cached servers.")
+            _isRestrictedNetworkState.value = true
+            updateDiagnostics {
+                it.copy(
+                    isConnected = true,
+                    isRestrictedNetwork = true,
+                    networkLabel = NETWORK_LABEL_CELLULAR,
+                    stageLabel = "Мобильная сеть заблокирована",
+                    lastEvent = "Android временно потерял activeNetwork после блокировки сервера; запускаю VPN из кэша",
+                    lastError = decision.probeError
+                )
+            }
+            startTunnel()
+            return
         }
 
         _isRestrictedNetworkState.value = shouldUseTunnel

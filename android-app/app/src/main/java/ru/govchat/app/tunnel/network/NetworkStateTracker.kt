@@ -51,12 +51,14 @@ class NetworkStateTracker(private val context: Context) {
     val lastProbeError: StateFlow<String?> = _lastProbeError
 
     private var probeJob: Job? = null
+    private var lostNetworkJob: Job? = null
     private var activeProbeNetwork: Network? = null
     private var probeGeneration = 0
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
             runCatching {
+                cancelLostNetworkCheck()
                 _isConnected.value = true
                 updateNetworkState(network)
             }.onFailure { error ->
@@ -66,13 +68,15 @@ class NetworkStateTracker(private val context: Context) {
 
         override fun onLost(network: Network) {
             runCatching {
+                cancelLostNetworkCheck()
                 val activeNetwork = connectivityManager.activeNetwork
                 if (activeNetwork != null && activeNetwork != network) {
-                    Log.d(TAG, "Ignoring lost non-active network=$network active=$activeNetwork")
+                    Log.d(TAG, "Network lost=$network, refreshing current active network=$activeNetwork")
+                    updateNetworkState(activeNetwork)
                     return
                 }
 
-                clearActiveNetwork("Нет активного подключения")
+                scheduleLostNetworkCheck(network)
             }.onFailure { error ->
                 handleCallbackError("onLost", error)
             }
@@ -83,6 +87,7 @@ class NetworkStateTracker(private val context: Context) {
             networkCapabilities: NetworkCapabilities
         ) {
             runCatching {
+                cancelLostNetworkCheck()
                 updateNetworkState(network, networkCapabilities)
             }.onFailure { error ->
                 handleCallbackError("onCapabilitiesChanged", error)
@@ -115,6 +120,7 @@ class NetworkStateTracker(private val context: Context) {
 
     fun stopTracking() {
         probeJob?.cancel()
+        lostNetworkJob?.cancel()
         try {
             connectivityManager.unregisterNetworkCallback(networkCallback)
         } catch (error: Exception) {
@@ -383,6 +389,7 @@ class NetworkStateTracker(private val context: Context) {
 
     private fun clearActiveNetwork(summary: String) {
         probeJob?.cancel()
+        lostNetworkJob?.cancel()
         activeProbeNetwork = null
         probeGeneration += 1
         _isConnected.value = false
@@ -393,6 +400,29 @@ class NetworkStateTracker(private val context: Context) {
         _lastProbeSummary.value = summary
         _lastProbeError.value = null
         Log.i(TAG, summary)
+    }
+
+    private fun scheduleLostNetworkCheck(lostNetwork: Network) {
+        lostNetworkJob?.cancel()
+        lostNetworkJob = scope.launch {
+            _lastProbeSummary.value = "Сеть переключается, перепроверяю активное подключение…"
+            delay(LOST_NETWORK_GRACE_MS)
+
+            val activeNetwork = connectivityManager.activeNetwork
+            if (activeNetwork != null) {
+                Log.i(TAG, "Recovered active network after loss=$lostNetwork -> active=$activeNetwork")
+                updateNetworkState(activeNetwork)
+                return@launch
+            }
+
+            Log.w(TAG, "No active network after grace timeout. lost=$lostNetwork")
+            clearActiveNetwork("Нет активного подключения")
+        }
+    }
+
+    private fun cancelLostNetworkCheck() {
+        lostNetworkJob?.cancel()
+        lostNetworkJob = null
     }
 
     private fun handleCallbackError(callbackName: String, error: Throwable) {
@@ -441,6 +471,7 @@ class NetworkStateTracker(private val context: Context) {
         private const val PROBE_DEBOUNCE_MS = 1_500L
         private const val PROBE_RETRY_DELAY_MS = 1_000L
         private const val PROBE_STABILIZATION_TIMEOUT_MS = 9_000L
+        private const val LOST_NETWORK_GRACE_MS = 2_500L
         private const val PUBLIC_PROBE_URL = "https://cp.cloudflare.com/generate_204"
     }
 }
