@@ -15,6 +15,7 @@ object ConfigBuilder {
     private val supportedTransportTypes = setOf("tcp", "ws", "grpc", "httpupgrade")
     private const val currentLibboxSupportsUtls = true
     private const val currentLibboxSupportsReality = true
+    private const val DEFAULT_REALITY_UTLS_FINGERPRINT = "chrome"
     private val supportedUtlsFingerprints = setOf(
         "chrome",
         "firefox",
@@ -230,14 +231,15 @@ object ConfigBuilder {
                     ?.takeIf { it.isNotEmpty() }
                     ?.let { put("alpn", JSONArray(it)) }
                 if (currentLibboxSupportsUtls) {
-                    queryParams["fp"]
+                    val fingerprint = queryParams["fp"]
                         ?.let { normalizeUtlsFingerprint(it, tag, stats) }
-                        ?.let { fingerprint ->
-                            put("utls", JSONObject().apply {
-                                put("enabled", true)
-                                put("fingerprint", fingerprint)
-                            })
-                        }
+                        ?: if (securityType == "reality") DEFAULT_REALITY_UTLS_FINGERPRINT else null
+                    if (fingerprint != null) {
+                        put("utls", JSONObject().apply {
+                            put("enabled", true)
+                            put("fingerprint", fingerprint)
+                        })
+                    }
                 }
                 if (securityType == "reality") {
                     put("reality", JSONObject().apply {

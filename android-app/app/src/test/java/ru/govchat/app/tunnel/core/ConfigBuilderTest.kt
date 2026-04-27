@@ -40,6 +40,31 @@ class ConfigBuilderTest {
     }
 
     @Test
+    fun parseVlessLink_defaultsRealityUtlsFingerprintWhenLinkOmitsFp() {
+        val outbound = ConfigBuilder.parseVlessLinkForTest(
+            vlessLinkWithoutFp(security = "reality"),
+            tag = "proxy-test"
+        )
+
+        val tls = outbound.getJSONObject("tls")
+        val reality = tls.getJSONObject("reality")
+        assertTrue(reality.getBoolean("enabled"))
+        val utls = tls.getJSONObject("utls")
+        assertTrue(utls.getBoolean("enabled"))
+        assertEquals("chrome", utls.getString("fingerprint"))
+    }
+
+    @Test
+    fun parseVlessLink_doesNotAddUtlsForPlainTlsWithoutFp() {
+        val outbound = ConfigBuilder.parseVlessLinkForTest(
+            vlessLinkWithoutFp(security = "tls"),
+            tag = "proxy-test"
+        )
+
+        assertFalse(outbound.getJSONObject("tls").has("utls"))
+    }
+
+    @Test
     fun parseVlessLink_keepsTlsSecurityEnabled() {
         val outbound = ConfigBuilder.parseVlessLinkForTest(
             vlessLink(security = "tls"),
@@ -68,6 +93,19 @@ class ConfigBuilderTest {
             "?security=$security" +
             "&sni=example.com" +
             "&fp=$fp" +
+            "&pbk=public-key" +
+            "&sid=abcd" +
+            "&type=$type" +
+            "&flow=xtls-rprx-vision"
+    }
+
+    private fun vlessLinkWithoutFp(
+        security: String = "reality",
+        type: String = "tcp"
+    ): String {
+        return "vless://11111111-1111-1111-1111-111111111111@example.com:443" +
+            "?security=$security" +
+            "&sni=example.com" +
             "&pbk=public-key" +
             "&sid=abcd" +
             "&type=$type" +
