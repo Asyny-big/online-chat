@@ -1,11 +1,11 @@
 {
-  "latestVersion": "1.0-ufo.8",
-  "latestVersionCode": 14,
+  "latestVersion": "1.0-ufo.9",
+  "latestVersionCode": 15,
   "minSupportedVersion": "1.0",
   "minSupportedVersionCode": 1,
   "forceUpdate": false,
-  "apkFile": "DengerUO.apk",
-  "apkSha256": "0a1b5d0c9fe24f8d86b26a9de581c58d4f6a089c3a8551fed2bc9c2dc124439d",
+  "apkFile": "XelloYbig.apk",
+  "apkSha256": "411087dd4e327ba426d8e86e9576bdb3e2cbbaa534c01264caf58f78f20c6550",
   "signingCertSha256": [],
   "changelog": [
     "Исправлена ошибка запуска VPN на мобильной сети: uTLS fingerprint из VLESS-кэша нормализуется перед запуском sing-box."
