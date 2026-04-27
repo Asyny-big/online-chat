@@ -176,11 +176,14 @@ class TunnelManager private constructor(private val context: Context) {
     private suspend fun handleNetworkStateChange(decision: NetworkStateDecision) {
         lastDecision = decision
         val isCellularNetwork = decision.networkLabel == NETWORK_LABEL_CELLULAR
-        val lastNetworkWasCellular = _diagnostics.value.networkLabel == NETWORK_LABEL_CELLULAR
+        val currentDiagnostics = _diagnostics.value
+        val lastNetworkWasCellular = currentDiagnostics.networkLabel == NETWORK_LABEL_CELLULAR
         val cellularLossDuringServerBlock = !decision.isConnected &&
             lastNetworkWasCellular &&
             !isVpnRunning &&
             serverManager.hasCachedServers()
+        val tunnelShouldSurviveTransientLoss = (isVpnRunning || tunnelStartInFlight) &&
+            (currentDiagnostics.isRestrictedNetwork || lastNetworkWasCellular)
         val isCellularProbePending = isCellularNetwork &&
             decision.backendReachable == null &&
             !isVpnRunning
@@ -224,6 +227,23 @@ class TunnelManager private constructor(private val context: Context) {
         }
 
         if (!decision.isConnected) {
+            if (tunnelShouldSurviveTransientLoss) {
+                Log.w(
+                    TAG,
+                    "Restricted network temporarily unavailable while VPN is running/starting. " +
+                        "Keeping tunnel alive. running=$isVpnRunning inFlight=$tunnelStartInFlight"
+                )
+                updateDiagnostics {
+                    it.copy(
+                        isConnected = true,
+                        isRestrictedNetwork = true,
+                        stageLabel = "VPN ждёт сеть",
+                        lastEvent = "Сеть временно пропала, оставляю VPN активным для восстановления",
+                        isVpnPermissionRequired = _vpnPermissionRequired.value
+                    )
+                }
+                return
+            }
             Log.d(TAG, "No network connection. Stopping VPN if running.")
             stopTunnel()
             updateDiagnostics {

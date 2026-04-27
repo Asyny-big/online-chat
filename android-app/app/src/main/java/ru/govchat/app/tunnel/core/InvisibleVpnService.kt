@@ -167,8 +167,10 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
     }
 
     override fun onDestroy() {
-        runCatching { stopTunnel() }
-            .onFailure { error -> Log.e(TAG, "Error while destroying VPN service", error) }
+        if (!singBoxRunner.isRunning()) {
+            runCatching { stopTunnel() }
+                .onFailure { error -> Log.e(TAG, "Error while destroying VPN service", error) }
+        }
         super.onDestroy()
     }
 
