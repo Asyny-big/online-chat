@@ -1,19 +1,13 @@
 {
-  "latestVersion": "1.0-ufo.6",
-  "latestVersionCode": 12,
+  "latestVersion": "1.0-ufo.7",
+  "latestVersionCode": 13,
   "minSupportedVersion": "1.0",
   "minSupportedVersionCode": 1,
   "forceUpdate": false,
-  "apkFile": "BotikYa.apk",
-  "apkSha256": "817d966dd3f38350e65827b39d6d14665b19c8cfc6410652bd3b5378e7af667c",
+  "apkFile": "BobukUI.apk",
+  "apkSha256": "0a1f388609408b311d1152b469ba86d0fbec0dd8a5e0ead0996a507b790f913b",
   "signingCertSha256": [],
   "changelog": [
-    "Исправлена ошибка запуска VPN на мобильной сети: uTLS fingerprint из VLESS-кэша нормализуется перед запуском sing-box.",
-    "Некорректные значения вроде fp=QQ больше не роняют весь VPN-конфиг.",
-    "Добавлена диагностика сборки sing-box config: видно сколько серверов принято, пропущено и сколько fp исправлено.",
-    "Исправлена гонка при старте на мобильной сети: приложение ждёт проверку доступности govchat.ru и запуск VPN перед HTTP/socket-запросами.",
-    "Если govchat.ru не резолвится на мобильном операторе, встроенный VPN теперь запускается по кэшу VLESS без ложного статуса «VPN не требуется».",
-    "VLESS TCP/raw конфиги теперь собираются в корректный sing-box config.",
-    "Первичная загрузка VLESS-конфигов выполняется по Wi-Fi, дальнейшее обновление возможно через встроенный VPN."
+    "Исправлена ошибка запуска VPN на мобильной сети: uTLS fingerprint из VLESS-кэша нормализуется перед запуском sing-box."
   ]
 }
