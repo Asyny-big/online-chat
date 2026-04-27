@@ -1,11 +1,11 @@
 {
-  "latestVersion": "1.0-ufo.7",
-  "latestVersionCode": 13,
+  "latestVersion": "1.0-ufo.8",
+  "latestVersionCode": 14,
   "minSupportedVersion": "1.0",
   "minSupportedVersionCode": 1,
   "forceUpdate": false,
-  "apkFile": "BobukUI.apk",
-  "apkSha256": "0a1f388609408b311d1152b469ba86d0fbec0dd8a5e0ead0996a507b790f913b",
+  "apkFile": "DengerUO.apk",
+  "apkSha256": "0a1b5d0c9fe24f8d86b26a9de581c58d4f6a089c3a8551fed2bc9c2dc124439d",
   "signingCertSha256": [],
   "changelog": [
     "Исправлена ошибка запуска VPN на мобильной сети: uTLS fingerprint из VLESS-кэша нормализуется перед запуском sing-box."
