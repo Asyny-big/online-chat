@@ -233,6 +233,7 @@ class TunnelManager private constructor(private val context: Context) {
                     "Restricted network temporarily unavailable while VPN is running/starting. " +
                         "Keeping tunnel alive. running=$isVpnRunning inFlight=$tunnelStartInFlight"
                 )
+                _isRestrictedNetworkState.value = true
                 updateDiagnostics {
                     it.copy(
                         isConnected = true,

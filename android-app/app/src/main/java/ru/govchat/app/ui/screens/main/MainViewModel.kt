@@ -214,9 +214,22 @@ class MainViewModel(
             }
         }
         viewModelScope.launch {
-            waitForNetworkPathReady()
-            chatRepository.connectRealtime()
-            observeRealtime()
+            try {
+                waitForNetworkPathReady()
+                chatRepository.connectRealtime()
+                observeRealtime()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                Log.e(TAG, "Realtime bootstrap failed", error)
+                tunnelManager.setSocketConnected(false)
+                mutableState.update {
+                    it.copy(
+                        isRealtimeConnected = false,
+                        errorMessage = it.errorMessage ?: "Realtime временно недоступен"
+                    )
+                }
+            }
         }
         viewModelScope.launch {
             observeSession()
@@ -228,9 +241,22 @@ class MainViewModel(
         }
 
         viewModelScope.launch {
-            waitForNetworkPathReady()
-            loadCurrentUser()
-            refreshChats()
+            try {
+                waitForNetworkPathReady()
+                loadCurrentUser()
+                refreshChats()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                Log.e(TAG, "Initial main bootstrap failed", error)
+                mutableState.update {
+                    it.copy(
+                        isLoadingChats = false,
+                        userProfileLoading = false,
+                        errorMessage = it.errorMessage ?: "Не удалось завершить запуск приложения"
+                    )
+                }
+            }
         }
     }
 
@@ -3274,5 +3300,4 @@ private fun ChatMessage.toChatSubtitle(): String {
         MessageType.Text -> text.ifBlank { "Р В Р Р‹Р В РЎвЂўР В РЎвЂўР В Р’В±Р РЋРІР‚В°Р В Р’ВµР В Р вЂ¦Р В РЎвЂР В Р’Вµ" }
     }
 }
-
 
