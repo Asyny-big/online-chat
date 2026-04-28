@@ -1,11 +1,11 @@
 {
-  "latestVersion": "1.0-ufo.11",
-  "latestVersionCode": 17,
+  "latestVersion": "1.0-ufo.12",
+  "latestVersionCode": 18,
   "minSupportedVersion": "1.0",
   "minSupportedVersionCode": 1,
   "forceUpdate": false,
-  "apkFile": "KertynUi.apk",
-  "apkSha256": "1e3727da1aef1da2091a2083feeaac54008d0db6fe3e0f37eee8378a0813410a",
+  "apkFile": "MergerTV.apk",
+  "apkSha256": "c92ae0f230a60daa054ee83906d884d3534e32676836aa348bbc56b1d75a3bb5",
   "signingCertSha256": [],
   "changelog": [
     "Исправлена ошибка запуска VPN на мобильной сети: uTLS fingerprint из VLESS-кэша нормализуется перед запуском sing-box."
