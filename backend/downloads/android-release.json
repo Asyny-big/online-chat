@@ -1,11 +1,11 @@
 {
-  "latestVersion": "1.0-ufo.13",
-  "latestVersionCode": 19,
+  "latestVersion": "1.0-ufo.14",
+  "latestVersionCode": 20,
   "minSupportedVersion": "1.0",
   "minSupportedVersionCode": 1,
   "forceUpdate": false,
-  "apkFile": "Mouses.apk",
-  "apkSha256": "f02049b2ea0e86fcf4b1c8f758c19dcccda615219c121cb00e7abb193922449f",
+  "apkFile": "CelvinCl.apk",
+  "apkSha256": "1a03604fb8bf9d4c5eb37c76b300b949c5523bbbfca4a431413d9b0fe038d85c",
   "signingCertSha256": [],
   "changelog": [
     "Исправлена ошибка запуска VPN на мобильной сети: uTLS fingerprint из VLESS-кэша нормализуется перед запуском sing-box."
