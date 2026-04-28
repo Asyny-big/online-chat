@@ -13,6 +13,7 @@ object ConfigBuilder {
 
     private const val TAG = "ConfigBuilder"
     private val supportedTransportTypes = setOf("tcp", "ws", "grpc", "httpupgrade")
+    private val supportedFlows = setOf("xtls-rprx-vision")
     private const val currentLibboxSupportsUtls = true
     private const val currentLibboxSupportsReality = true
     private const val DEFAULT_REALITY_UTLS_FINGERPRINT = "chrome"
@@ -101,13 +102,12 @@ object ConfigBuilder {
         val tunInbound = JSONObject().apply {
             put("type", "tun")
             put("tag", "tun-in")
-            put("mtu", 1400)
+            put("mtu", 1280)
             put("inet4_address", "172.19.0.1/30")
             put("inet6_address", "fdfe:dcba:9876::1/126")
             put("auto_route", true)
             put("strict_route", true)
             put("stack", "system")
-            put("endpoint_independent_nat", true)
         }
         inboundsArray.put(tunInbound)
 
@@ -203,6 +203,9 @@ object ConfigBuilder {
         require(securityType != "reality" || currentLibboxSupportsReality) {
             "Reality requires uTLS, but current libbox.aar was built without with_utls"
         }
+        if (securityType == "reality") {
+            require(!queryParams["pbk"].isNullOrBlank()) { "Reality public key is missing" }
+        }
 
         val outbound = JSONObject().apply {
             put("type", "vless")
@@ -214,8 +217,17 @@ object ConfigBuilder {
         }
 
         queryParams["flow"]
+            ?.trim()
             ?.takeIf { it.isNotBlank() && it != "none" }
-            ?.let { outbound.put("flow", it) }
+            ?.let { flow ->
+                if (flow in supportedFlows) {
+                    outbound.put("flow", flow)
+                } else {
+                    stats?.let {
+                        it.addWarning("$tag: unsupported VLESS flow '$flow', omitted")
+                    }
+                }
+            }
 
         if (securityType == "tls" || securityType == "reality") {
             val tlsObject = JSONObject().apply {

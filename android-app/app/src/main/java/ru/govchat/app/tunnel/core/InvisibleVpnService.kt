@@ -24,7 +24,6 @@ import libbox.RoutePrefixIterator
 import libbox.TunOptions
 import libbox.WIFIState
 import ru.govchat.app.tunnel.TunnelManager
-import java.io.IOException
 
 class InvisibleVpnService : VpnService(), PlatformInterface {
 
@@ -32,6 +31,7 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
     private val singBoxRunner = SingBoxRunner.getInstance()
     private var stopRequested = false
     private var startRequested = false
+    private var foregroundStarted = false
 
     companion object {
         const val ACTION_START = "ru.govchat.app.START_VPN"
@@ -42,9 +42,18 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
-            ACTION_START -> startTunnel()
-            ACTION_STOP -> stopTunnel()
+        try {
+            when (intent?.action) {
+                ACTION_START -> startTunnel()
+                ACTION_STOP -> stopTunnel()
+            }
+        } catch (error: Throwable) {
+            Log.e(TAG, "Unhandled VPN service command failure", error)
+            TunnelManager.getInstance(applicationContext).reportTunnelFailure(
+                "Критическая ошибка VPN-сервиса: ${error.message ?: error.javaClass.simpleName}"
+            )
+            runCatching { stopTunnel() }
+                .onFailure { cleanupError -> Log.e(TAG, "Failed to clean up after command failure", cleanupError) }
         }
         return START_NOT_STICKY
     }
@@ -98,7 +107,8 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
             tunnelManager.markTunnelStartFinishedWithoutRunning(
                 "Запуск VPN остановлен: ${error.message ?: error.javaClass.simpleName}"
             )
-            stopTunnel()
+            runCatching { stopTunnel() }
+                .onFailure { cleanupError -> Log.e(TAG, "Failed to clean up after VPN start failure", cleanupError) }
         }
     }
 
@@ -114,6 +124,7 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
             } else {
                 startForeground(NOTIFICATION_ID, notification)
             }
+            foregroundStarted = true
         }.onFailure { error ->
             Log.e(TAG, "Failed to start VPN foreground service", error)
             throw error
@@ -125,24 +136,34 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
         stopRequested = true
         startRequested = false
 
-        singBoxRunner.stop()
+        runCatching { singBoxRunner.stop() }
+            .onFailure { error -> Log.e(TAG, "Error stopping sing-box", error) }
         TunnelManager.getInstance(applicationContext).markTunnelRunning(false)
 
-        try {
+        runCatching {
             vpnInterface?.close()
-        } catch (error: IOException) {
+        }.onFailure { error ->
             Log.e(TAG, "Error closing VPN interface", error)
-        } finally {
+        }.also {
             vpnInterface = null
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-        } else {
-            @Suppress("DEPRECATION")
-            stopForeground(true)
+        if (foregroundStarted) {
+            runCatching {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                } else {
+                    @Suppress("DEPRECATION")
+                    stopForeground(true)
+                }
+            }.onFailure { error ->
+                Log.e(TAG, "Error stopping VPN foreground state", error)
+            }
+            foregroundStarted = false
         }
-        stopSelf()
+
+        runCatching { stopSelf() }
+            .onFailure { error -> Log.e(TAG, "Error stopping VPN service", error) }
         TunnelManager.getInstance(applicationContext).reportTunnelEvent("Сервис VPN остановлен")
         Log.i(TAG, "VPN tunnel stopped")
     }

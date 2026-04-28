@@ -84,10 +84,21 @@ class ConfigBuilderTest {
         assertFalse(outbound.has("transport"))
     }
 
+    @Test
+    fun parseVlessLink_omitsUnsupportedFlow() {
+        val outbound = ConfigBuilder.parseVlessLinkForTest(
+            vlessLink(security = "tls", flow = "xtls-rprx-vision-udp443"),
+            tag = "proxy-test"
+        )
+
+        assertFalse(outbound.has("flow"))
+    }
+
     private fun vlessLink(
         security: String = "reality",
         fp: String = "chrome",
-        type: String = "tcp"
+        type: String = "tcp",
+        flow: String = "xtls-rprx-vision"
     ): String {
         return "vless://11111111-1111-1111-1111-111111111111@example.com:443" +
             "?security=$security" +
@@ -96,7 +107,7 @@ class ConfigBuilderTest {
             "&pbk=public-key" +
             "&sid=abcd" +
             "&type=$type" +
-            "&flow=xtls-rprx-vision"
+            "&flow=$flow"
     }
 
     private fun vlessLinkWithoutFp(
