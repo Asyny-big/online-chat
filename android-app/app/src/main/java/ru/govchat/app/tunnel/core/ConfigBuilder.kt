@@ -66,6 +66,12 @@ object ConfigBuilder {
         }
         outboundsArray.put(blockOutbound)
 
+        val dnsOutbound = JSONObject().apply {
+            put("type", "dns")
+            put("tag", "dns-out")
+        }
+        outboundsArray.put(dnsOutbound)
+
         for ((index, link) in vlessLinks.withIndex()) {
             if (serverTags.size >= MAX_ACTIVE_PROXY_COUNT) {
                 stats.limitedLinks = vlessLinks.size - index
@@ -120,6 +126,11 @@ object ConfigBuilder {
 
         val routeObject = JSONObject().apply {
             val rulesArray = JSONArray()
+
+            rulesArray.put(JSONObject().apply {
+                put("protocol", "dns")
+                put("outbound", "dns-out")
+            })
             
             rulesArray.put(JSONObject().apply {
                 put("ip_cidr", JSONArray(listOf(
