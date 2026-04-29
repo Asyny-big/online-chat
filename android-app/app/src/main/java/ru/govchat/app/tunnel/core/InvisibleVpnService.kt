@@ -119,9 +119,8 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
                     singBoxRunner.validateConfig(applicationContext, configResult.configJson)
                 }
                 tunnelManager.reportTunnelEvent("Конфиг sing-box валиден, запускаю VPN-движок…")
-                tunnelManager.markTunnelRunning(true)
                 tunnelManager.reportTunnelEvent(
-                    "VPN-движок запущен, жду handshake. Лог: ${singBoxRunner.stderrLogPath()}"
+                    "Создаю TUN-интерфейс Android и запускаю libbox. Лог: ${singBoxRunner.stderrLogPath()}"
                 )
                 withContext(Dispatchers.IO) {
                     singBoxRunner.start(
@@ -131,6 +130,7 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
                         validateConfig = false
                     )
                 }
+                tunnelManager.markTunnelRunning(true)
                 tunnelManager.reportTunnelEvent(
                     "sing-box запущен, жду первый handshake. Лог: ${singBoxRunner.stderrLogPath()}"
                 )
@@ -308,9 +308,7 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
                 .setMtu(mtu)
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                builder.setBlocking(true)
                 builder.setMetered(false)
-                builder.allowBypass()
             }
 
             val hasInet4 = addAddresses(builder, options.inet4Address)
@@ -334,6 +332,7 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
 
             runCatching { vpnInterface?.close() }
                 .onFailure { error -> Log.w(TAG, "Failed to close previous VPN interface", error) }
+
             vpnInterface = builder.establish()
                 ?: error("android: failed to establish VPN interface")
 

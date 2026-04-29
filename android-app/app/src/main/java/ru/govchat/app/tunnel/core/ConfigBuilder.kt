@@ -125,7 +125,7 @@ object ConfigBuilder {
             })
 
             put("rules", rulesArray)
-            put("auto_detect_interface", true)
+            put("auto_detect_interface", false)
         }
 
         val finalConfig = JSONObject().apply {

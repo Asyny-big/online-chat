@@ -19,6 +19,7 @@ class SingBoxRunner private constructor() {
 
     companion object {
         private const val TAG = "SingBoxRunner"
+        private const val FIX_ANDROID_STACK = true
 
         @Volatile
         private var instance: SingBoxRunner? = null
@@ -48,14 +49,14 @@ class SingBoxRunner private constructor() {
                     baseDir.absolutePath,
                     workingDir.absolutePath,
                     tempDir.absolutePath,
-                    false
+                    FIX_ANDROID_STACK
                 )
                 stderrLogFile?.let { Libbox.redirectStderr(it.absolutePath) }
 
                 initialized.set(true)
                 Log.i(
                     TAG,
-                    "libbox initialized. version=${runCatching { Libbox.version() }.getOrDefault("unknown")}, log=${stderrLogFile?.absolutePath}"
+                    "libbox initialized. version=${runCatching { Libbox.version() }.getOrDefault("unknown")}, fixAndroidStack=$FIX_ANDROID_STACK, log=${stderrLogFile?.absolutePath}"
                 )
             } catch (error: UnsatisfiedLinkError) {
                 Log.e(
