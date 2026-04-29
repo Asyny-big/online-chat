@@ -55,6 +55,7 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
         private const val TUN_IPV6_ADDRESS = "fdfe:dcba:9876::1"
         private const val TUN_IPV6_PREFIX = 126
         private const val TUN_DNS_SERVER = "172.19.0.2"
+        private val ANSI_ESCAPE_REGEX = Regex("\u001B\\[[;\\d]*m")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -417,10 +418,23 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
     override fun useProcFS(): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
 
     override fun writeLog(message: String) {
-        Log.i("sing-box", message)
-        if (message.contains("error", ignoreCase = true) || message.contains("failed", ignoreCase = true)) {
-            TunnelManager.getInstance(applicationContext).reportTunnelFailure(message)
+        val cleanMessage = ANSI_ESCAPE_REGEX.replace(message, "")
+        Log.i("sing-box", cleanMessage)
+        if (isTransientUrlTestFailure(cleanMessage)) {
+            return
         }
+        if (cleanMessage.contains("error", ignoreCase = true) || cleanMessage.contains("failed", ignoreCase = true)) {
+            TunnelManager.getInstance(applicationContext).reportTunnelFailure(cleanMessage)
+        }
+    }
+
+    private fun isTransientUrlTestFailure(message: String): Boolean {
+        return message.contains("outbound/urltest", ignoreCase = true) &&
+            (
+                message.contains("context deadline exceeded", ignoreCase = true) ||
+                    message.contains("i/o timeout", ignoreCase = true) ||
+                    message.contains("connection refused", ignoreCase = true)
+                )
     }
 
     private object EmptyNetworkInterfaceIterator : NetworkInterfaceIterator {

@@ -12,6 +12,7 @@ import ru.govchat.app.tunnel.data.ServerManager
 object ConfigBuilder {
 
     private const val TAG = "ConfigBuilder"
+    private const val MAX_ACTIVE_PROXY_COUNT = 12
     private val supportedTransportTypes = setOf("tcp", "ws", "grpc", "httpupgrade")
     private val supportedFlows = setOf("xtls-rprx-vision")
     private const val currentLibboxSupportsUtls = true
@@ -65,8 +66,14 @@ object ConfigBuilder {
         }
         outboundsArray.put(blockOutbound)
 
-        vlessLinks.forEachIndexed { index, link ->
-            val tag = "proxy-$index"
+        for ((index, link) in vlessLinks.withIndex()) {
+            if (serverTags.size >= MAX_ACTIVE_PROXY_COUNT) {
+                stats.limitedLinks = vlessLinks.size - index
+                stats.addWarning("active proxy limit $MAX_ACTIVE_PROXY_COUNT reached; ${stats.limitedLinks} cached links not loaded")
+                break
+            }
+
+            val tag = "proxy-${serverTags.size}"
 
             try {
                 val outbound = parseVlessLink(link, tag, stats)
@@ -74,7 +81,7 @@ object ConfigBuilder {
                 serverTags.add(tag)
             } catch (e: Exception) {
                 stats.skippedLinks += 1
-                stats.addWarning("$tag: ${e.message ?: e.javaClass.simpleName}")
+                stats.addWarning("link-${index + 1}: ${e.message ?: e.javaClass.simpleName}")
                 Log.e(TAG, "Error parsing VLESS link for $tag", e)
             }
         }
@@ -87,9 +94,11 @@ object ConfigBuilder {
             put("type", "urltest")
             put("tag", "proxy")
             put("outbounds", JSONArray(serverTags))
-            put("url", "http://cp.cloudflare.com/generate_204")
-            put("interval", "3m")
-            put("tolerance", 50)
+            put("url", "https://www.gstatic.com/generate_204")
+            put("interval", "10m")
+            put("tolerance", 150)
+            put("idle_timeout", "30m")
+            put("interrupt_exist_connections", false)
         }
 
         val finalOutboundsArray = JSONArray()
@@ -164,6 +173,7 @@ object ConfigBuilder {
             totalLinks = stats.totalLinks,
             acceptedLinks = serverTags.size,
             skippedLinks = stats.skippedLinks,
+            limitedLinks = stats.limitedLinks,
             normalizedFingerprintCount = stats.normalizedFingerprintCount,
             fallbackFingerprintCount = stats.fallbackFingerprintCount,
             warnings = stats.warnings.toList()
@@ -361,6 +371,7 @@ object ConfigBuilder {
     private data class MutableConfigBuildStats(
         val totalLinks: Int,
         var skippedLinks: Int = 0,
+        var limitedLinks: Int = 0,
         var normalizedFingerprintCount: Int = 0,
         var fallbackFingerprintCount: Int = 0,
         val warnings: MutableList<String> = mutableListOf()
@@ -380,17 +391,18 @@ data class ConfigBuildResult(
     val totalLinks: Int,
     val acceptedLinks: Int,
     val skippedLinks: Int,
+    val limitedLinks: Int,
     val normalizedFingerprintCount: Int,
     val fallbackFingerprintCount: Int,
     val warnings: List<String>
 ) {
     fun logSummary(): String {
-        return "servers=$acceptedLinks/$totalLinks, skipped=$skippedLinks, " +
+        return "servers=$acceptedLinks/$totalLinks, skipped=$skippedLinks, limited=$limitedLinks, " +
             "normalizedFp=$normalizedFingerprintCount, fallbackFp=$fallbackFingerprintCount"
     }
 
     fun userSummary(): String {
-        return "Конфиг sing-box готов: серверов $acceptedLinks/$totalLinks, " +
+        return "Конфиг sing-box готов: активных серверов $acceptedLinks/$totalLinks, " +
             "исправлено fp: $normalizedFingerprintCount, fallback fp: $fallbackFingerprintCount"
     }
 }
