@@ -270,6 +270,27 @@ class TunnelManager private constructor(private val context: Context) {
             return
         }
 
+        if (decision.networkLabel == NETWORK_LABEL_VPN && (isVpnRunning || tunnelStartInFlight)) {
+            Log.d(TAG, "VPN network observed while tunnel is running/starting. Keeping tunnel alive.")
+            _isRestrictedNetworkState.value = true
+            updateDiagnostics {
+                it.copy(
+                    isConnected = true,
+                    isRestrictedNetwork = true,
+                    networkLabel = NETWORK_LABEL_VPN,
+                    stageLabel = if (isVpnRunning) "VPN активен" else "Запуск VPN",
+                    lastEvent = if (isVpnRunning) {
+                        "Приложение работает через встроенный VPN"
+                    } else {
+                        "VPN-интерфейс появился, жду завершения запуска sing-box"
+                    },
+                    isVpnPermissionRequired = false,
+                    lastError = null
+                )
+            }
+            return
+        }
+
         if (shouldUseTunnel) {
             Log.d(TAG, "Restricted network detected. Checking cache...")
             updateDiagnostics {

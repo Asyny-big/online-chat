@@ -16,6 +16,14 @@ import android.os.ParcelFileDescriptor
 import android.os.Process
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import libbox.InterfaceUpdateListener
 import libbox.NetworkInterface
 import libbox.NetworkInterfaceIterator
@@ -32,6 +40,8 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
     private var stopRequested = false
     private var startRequested = false
     private var foregroundStarted = false
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var startJob: Job? = null
 
     companion object {
         const val ACTION_START = "ru.govchat.app.START_VPN"
@@ -75,47 +85,68 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
         val tunnelManager = TunnelManager.getInstance(applicationContext)
         try {
             startTunnelForeground()
-            tunnelManager.reportTunnelEvent("Сервис VPN запущен, собираю конфиг sing-box…")
-
-            val configResult = try {
-                ConfigBuilder.buildConfigResult(applicationContext)
-            } catch (error: Throwable) {
-                tunnelManager.reportTunnelFailure(
-                    "Не удалось собрать конфиг sing-box: ${error.message ?: error.javaClass.simpleName}"
-                )
-                throw error
-            }
-            tunnelManager.reportTunnelEvent(configResult.userSummary())
-            if (configResult.warnings.isNotEmpty()) {
-                tunnelManager.reportTunnelEvent(
-                    "Предупреждения парсера: ${configResult.warnings.take(2).joinToString(" | ")}"
-                )
-            }
-
-            tunnelManager.reportTunnelEvent("Запускаю sing-box (валидация конфига и handshake)…")
-            singBoxRunner.start(applicationContext, configResult.configJson, this)
-            tunnelManager.markTunnelRunning(true)
-            tunnelManager.reportTunnelEvent(
-                "sing-box запущен, жду первый handshake. Лог: ${singBoxRunner.stderrLogPath()}"
-            )
-            Log.i(TAG, "VPN tunnel started. stderr=${singBoxRunner.stderrLogPath()}")
         } catch (error: Throwable) {
-            Log.e(TAG, "Error starting VPN tunnel", error)
-            tunnelManager.reportTunnelFailure(
-                "Не удалось запустить VPN: ${error.message ?: error.javaClass.simpleName}"
-            )
-            tunnelManager.markTunnelStartFinishedWithoutRunning(
-                "Запуск VPN остановлен: ${error.message ?: error.javaClass.simpleName}"
-            )
-            runCatching { stopTunnel() }
-                .onFailure { cleanupError -> Log.e(TAG, "Failed to clean up after VPN start failure", cleanupError) }
+            handleTunnelStartFailure(tunnelManager, error)
+            return
         }
+
+        startJob?.cancel()
+        startJob = serviceScope.launch {
+            try {
+                tunnelManager.reportTunnelEvent("Сервис VPN запущен, собираю конфиг sing-box…")
+
+                val configResult = try {
+                    withContext(Dispatchers.Default) {
+                        ConfigBuilder.buildConfigResult(applicationContext)
+                    }
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Throwable) {
+                    tunnelManager.reportTunnelFailure(
+                        "Не удалось собрать конфиг sing-box: ${error.message ?: error.javaClass.simpleName}"
+                    )
+                    throw error
+                }
+                tunnelManager.reportTunnelEvent(configResult.userSummary())
+                if (configResult.warnings.isNotEmpty()) {
+                    tunnelManager.reportTunnelEvent(
+                        "Предупреждения парсера: ${configResult.warnings.take(2).joinToString(" | ")}"
+                    )
+                }
+
+                tunnelManager.reportTunnelEvent("Запускаю sing-box (валидация конфига и handshake)…")
+                withContext(Dispatchers.IO) {
+                    singBoxRunner.start(applicationContext, configResult.configJson, this@InvisibleVpnService)
+                }
+                tunnelManager.markTunnelRunning(true)
+                tunnelManager.reportTunnelEvent(
+                    "sing-box запущен, жду первый handshake. Лог: ${singBoxRunner.stderrLogPath()}"
+                )
+                Log.i(TAG, "VPN tunnel started. stderr=${singBoxRunner.stderrLogPath()}")
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                handleTunnelStartFailure(tunnelManager, error)
+            }
+        }
+    }
+
+    private fun handleTunnelStartFailure(tunnelManager: TunnelManager, error: Throwable) {
+        Log.e(TAG, "Error starting VPN tunnel", error)
+        tunnelManager.reportTunnelFailure(
+            "Не удалось запустить VPN: ${error.message ?: error.javaClass.simpleName}"
+        )
+        tunnelManager.markTunnelStartFinishedWithoutRunning(
+            "Запуск VPN остановлен: ${error.message ?: error.javaClass.simpleName}"
+        )
+        runCatching { stopTunnel(cancelStartJob = false) }
+            .onFailure { cleanupError -> Log.e(TAG, "Failed to clean up after VPN start failure", cleanupError) }
     }
 
     private fun startTunnelForeground() {
         val notification = createNotification()
         runCatching {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 startForeground(
                     NOTIFICATION_ID,
                     notification,
@@ -131,10 +162,15 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
         }
     }
 
-    private fun stopTunnel() {
+    private fun stopTunnel(cancelStartJob: Boolean = true) {
         if (stopRequested) return
         stopRequested = true
         startRequested = false
+        val pendingStartJob = startJob
+        startJob = null
+        if (cancelStartJob) {
+            pendingStartJob?.cancel()
+        }
 
         runCatching { singBoxRunner.stop() }
             .onFailure { error -> Log.e(TAG, "Error stopping sing-box", error) }
@@ -190,6 +226,7 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
     override fun onDestroy() {
         runCatching { stopTunnel() }
             .onFailure { error -> Log.e(TAG, "Error while destroying VPN service", error) }
+        serviceScope.cancel()
         super.onDestroy()
     }
 

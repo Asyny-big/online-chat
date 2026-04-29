@@ -4,8 +4,8 @@
   "minSupportedVersion": "1.0",
   "minSupportedVersionCode": 1,
   "forceUpdate": false,
-  "apkFile": "CelvinCl.apk",
-  "apkSha256": "1a03604fb8bf9d4c5eb37c76b300b949c5523bbbfca4a431413d9b0fe038d85c",
+  "apkFile": "Muskat.apk",
+  "apkSha256": "96b23533b9a7ad2d9d0e218a4e2322c9192170b23acab7c65c7375fc00526d84",
   "signingCertSha256": [],
   "changelog": [
     "Исправлена ошибка запуска VPN на мобильной сети: uTLS fingerprint из VLESS-кэша нормализуется перед запуском sing-box."
