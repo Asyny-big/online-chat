@@ -4,8 +4,8 @@
   "minSupportedVersion": "1.0",
   "minSupportedVersionCode": 1,
   "forceUpdate": false,
-  "apkFile": "HertynChik.apk",
-  "apkSha256": "778aaa16253c7bbc4c47bf0c969dbe7cf65eb97d2b5781068680a1fb1439a637",
+  "apkFile": "LoLI.apk",
+  "apkSha256": "5ee94da4fb90b846261a56f21341181323319849f4079b10bd1cc94729869c11",
   "signingCertSha256": [],
   "changelog": [
     "Исправлена ошибка запуска VPN на мобильной сети: uTLS fingerprint из VLESS-кэша нормализуется перед запуском sing-box."

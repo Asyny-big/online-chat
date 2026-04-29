@@ -28,10 +28,10 @@ import libbox.InterfaceUpdateListener
 import libbox.NetworkInterface
 import libbox.NetworkInterfaceIterator
 import libbox.PlatformInterface
-import libbox.RoutePrefixIterator
 import libbox.TunOptions
 import libbox.WIFIState
 import ru.govchat.app.tunnel.TunnelManager
+import java.util.concurrent.CountDownLatch
 
 class InvisibleVpnService : VpnService(), PlatformInterface {
 
@@ -49,6 +49,12 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
         private const val NOTIFICATION_ID = 10101
         private const val CHANNEL_ID = "tunnel_channel"
         private const val TAG = "InvisibleVpnService"
+        private const val TUN_MTU = 1280
+        private const val TUN_IPV4_ADDRESS = "172.19.0.1"
+        private const val TUN_IPV4_PREFIX = 30
+        private const val TUN_IPV6_ADDRESS = "fdfe:dcba:9876::1"
+        private const val TUN_IPV6_PREFIX = 126
+        private const val TUN_DNS_SERVER = "172.19.0.2"
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -297,32 +303,52 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
     }
 
     override fun openTun(options: TunOptions): Int {
+        Log.i(TAG, "openTun callback received, dispatching worker")
+        val latch = CountDownLatch(1)
+        var fd: Int? = null
+        var failure: Throwable? = null
+
+        Thread({
+            try {
+                fd = openTunOnWorker()
+            } catch (error: Throwable) {
+                failure = error
+            } finally {
+                latch.countDown()
+            }
+        }, "GovChatOpenTun").start()
+
+        try {
+            latch.await()
+        } catch (error: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw error
+        }
+
+        failure?.let { throw it }
+        return fd ?: error("android: VPN interface fd is unavailable")
+    }
+
+    private fun openTunOnWorker(): Int {
+        Log.i(TAG, "openTun worker started")
         if (prepare(this) != null) {
             error("android: missing vpn permission")
         }
 
         try {
-            val mtu = options.mtu.coerceIn(1280, 1500)
             val builder = Builder()
                 .setSession("GovChat Secure Tunnel")
-                .setMtu(mtu)
+                .setMtu(TUN_MTU)
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 builder.setMetered(false)
             }
 
-            val hasInet4 = addAddresses(builder, options.inet4Address)
-            val hasInet6 = addAddresses(builder, options.inet6Address)
-
-            if (options.autoRoute) {
-                val dnsAddress = runCatching { options.dnsServerAddress }.getOrNull()
-                if (!dnsAddress.isNullOrBlank()) {
-                    builder.addDnsServer(dnsAddress)
-                }
-
-                addRoutes(builder, options.inet4RouteAddress, "0.0.0.0", hasInet4)
-                addRoutes(builder, options.inet6RouteAddress, "::", hasInet6)
-            }
+            builder.addAddress(TUN_IPV4_ADDRESS, TUN_IPV4_PREFIX)
+            builder.addAddress(TUN_IPV6_ADDRESS, TUN_IPV6_PREFIX)
+            builder.addDnsServer(TUN_DNS_SERVER)
+            builder.addRoute("0.0.0.0", 0)
+            builder.addRoute("::", 0)
 
             try {
                 builder.addAllowedApplication(packageName)
@@ -339,7 +365,7 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
             val fd = vpnInterface?.fd ?: error("android: VPN interface fd is unavailable")
             Log.i(
                 TAG,
-                "openTun established. fd=$fd, mtu=$mtu, autoRoute=${options.autoRoute}, strictRoute=${options.strictRoute}"
+                "openTun established. fd=$fd, mtu=$TUN_MTU, dns=$TUN_DNS_SERVER"
             )
             return fd
         } catch (error: Throwable) {
@@ -394,35 +420,6 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
         Log.i("sing-box", message)
         if (message.contains("error", ignoreCase = true) || message.contains("failed", ignoreCase = true)) {
             TunnelManager.getInstance(applicationContext).reportTunnelFailure(message)
-        }
-    }
-
-    private fun addAddresses(builder: Builder, iterator: RoutePrefixIterator): Boolean {
-        var hasItems = false
-        while (iterator.hasNext()) {
-            hasItems = true
-            val prefix = iterator.next()
-            builder.addAddress(prefix.address, prefix.prefix)
-        }
-        return hasItems
-    }
-
-    private fun addRoutes(
-        builder: Builder,
-        iterator: RoutePrefixIterator,
-        fallbackAddress: String,
-        hasAddressFamily: Boolean
-    ) {
-        if (iterator.hasNext()) {
-            while (iterator.hasNext()) {
-                val prefix = iterator.next()
-                builder.addRoute(prefix.address, prefix.prefix)
-            }
-            return
-        }
-
-        if (hasAddressFamily) {
-            builder.addRoute(fallbackAddress, 0)
         }
     }
 
