@@ -4,8 +4,8 @@
   "minSupportedVersion": "1.0",
   "minSupportedVersionCode": 1,
   "forceUpdate": false,
-  "apkFile": "Svaper.apk",
-  "apkSha256": "d06b6a95a1daf00037813bbb396716bbc47695be35a151c9b3793e83dc628148",
+  "apkFile": "Versachi.apk",
+  "apkSha256": "78d674f589fc72f37b50f90a4498f709833c80a311198960d7101361f8e06ec2",
   "signingCertSha256": [],
   "changelog": [
     "Исправлена ошибка запуска VPN на мобильной сети: uTLS fingerprint из VLESS-кэша нормализуется перед запуском sing-box."

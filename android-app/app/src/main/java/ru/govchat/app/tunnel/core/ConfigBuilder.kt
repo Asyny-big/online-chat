@@ -97,8 +97,6 @@ object ConfigBuilder {
             put("url", "https://www.gstatic.com/generate_204")
             put("interval", "10m")
             put("tolerance", 150)
-            put("idle_timeout", "30m")
-            put("interrupt_exist_connections", false)
         }
 
         val finalOutboundsArray = JSONArray()
