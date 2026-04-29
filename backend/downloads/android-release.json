@@ -4,8 +4,8 @@
   "minSupportedVersion": "1.0",
   "minSupportedVersionCode": 1,
   "forceUpdate": false,
-  "apkFile": "Muskat.apk",
-  "apkSha256": "96b23533b9a7ad2d9d0e218a4e2322c9192170b23acab7c65c7375fc00526d84",
+  "apkFile": "LoketMe.apk",
+  "apkSha256": "3af33b5684499e3c3676d15c72c8821bf3bf31783f2f21a487a0c681505d5316",
   "signingCertSha256": [],
   "changelog": [
     "Исправлена ошибка запуска VPN на мобильной сети: uTLS fingerprint из VLESS-кэша нормализуется перед запуском sing-box."
