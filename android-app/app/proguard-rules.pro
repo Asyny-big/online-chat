@@ -23,6 +23,8 @@
 # Moshi uses reflection for network DTOs in this package.
 # Keep names and members to avoid JSON mapping regressions in release builds.
 -keep class ru.govchat.app.core.network.** { *; }
+-keep class go.** { *; }
+-keep class libbox.** { *; }
 
 # Keep annotation/metadata information required by Moshi + Kotlin reflection.
 -keepattributes RuntimeVisibleAnnotations,RuntimeVisibleParameterAnnotations,Signature,InnerClasses,EnclosingMethod

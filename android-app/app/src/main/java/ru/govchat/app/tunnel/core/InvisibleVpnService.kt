@@ -116,9 +116,21 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
 
                 tunnelManager.reportTunnelEvent("Запускаю sing-box (валидация конфига и handshake)…")
                 withContext(Dispatchers.IO) {
-                    singBoxRunner.start(applicationContext, configResult.configJson, this@InvisibleVpnService)
+                    singBoxRunner.validateConfig(applicationContext, configResult.configJson)
                 }
+                tunnelManager.reportTunnelEvent("Конфиг sing-box валиден, запускаю VPN-движок…")
                 tunnelManager.markTunnelRunning(true)
+                tunnelManager.reportTunnelEvent(
+                    "VPN-движок запущен, жду handshake. Лог: ${singBoxRunner.stderrLogPath()}"
+                )
+                withContext(Dispatchers.IO) {
+                    singBoxRunner.start(
+                        applicationContext,
+                        configResult.configJson,
+                        this@InvisibleVpnService,
+                        validateConfig = false
+                    )
+                }
                 tunnelManager.reportTunnelEvent(
                     "sing-box запущен, жду первый handshake. Лог: ${singBoxRunner.stderrLogPath()}"
                 )
@@ -132,15 +144,21 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
     }
 
     private fun handleTunnelStartFailure(tunnelManager: TunnelManager, error: Throwable) {
+        val message = buildTunnelStartFailureMessage(error)
         Log.e(TAG, "Error starting VPN tunnel", error)
-        tunnelManager.reportTunnelFailure(
-            "Не удалось запустить VPN: ${error.message ?: error.javaClass.simpleName}"
-        )
-        tunnelManager.markTunnelStartFinishedWithoutRunning(
-            "Запуск VPN остановлен: ${error.message ?: error.javaClass.simpleName}"
-        )
+        tunnelManager.markTunnelStartFinishedWithoutRunning(message)
         runCatching { stopTunnel(cancelStartJob = false) }
             .onFailure { cleanupError -> Log.e(TAG, "Failed to clean up after VPN start failure", cleanupError) }
+    }
+
+    private fun buildTunnelStartFailureMessage(error: Throwable): String {
+        val reason = error.message ?: error.javaClass.simpleName
+        val stderrTail = singBoxRunner.stderrLogTail(maxChars = 1800)
+        return if (stderrTail.isNullOrBlank()) {
+            "Не удалось запустить VPN: $reason. Лог sing-box: ${singBoxRunner.stderrLogPath() ?: "недоступен"}"
+        } else {
+            "Не удалось запустить VPN: $reason\nsing-box: $stderrTail"
+        }
     }
 
     private fun startTunnelForeground() {

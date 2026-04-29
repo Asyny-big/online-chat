@@ -190,6 +190,11 @@ class TunnelManager private constructor(private val context: Context) {
         val shouldUseTunnel = decision.isRestricted ||
             (isCellularNetwork && decision.backendReachable == false) ||
             (isCellularNetwork && socketFallbackActive)
+        val visibleNetworkError = when {
+            currentDiagnostics.stageLabel == "Ошибка VPN" -> currentDiagnostics.lastError
+            shouldUseTunnel || tunnelStartInFlight || isVpnRunning -> null
+            else -> currentDiagnostics.lastError ?: decision.probeError
+        }
         if (decision.networkLabel != NETWORK_LABEL_CELLULAR) {
             // Reset fallback state when leaving cellular (Wi-Fi/VPN/none).
             cancelSocketFallbackTimer()
@@ -222,7 +227,7 @@ class TunnelManager private constructor(private val context: Context) {
                 isBackendReachable = decision.backendReachable,
                 isPublicInternetReachable = decision.publicInternetReachable,
                 lastProbeSummary = decision.probeSummary,
-                lastError = it.lastError ?: decision.probeError
+                lastError = visibleNetworkError
             )
         }
 
@@ -297,7 +302,8 @@ class TunnelManager private constructor(private val context: Context) {
                 it.copy(
                     stageLabel = "Мобильная сеть",
                     lastEvent = decision.probeSummary,
-                    isVpnPermissionRequired = _vpnPermissionRequired.value
+                    isVpnPermissionRequired = _vpnPermissionRequired.value,
+                    lastError = null
                 )
             }
             if (serverManager.hasCachedServers()) {
@@ -305,7 +311,8 @@ class TunnelManager private constructor(private val context: Context) {
                 updateDiagnostics {
                     it.copy(
                         stageLabel = "Подготовка VPN",
-                        lastEvent = "Кэш найден, запускаю sing-box"
+                        lastEvent = "Кэш найден, запускаю sing-box",
+                        lastError = null
                     )
                 }
                 startTunnel()
@@ -475,7 +482,11 @@ class TunnelManager private constructor(private val context: Context) {
         }
         try {
             Log.i(TAG, "Stopping VPN foreground service")
-            ContextCompat.startForegroundService(applicationContext, intent)
+            val stopped = applicationContext.stopService(intent)
+            if (!stopped) {
+                Log.w(TAG, "VPN service stop requested, but Android reported it was not running")
+                markTunnelRunning(false)
+            }
         } catch (error: Throwable) {
             handleManagerError("stop VPN service", error)
             markTunnelRunning(false)
