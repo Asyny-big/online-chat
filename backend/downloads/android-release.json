@@ -1,14 +1,16 @@
 {
-  "latestVersion": "1.0-ufo.15",
-  "latestVersionCode": 21,
+  "latestVersion": "1.0-ufo.17",
+  "latestVersionCode": 23,
   "minSupportedVersion": "1.0",
   "minSupportedVersionCode": 1,
   "forceUpdate": false,
-  "apkFile": "BulderAP.apk",
-  "apkSha256": "359e15e6a91b8805afa8ec54da3dc991933cacb238d9c6851755bfc786ad20bb",
+  "apkFile": "AnigilatorAI.apk",
+  "apkSha256": "d8cbebeebfe57dcf9eac0b28d845957697f6dc52d23d90933c688e264779d1bb",
   "signingCertSha256": [],
   "changelog": [
-    "Исправлен запуск VPN на мобильной сети: DNS-запросы внутри туннеля теперь обрабатываются через sing-box dns-out.",
-    "Устранены ошибки VPN address already in use и Unable to resolve host при активном туннеле."
+    "Исправлена маршрутизация встроенного VPN на мобильных сетях: исходящие соединения sing-box защищаются от зацикливания через VPN.",
+    "Стабилизирован DNS внутри туннеля: запросы идут через sing-box dns-out и direct bootstrap без проблемного DoH fallback.",
+    "Убраны ложные сообщения об ошибке VPN при успешных DNS-ответах и временных urltest-сбоях.",
+    "Улучшена стабильность VPN для сообщений и видеозвонков."
   ]
 }

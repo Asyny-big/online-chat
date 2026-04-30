@@ -148,7 +148,7 @@ object ConfigBuilder {
             })
 
             put("rules", rulesArray)
-            put("auto_detect_interface", false)
+            put("auto_detect_interface", true)
         }
 
         val finalConfig = JSONObject().apply {
@@ -159,11 +159,6 @@ object ConfigBuilder {
             put("dns", JSONObject().apply {
                 put("servers", JSONArray().apply {
                     put(JSONObject().apply {
-                        put("tag", "dns-remote")
-                        put("address", "https://1.1.1.1/dns-query")
-                        put("detour", "proxy")
-                    })
-                    put(JSONObject().apply {
                         put("tag", "dns-direct")
                         put("address", "8.8.8.8")
                         put("detour", "direct")
@@ -172,7 +167,7 @@ object ConfigBuilder {
                 put("rules", JSONArray().apply {
                     put(JSONObject().apply {
                         put("outbound", "any")
-                        put("server", "dns-remote")
+                        put("server", "dns-direct")
                     })
                 })
                 put("independent_cache", true)

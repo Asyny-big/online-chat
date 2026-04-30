@@ -32,6 +32,7 @@ import libbox.TunOptions
 import libbox.WIFIState
 import ru.govchat.app.tunnel.TunnelManager
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicInteger
 
 class InvisibleVpnService : VpnService(), PlatformInterface {
 
@@ -42,6 +43,7 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
     private var foregroundStarted = false
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var startJob: Job? = null
+    private val protectedSocketLogCount = AtomicInteger(0)
 
     companion object {
         const val ACTION_START = "ru.govchat.app.START_VPN"
@@ -55,6 +57,7 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
         private const val TUN_IPV6_ADDRESS = "fdfe:dcba:9876::1"
         private const val TUN_IPV6_PREFIX = 126
         private const val TUN_DNS_SERVER = "172.19.0.2"
+        private const val PROTECTED_SOCKET_LOG_LIMIT = 8
         private val ANSI_ESCAPE_REGEX = Regex("\u001B\\[[;\\d]*m")
     }
 
@@ -264,7 +267,12 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
     }
 
     override fun autoDetectInterfaceControl(fd: Int) {
-        if (!protect(fd)) {
+        if (protect(fd)) {
+            val logIndex = protectedSocketLogCount.getAndIncrement()
+            if (logIndex < PROTECTED_SOCKET_LOG_LIMIT) {
+                Log.d(TAG, "Protected sing-box outbound fd=$fd")
+            }
+        } else {
             Log.w(TAG, "protect(fd=$fd) returned false")
         }
     }
@@ -423,9 +431,34 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
         if (isTransientUrlTestFailure(cleanMessage)) {
             return
         }
-        if (cleanMessage.contains("error", ignoreCase = true) || cleanMessage.contains("failed", ignoreCase = true)) {
+        if (isReportableSingBoxFailure(cleanMessage)) {
             TunnelManager.getInstance(applicationContext).reportTunnelFailure(cleanMessage)
         }
+    }
+
+    private fun isReportableSingBoxFailure(message: String): Boolean {
+        val trimmedMessage = message.trimStart()
+        if (trimmedMessage.startsWith("FATAL[", ignoreCase = true) ||
+            trimmedMessage.startsWith("PANIC[", ignoreCase = true)
+        ) {
+            return true
+        }
+        if (!trimmedMessage.startsWith("ERROR[", ignoreCase = true)) {
+            return false
+        }
+        if (isRecoverableSingBoxRuntimeFailure(trimmedMessage)) {
+            return false
+        }
+        return !TunnelManager.getInstance(applicationContext).isTunnelActive()
+    }
+
+    private fun isRecoverableSingBoxRuntimeFailure(message: String): Boolean {
+        return message.contains("dns: exchange failed", ignoreCase = true) ||
+            message.contains("outbound/urltest", ignoreCase = true) ||
+            message.contains("context deadline exceeded", ignoreCase = true) ||
+            message.contains("connection reset by peer", ignoreCase = true) ||
+            message.contains("context canceled", ignoreCase = true) ||
+            message.contains("i/o timeout", ignoreCase = true)
     }
 
     private fun isTransientUrlTestFailure(message: String): Boolean {
@@ -433,7 +466,9 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
             (
                 message.contains("context deadline exceeded", ignoreCase = true) ||
                     message.contains("i/o timeout", ignoreCase = true) ||
-                    message.contains("connection refused", ignoreCase = true)
+                    message.contains("connection refused", ignoreCase = true) ||
+                    message.contains("connection reset by peer", ignoreCase = true) ||
+                    message.contains("context canceled", ignoreCase = true)
                 )
     }
 

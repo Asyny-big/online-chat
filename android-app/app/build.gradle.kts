@@ -18,8 +18,8 @@ android {
         applicationId = "ru.govchat.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 21
-        versionName = "1.0-ufo.15"
+        versionCode = 23
+        versionName = "1.0-ufo.17"
         buildConfigField("String", "API_BASE_URL", "\"https://govchat.ru/api/\"")
         buildConfigField("String", "SOCKET_BASE_URL", "\"https://govchat.ru\"")
         buildConfigField("String", "LIVEKIT_URL", "\"wss://govchat.ru/rtc\"")

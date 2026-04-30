@@ -570,6 +570,7 @@ class TunnelManager private constructor(private val context: Context) {
                     current.isConnected -> "VPN остановлен, приложение работает напрямую"
                     else -> "VPN остановлен из-за отсутствия сети"
                 },
+                lastError = if (isRunning) null else current.lastError,
                 lastTunnelStartAtMillis = if (isRunning) System.currentTimeMillis() else current.lastTunnelStartAtMillis,
                 lastTunnelStopAtMillis = if (isRunning) current.lastTunnelStopAtMillis else System.currentTimeMillis()
             )
@@ -596,7 +597,11 @@ class TunnelManager private constructor(private val context: Context) {
     fun reportTunnelEvent(message: String) {
         Log.i(TAG, message)
         updateDiagnostics {
-            it.copy(lastEvent = message)
+            it.copy(
+                stageLabel = if (isVpnRunning) "VPN активен" else it.stageLabel,
+                lastEvent = message,
+                lastError = if (isVpnRunning) null else it.lastError
+            )
         }
     }
 
