@@ -1,13 +1,14 @@
 {
-  "latestVersion": "1.0-ufo.14",
-  "latestVersionCode": 20,
+  "latestVersion": "1.0-ufo.15",
+  "latestVersionCode": 21,
   "minSupportedVersion": "1.0",
   "minSupportedVersionCode": 1,
   "forceUpdate": false,
-  "apkFile": "Nuitersg.apk",
-  "apkSha256": "e82a81b95c1065f3990be18dc1fb670495ddedfb37de20bd33490c09fcfa9cec",
+  "apkFile": "BulderAP.apk",
+  "apkSha256": "359e15e6a91b8805afa8ec54da3dc991933cacb238d9c6851755bfc786ad20bb",
   "signingCertSha256": [],
   "changelog": [
-    "Исправлена ошибка запуска VPN на мобильной сети: uTLS fingerprint из VLESS-кэша нормализуется перед запуском sing-box."
+    "Исправлен запуск VPN на мобильной сети: DNS-запросы внутри туннеля теперь обрабатываются через sing-box dns-out.",
+    "Устранены ошибки VPN address already in use и Unable to resolve host при активном туннеле."
   ]
 }

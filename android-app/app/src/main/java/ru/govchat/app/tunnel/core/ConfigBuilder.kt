@@ -128,10 +128,15 @@ object ConfigBuilder {
             val rulesArray = JSONArray()
 
             rulesArray.put(JSONObject().apply {
+                put("port", JSONArray(listOf(53)))
+                put("outbound", "dns-out")
+            })
+
+            rulesArray.put(JSONObject().apply {
                 put("protocol", "dns")
                 put("outbound", "dns-out")
             })
-            
+
             rulesArray.put(JSONObject().apply {
                 put("ip_cidr", JSONArray(listOf(
                     "10.0.0.0/8",
