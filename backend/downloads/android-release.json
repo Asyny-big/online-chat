@@ -4,8 +4,8 @@
   "minSupportedVersion": "1.0",
   "minSupportedVersionCode": 1,
   "forceUpdate": false,
-  "apkFile": "AnigilatorAI.apk",
-  "apkSha256": "211bc93064c6a49e065f7b4ed2cdcd05dd76f323733d67bcf4751a9cc24b4381",
+  "apkFile": "ChetcoAU.apk",
+  "apkSha256": "1f361118aab00573d19ee5f2c0254d1719715775a1087b83986923ffb38929aa",
   "signingCertSha256": [],
   "changelog": [
     "Фикс: ложная красная плашка 'All 3 VLESS config sources failed' больше не появляется когда фоновое обновление кэша на старте упало (например, GitHub режется на Yota whitelist). Если рабочий кэш есть — refresh-сбой просто логируется в logcat и игнорируется. Ошибка показывается ТОЛЬКО когда кэш пуст и обновить нечем.",
