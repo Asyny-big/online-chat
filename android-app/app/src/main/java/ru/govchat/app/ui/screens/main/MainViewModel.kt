@@ -265,7 +265,8 @@ class MainViewModel(
             waitForNetworkPathReady()
             Log.i(TAG, "Refreshing chats. restricted=${tunnelManager.isRestrictedNetworkState.value} vpn=${tunnelManager.isTunnelRunningState.value}")
             mutableState.update { it.copy(isLoadingChats = true, errorMessage = null) }
-            loadChatsUseCase()
+            val result = retryOnTransientNetworkFailure("loadChats") { loadChatsUseCase() }
+            result
                 .onSuccess { chats ->
                     Log.i(TAG, "Chats refreshed successfully. count=${chats.size}")
                     mutableState.update {
@@ -281,7 +282,7 @@ class MainViewModel(
                     mutableState.update {
                         it.copy(
                             isLoadingChats = false,
-                            errorMessage = error.message ?: "Р В РЎвЂєР РЋРІвЂљВ¬Р В РЎвЂР В Р’В±Р В РЎвЂќР В Р’В° Р В Р’В·Р В Р’В°Р В РЎвЂ“Р РЋР вЂљР РЋРЎвЂњР В Р’В·Р В РЎвЂќР В РЎвЂ Р РЋРІР‚РЋР В Р’В°Р РЋРІР‚С™Р В РЎвЂўР В Р вЂ "
+                            errorMessage = humanizeNetworkError(error)
                         )
                     }
                 }
@@ -2184,7 +2185,9 @@ class MainViewModel(
     private suspend fun loadCurrentUser() {
         Log.i(TAG, "Loading current user profile")
         mutableState.update { it.copy(userProfileLoading = true) }
-        chatRepository.getCurrentUser().onSuccess { user ->
+        retryOnTransientNetworkFailure("getCurrentUser") {
+            chatRepository.getCurrentUser()
+        }.onSuccess { user ->
             Log.i(TAG, "Current user profile loaded. userId=${user.id}")
             mutableState.update {
                 it.copy(
@@ -2198,7 +2201,7 @@ class MainViewModel(
             mutableState.update {
                 it.copy(
                     userProfileLoading = false,
-                    errorMessage = it.errorMessage ?: (error.message ?: "Не удалось загрузить профиль")
+                    errorMessage = it.errorMessage ?: humanizeNetworkError(error)
                 )
             }
         }
@@ -3093,6 +3096,73 @@ class MainViewModel(
         return block()
     }
 
+    private fun isTransientNetworkFailure(error: Throwable): Boolean {
+        var current: Throwable? = error
+        var depth = 0
+        while (current != null && depth < 6) {
+            if (current is java.net.UnknownHostException) return true
+            val message = current.message?.lowercase().orEmpty()
+            if (
+                message.contains("unable to resolve host") ||
+                message.contains("no address associated with hostname") ||
+                message.contains("failed to connect") ||
+                message.contains("connection reset") ||
+                message.contains("software caused connection abort") ||
+                message.contains("eof") ||
+                message.contains("timeout") ||
+                message.contains("network is unreachable") ||
+                message.contains("no route to host")
+            ) {
+                return true
+            }
+            current = current.cause
+            depth += 1
+        }
+        return false
+    }
+
+    private fun humanizeNetworkError(error: Throwable): String {
+        if (isTransientNetworkFailure(error)) {
+            return if (tunnelManager.isTunnelRunningState.value) {
+                "VPN ещё устанавливается, пробую снова. Сетевая ошибка: ${error.message ?: error.javaClass.simpleName}"
+            } else {
+                "Не удалось связаться с сервером: ${error.message ?: error.javaClass.simpleName}"
+            }
+        }
+        return error.message ?: "Не удалось загрузить чаты"
+    }
+
+    private suspend fun <T> retryOnTransientNetworkFailure(
+        operation: String,
+        attempts: Int = 3,
+        baseDelayMs: Long = 800L,
+        block: suspend () -> Result<T>
+    ): Result<T> {
+        var lastResult: Result<T>? = null
+        var attempt = 0
+        while (attempt < attempts) {
+            attempt += 1
+            val result = runCatching { block() }.getOrElse { error ->
+                Result.failure<T>(error)
+            }
+            if (result.isSuccess) return result
+            val error = result.exceptionOrNull()
+            if (error == null || !isTransientNetworkFailure(error)) {
+                return result
+            }
+            lastResult = result
+            if (attempt >= attempts) break
+            val backoff = baseDelayMs * attempt
+            Log.w(
+                TAG,
+                "$operation transient failure on attempt $attempt/$attempts (${error.message}). " +
+                    "Waiting ${backoff}ms before retry."
+            )
+            delay(backoff)
+        }
+        return lastResult ?: Result.failure(IllegalStateException("$operation retry failed without result"))
+    }
+
     private suspend fun waitForNetworkPathReady() {
         val startedAt = SystemClock.elapsedRealtime()
         var lastWaitLogAt = 0L
@@ -3102,6 +3172,7 @@ class MainViewModel(
             val diagnostics = tunnelManager.diagnostics.value
             val restricted = tunnelManager.isRestrictedNetworkState.value || diagnostics.isRestrictedNetwork
             val tunnelRunning = tunnelManager.isTunnelRunningState.value || diagnostics.isTunnelRunning
+            val tunnelReady = tunnelManager.isTunnelReadyState.value
             val initialNetworkProbePending = diagnostics.isConnected &&
                 diagnostics.networkLabel == NETWORK_LABEL_UNKNOWN &&
                 diagnostics.isBackendReachable == null &&
@@ -3111,13 +3182,16 @@ class MainViewModel(
                 diagnostics.isBackendReachable == null &&
                 !tunnelRunning
             val waitingForTunnel = restricted && !tunnelRunning
+            val waitingForUrlTest = tunnelRunning && !tunnelReady
             val waitingForVpnPermission = diagnostics.isVpnPermissionRequired
 
-            if (!initialNetworkProbePending && !cellularProbePending && !waitingForTunnel && !waitingForVpnPermission) {
+            if (!initialNetworkProbePending && !cellularProbePending && !waitingForTunnel && !waitingForVpnPermission && !waitingForUrlTest) {
                 Log.i(
                     TAG,
                     "Network path ready. label=${diagnostics.networkLabel} " +
-                        "backend=${diagnostics.isBackendReachable} restricted=$restricted vpn=$tunnelRunning"
+                        "backend=${diagnostics.isBackendReachable} restricted=$restricted " +
+                        "vpn=$tunnelRunning ready=$tunnelReady tested=${diagnostics.urlTestTested} " +
+                        "alive=${diagnostics.urlTestAlive} selected=${diagnostics.urlTestSelectedTag}"
                 )
                 return
             }
@@ -3200,7 +3274,12 @@ class MainViewModel(
         private const val MAX_HANDLED_NOTIFICATION_EVENTS = 128
         private const val MESSAGES_PAGE_SIZE = 30
         private const val DISK_CACHE_MESSAGES_LIMIT = 100
-        private const val NETWORK_PATH_READY_TIMEOUT_MS = 10_000L
+        // Must be greater than TunnelManager.URL_TEST_WARMUP_DEADLINE_MS (90s)
+        // so we don't bail out of waitForNetworkPathReady while sing-box is
+        // still searching for the fastest live VLESS proxy among all ~500
+        // cached endpoints. We add a 10-second buffer so URLTest's "I'm done"
+        // signal has time to propagate to MainViewModel before we time out.
+        private const val NETWORK_PATH_READY_TIMEOUT_MS = 100_000L
         private const val NETWORK_PATH_WAIT_LOG_INTERVAL_MS = 2_000L
         private const val NETWORK_LABEL_UNKNOWN = "Неизвестная сеть"
         private const val NETWORK_LABEL_CELLULAR = "Мобильная сеть"

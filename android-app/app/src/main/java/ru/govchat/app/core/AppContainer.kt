@@ -14,6 +14,8 @@ import ru.govchat.app.BuildConfig
 import ru.govchat.app.core.network.AuthInterceptor
 import ru.govchat.app.core.network.GovChatApi
 import ru.govchat.app.core.network.SocketGateway
+import ru.govchat.app.core.network.TunnelAwareRetryInterceptor
+import java.util.concurrent.TimeUnit
 import ru.govchat.app.core.storage.ChatMessagesCacheStorage
 import ru.govchat.app.core.storage.SessionStorage
 import ru.govchat.app.core.update.AppUpdateDownloadManager
@@ -74,8 +76,18 @@ class AppContainer(application: Application) {
     )
 
     private val authInterceptor = AuthInterceptor(sessionStorage)
+    private val tunnelAwareRetryInterceptor = TunnelAwareRetryInterceptor(application.applicationContext)
 
     private val okHttpClient: OkHttpClient = OkHttpClient.Builder()
+        .retryOnConnectionFailure(true)
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
+        .callTimeout(60, TimeUnit.SECONDS)
+        // Retry transient DNS/connect failures while the in-app VPN is still warming up.
+        // Must be registered BEFORE the auth interceptor so the entire request chain
+        // (including auth header injection) is replayed on each retry.
+        .addInterceptor(tunnelAwareRetryInterceptor)
         .addInterceptor(authInterceptor)
         .apply {
             if (BuildConfig.DEBUG) {

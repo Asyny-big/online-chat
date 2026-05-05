@@ -18,15 +18,33 @@ android {
         applicationId = "ru.govchat.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 23
-        versionName = "1.0-ufo.17"
+        versionCode = 30
+        versionName = "1.0-ufo.24"
         buildConfigField("String", "API_BASE_URL", "\"https://govchat.ru/api/\"")
         buildConfigField("String", "SOCKET_BASE_URL", "\"https://govchat.ru\"")
         buildConfigField("String", "LIVEKIT_URL", "\"wss://govchat.ru/rtc\"")
+        // Pipe-separated list of VLESS config sources. ServerManager downloads
+        // each, parses vless:// links, deduplicates by full URI and stores them
+        // in one shared cache. More sources = wider variety of upstream networks
+        // = higher probability of finding a proxy whose host network actually has
+        // a working route to govchat.ru's IP (95.85.243.120) under aggressive
+        // carrier filtering (Yota whitelist, MTS DPI, etc.).
+        buildConfigField(
+            "String",
+            "TUNNEL_CONFIG_URLS",
+            "\"" +
+                "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile.txt|" +
+                "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile-2.txt|" +
+                "https://raw.githubusercontent.com/Ai123999/WhiteKeys/main/WhiteKeys" +
+                "\""
+        )
+        // Backwards-compatible single-URL field still used by some legacy probes
+        // (e.g. NetworkStateTracker.lastFetchSourceUrl). Keep pointing at the
+        // first source in TUNNEL_CONFIG_URLS so any cosmetics still resolve.
         buildConfigField(
             "String",
             "TUNNEL_CONFIG_URL",
-            "\"https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile.txt\""
+            "\"https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt\""
         )
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

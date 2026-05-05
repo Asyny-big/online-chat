@@ -72,62 +72,141 @@ class ServerManager(context: Context) {
     }
 
     suspend fun fetchAndCacheServers(): Boolean = withContext(Dispatchers.IO) {
-        var connection: HttpURLConnection? = null
-        try {
-            require(BuildConfig.TUNNEL_CONFIG_URL.isNotBlank()) {
-                "BuildConfig.TUNNEL_CONFIG_URL is blank"
-            }
+        val sources = resolveConfigSources()
+        if (sources.isEmpty()) {
+            Log.e(TAG, "No TUNNEL_CONFIG_URLS configured")
+            sharedPrefs.edit()
+                .putLong(KEY_LAST_FETCH_ATTEMPT_AT, System.currentTimeMillis())
+                .putString(KEY_LAST_FETCH_ERROR, "No TUNNEL_CONFIG_URLS configured")
+                .apply()
+            return@withContext false
+        }
 
-            val url = URL(BuildConfig.TUNNEL_CONFIG_URL)
+        // Deduplicate by full vless:// URI: collisions across mirrors are common
+        // and we don't want URLTest to waste time stress-testing the same proxy
+        // multiple times with slightly different cosmetic params.
+        val merged = LinkedHashSet<String>()
+        val perSourceLog = StringBuilder()
+        var totalBytes = 0
+        val sourceErrors = mutableListOf<String>()
+
+        for (source in sources) {
+            val (links, bytes, error) = fetchSingleSource(source)
+            totalBytes += bytes
+            if (error != null) {
+                sourceErrors += "$source: $error"
+                perSourceLog.append("$source -> ERROR ${error.take(80)}; ")
+            } else {
+                val before = merged.size
+                merged.addAll(links)
+                val added = merged.size - before
+                perSourceLog.append("$source -> +$added (raw=${links.size}); ")
+            }
+        }
+
+        if (merged.isEmpty()) {
+            val existingCacheSize = getCachedServers().size
+            val errorMessage = "All ${sources.size} VLESS config sources failed: ${sourceErrors.take(3).joinToString(" | ")}"
+            if (existingCacheSize > 0) {
+                // Refresh failed (likely the user is on a Russian carrier with
+                // GitHub blocked and VPN not yet up), BUT we still have a valid
+                // cache from a previous successful fetch. Keep the cache, do
+                // NOT surface this as a fatal error to the UI — the user is
+                // perfectly capable of running the tunnel from the existing
+                // cache. Just record a non-blocking note in logcat and clear
+                // the previously saved error so the UI doesn't keep showing
+                // stale red banners.
+                Log.w(
+                    TAG,
+                    "Background refresh failed but $existingCacheSize cached servers are still usable. Ignoring. cause=$errorMessage"
+                )
+                sharedPrefs.edit()
+                    .putLong(KEY_LAST_FETCH_ATTEMPT_AT, System.currentTimeMillis())
+                    .putInt(KEY_LAST_RESPONSE_SIZE, totalBytes)
+                    .remove(KEY_LAST_FETCH_ERROR)
+                    .apply()
+                return@withContext false
+            }
+            // No cache AND no fetch: this is genuinely fatal, surface to UI.
+            sharedPrefs.edit()
+                .putLong(KEY_LAST_FETCH_ATTEMPT_AT, System.currentTimeMillis())
+                .putString(KEY_LAST_FETCH_ERROR, errorMessage)
+                .putInt(KEY_LAST_RESPONSE_SIZE, totalBytes)
+                .apply()
+            Log.e(TAG, errorMessage)
+            return@withContext false
+        }
+
+        val decodedServers = merged.toList()
+        val cacheJson = JSONObject().apply {
+            put("servers", JSONArray(decodedServers))
+        }
+        sharedPrefs.edit()
+            .putString(KEY_SERVERS, cacheJson.toString())
+            .putLong(KEY_LAST_FETCH_ATTEMPT_AT, System.currentTimeMillis())
+            .putLong(KEY_LAST_FETCH_SUCCESS_AT, System.currentTimeMillis())
+            .putInt(KEY_LAST_FETCH_PARSED_COUNT, decodedServers.size)
+            .putInt(KEY_LAST_RESPONSE_SIZE, totalBytes)
+            .also { editor ->
+                if (sourceErrors.isEmpty()) {
+                    editor.remove(KEY_LAST_FETCH_ERROR)
+                } else {
+                    editor.putString(
+                        KEY_LAST_FETCH_ERROR,
+                        "Partial fetch ok: cached=${decodedServers.size}, failed sources=${sourceErrors.size}"
+                    )
+                }
+                editor.remove(KEY_LAST_READ_ERROR)
+            }
+            .apply()
+        Log.i(
+            TAG,
+            "Cached ${decodedServers.size} unique VLESS servers from ${sources.size} sources. Per-source: $perSourceLog"
+        )
+        return@withContext true
+    }
+
+    private fun resolveConfigSources(): List<String> {
+        val multi = runCatching { BuildConfig.TUNNEL_CONFIG_URLS }.getOrNull().orEmpty()
+        if (multi.isNotBlank()) {
+            return multi.split('|', '\n', ';')
+                .map { it.trim() }
+                .filter { it.isNotBlank() && it.startsWith("http") }
+                .distinct()
+        }
+        return listOfNotNull(BuildConfig.TUNNEL_CONFIG_URL.takeIf { it.isNotBlank() })
+    }
+
+    private fun fetchSingleSource(sourceUrl: String): SingleSourceResult {
+        var connection: HttpURLConnection? = null
+        return try {
+            val url = URL(sourceUrl)
             connection = url.openConnection() as HttpURLConnection
             connection.connectTimeout = 10000
             connection.readTimeout = 10000
             connection.requestMethod = "GET"
             connection.setRequestProperty("Accept", "text/plain, application/json")
             connection.setRequestProperty("User-Agent", "GovChat-Android/${BuildConfig.VERSION_NAME}")
-
-            if (connection.responseCode == HttpURLConnection.HTTP_OK) {
+            val code = connection.responseCode
+            if (code != HttpURLConnection.HTTP_OK) {
+                SingleSourceResult(emptyList(), 0, "HTTP $code")
+            } else {
                 val responseString = connection.inputStream.bufferedReader().use { it.readText() }
-
-                val decodedServers = parseServersResponse(responseString)
-
-                if (decodedServers.isNotEmpty()) {
-                    val cacheJson = JSONObject().apply {
-                        put("servers", JSONArray(decodedServers))
-                    }
-                    sharedPrefs.edit()
-                        .putString(KEY_SERVERS, cacheJson.toString())
-                        .putLong(KEY_LAST_FETCH_ATTEMPT_AT, System.currentTimeMillis())
-                        .putLong(KEY_LAST_FETCH_SUCCESS_AT, System.currentTimeMillis())
-                        .putInt(KEY_LAST_FETCH_PARSED_COUNT, decodedServers.size)
-                        .putInt(KEY_LAST_RESPONSE_SIZE, responseString.length)
-                        .remove(KEY_LAST_FETCH_ERROR)
-                        .remove(KEY_LAST_READ_ERROR)
-                        .apply()
-                    Log.i(TAG, "Cached ${decodedServers.size} VLESS servers from ${BuildConfig.TUNNEL_CONFIG_URL}")
-                    return@withContext true
-                }
+                val parsed = parseServersResponse(responseString)
+                SingleSourceResult(parsed, responseString.length, null)
             }
-            val errorMessage = "Config fetch failed. responseCode=${connection.responseCode}"
-            sharedPrefs.edit()
-                .putLong(KEY_LAST_FETCH_ATTEMPT_AT, System.currentTimeMillis())
-                .putString(KEY_LAST_FETCH_ERROR, errorMessage)
-                .putInt(KEY_LAST_RESPONSE_SIZE, 0)
-                .apply()
-            Log.e(TAG, errorMessage)
-            return@withContext false
         } catch (e: Exception) {
-            sharedPrefs.edit()
-                .putLong(KEY_LAST_FETCH_ATTEMPT_AT, System.currentTimeMillis())
-                .putString(KEY_LAST_FETCH_ERROR, e.message ?: e.javaClass.simpleName)
-                .putInt(KEY_LAST_RESPONSE_SIZE, 0)
-                .apply()
-            Log.e(TAG, "Failed to fetch server config", e)
-            return@withContext false
+            SingleSourceResult(emptyList(), 0, e.message ?: e.javaClass.simpleName)
         } finally {
             connection?.disconnect()
         }
     }
+
+    private data class SingleSourceResult(
+        val links: List<String>,
+        val responseSizeBytes: Int,
+        val error: String?
+    )
     
     fun hasCachedServers(): Boolean {
         return getCachedServers().isNotEmpty()

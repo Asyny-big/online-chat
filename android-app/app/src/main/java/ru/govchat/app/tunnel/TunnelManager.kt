@@ -35,6 +35,7 @@ data class TunnelDiagnosticsSnapshot(
     val isConnected: Boolean = false,
     val isRestrictedNetwork: Boolean = false,
     val isTunnelRunning: Boolean = false,
+    val isTunnelWarmingUp: Boolean = false,
     val isVpnPermissionRequired: Boolean = false,
     val stageLabel: String = "Инициализация",
     val lastEvent: String = "Запуск диагностики",
@@ -50,7 +51,16 @@ data class TunnelDiagnosticsSnapshot(
     val isBackendReachable: Boolean? = null,
     val isPublicInternetReachable: Boolean? = null,
     val lastProbeSummary: String = "Проверка сети ещё не запускалась",
-    val configSourceUrl: String = BuildConfig.TUNNEL_CONFIG_URL
+    val configSourceUrl: String = BuildConfig.TUNNEL_CONFIG_URL,
+    // URLTest progress while sing-box is bursting parallel handshakes through
+    // every cached VLESS endpoint. Used to render a friendly "подбираю лучший
+    // сервер 47/149" indicator instead of leaving the user staring at a blank
+    // diagnostic card.
+    val urlTestTotal: Int = 0,
+    val urlTestTested: Int = 0,
+    val urlTestAlive: Int = 0,
+    val urlTestDeadlineAtMillis: Long? = null,
+    val urlTestSelectedTag: String? = null
 )
 
 private data class NetworkStateDecision(
@@ -88,6 +98,14 @@ class TunnelManager private constructor(private val context: Context) {
     private var tunnelStartWatchdogJob: Job? = null
     private var tunnelStartAttempts = 0
     private var lastDecision: NetworkStateDecision? = null
+    private val _isTunnelReadyState = MutableStateFlow(false)
+    val isTunnelReadyState: StateFlow<Boolean> = _isTunnelReadyState
+    private var urlTestTotal: Int = 0
+    private var urlTestTested: Int = 0
+    private var urlTestAlive: Int = 0
+    private var urlTestSelectedTag: String? = null
+    private var urlTestStartedAtMs: Long = 0L
+    private var urlTestWatchdogJob: Job? = null
     private val _diagnostics = MutableStateFlow(
         TunnelDiagnosticsSnapshot(
             networkLabel = networkStateTracker.networkLabel.value,
@@ -116,6 +134,18 @@ class TunnelManager private constructor(private val context: Context) {
         private const val SOCKET_FALLBACK_GRACE_MS = 12_000L
         private const val TUNNEL_START_TIMEOUT_MS = 10_000L
         private const val MAX_TUNNEL_START_ATTEMPTS = 2
+        // Maximum time we will wait for URLTest to find at least one live proxy.
+        // After this deadline we mark the tunnel as ready anyway so the user
+        // gets a definitive failure instead of an indefinitely spinning UI.
+        // Generous (90s) on purpose: with ~500 cached servers being tested in
+        // parallel, the slowest healthy ones can take up to a minute to answer
+        // the govchat.ru/api/ping probe through their full upstream path. The
+        // user explicitly asked for "let it take long but make sure the truly
+        // fastest server is picked" rather than "fail fast on a quick subset".
+        const val URL_TEST_WARMUP_DEADLINE_MS = 90_000L
+        // If we have at least this many live proxies, the warmup is considered
+        // healthy and we stop displaying progress immediately.
+        private const val URL_TEST_MIN_HEALTHY_LIVE = 1
 
         @Volatile
         private var instance: TunnelManager? = null
@@ -551,12 +581,19 @@ class TunnelManager private constructor(private val context: Context) {
         if (isRunning) {
             pendingTunnelStart = false
             _vpnPermissionRequired.value = false
+            beginUrlTestWarmup()
+        } else {
+            cancelUrlTestWarmup()
+            _isTunnelReadyState.value = false
         }
         updateDiagnostics { current ->
+            val warming = isRunning && current.urlTestSelectedTag == null
             current.copy(
                 isTunnelRunning = isRunning,
+                isTunnelWarmingUp = warming,
                 isVpnPermissionRequired = _vpnPermissionRequired.value,
                 stageLabel = when {
+                    isRunning && warming -> "VPN: подбираю сервер"
                     isRunning -> "VPN активен"
                     current.lastError != null -> "Ошибка VPN"
                     current.isRestrictedNetwork -> "VPN остановлен"
@@ -564,6 +601,8 @@ class TunnelManager private constructor(private val context: Context) {
                     else -> "Нет подключения"
                 },
                 lastEvent = when {
+                    isRunning && warming ->
+                        "Подбираю лучший VPN-сервер из ${current.cachedServerCount}, не закрывайте приложение"
                     isRunning -> "Туннель поднят, трафик GovChat идёт через sing-box"
                     current.lastError != null -> current.lastEvent
                     current.isRestrictedNetwork -> "VPN остановлен в ограниченной сети"
@@ -572,9 +611,115 @@ class TunnelManager private constructor(private val context: Context) {
                 },
                 lastError = if (isRunning) null else current.lastError,
                 lastTunnelStartAtMillis = if (isRunning) System.currentTimeMillis() else current.lastTunnelStartAtMillis,
-                lastTunnelStopAtMillis = if (isRunning) current.lastTunnelStopAtMillis else System.currentTimeMillis()
+                lastTunnelStopAtMillis = if (isRunning) current.lastTunnelStopAtMillis else System.currentTimeMillis(),
+                urlTestTotal = if (isRunning) current.urlTestTotal else 0,
+                urlTestTested = if (isRunning) current.urlTestTested else 0,
+                urlTestAlive = if (isRunning) current.urlTestAlive else 0,
+                urlTestSelectedTag = if (isRunning) current.urlTestSelectedTag else null,
+                urlTestDeadlineAtMillis = if (isRunning) current.urlTestDeadlineAtMillis else null
             )
         }
+    }
+
+    private fun beginUrlTestWarmup() {
+        urlTestTotal = _diagnostics.value.cachedServerCount
+        urlTestTested = 0
+        urlTestAlive = 0
+        urlTestSelectedTag = null
+        urlTestStartedAtMs = System.currentTimeMillis()
+        _isTunnelReadyState.value = false
+        urlTestWatchdogJob?.cancel()
+        urlTestWatchdogJob = scope.launch {
+            delay(URL_TEST_WARMUP_DEADLINE_MS)
+            // Timeout reached. Either there were no live servers at all or
+            // they answered too slowly. Either way, unblock the UI so the
+            // user gets a definitive failure message via the retry layer.
+            if (!_isTunnelReadyState.value) {
+                Log.w(
+                    TAG,
+                    "URLTest warmup deadline reached. tested=$urlTestTested " +
+                        "alive=$urlTestAlive total=$urlTestTotal selected=$urlTestSelectedTag"
+                )
+                if (urlTestAlive == 0 && urlTestSelectedTag.isNullOrBlank()) {
+                    updateDiagnostics { current ->
+                        current.copy(
+                            isTunnelWarmingUp = false,
+                            stageLabel = "VPN: серверы не отвечают",
+                            lastEvent = "Не нашёл живых VPN-серверов из ${current.urlTestTotal} за ${URL_TEST_WARMUP_DEADLINE_MS / 1000} с. Попробуйте Wi-Fi или другую SIM.",
+                            lastError = "Все ${current.urlTestTotal} VLESS-серверов из кэша не отвечают на этой сети. Нужны другие конфиги."
+                        )
+                    }
+                }
+                markTunnelReadyAfterWarmup()
+            }
+        }
+        updateDiagnostics { current ->
+            current.copy(
+                urlTestTotal = current.cachedServerCount,
+                urlTestTested = 0,
+                urlTestAlive = 0,
+                urlTestSelectedTag = null,
+                urlTestDeadlineAtMillis = System.currentTimeMillis() + URL_TEST_WARMUP_DEADLINE_MS,
+                isTunnelWarmingUp = true
+            )
+        }
+    }
+
+    private fun cancelUrlTestWarmup() {
+        urlTestWatchdogJob?.cancel()
+        urlTestWatchdogJob = null
+    }
+
+    /**
+     * Called by InvisibleVpnService whenever sing-box reports that a candidate
+     * proxy was probed by URLTest. We rely on parsing native log lines because
+     * the bundled libbox version does not expose a structured callback for this.
+     */
+    fun reportProxyProbeResult(tag: String, alive: Boolean) {
+        urlTestTested = (urlTestTested + 1).coerceAtMost(maxOf(urlTestTotal, urlTestTested + 1))
+        if (alive) {
+            urlTestAlive += 1
+            if (urlTestSelectedTag.isNullOrBlank()) {
+                urlTestSelectedTag = tag
+            }
+        }
+        val testedNow = urlTestTested
+        val aliveNow = urlTestAlive
+        val selectedNow = urlTestSelectedTag
+        val totalNow = urlTestTotal
+        if (aliveNow >= URL_TEST_MIN_HEALTHY_LIVE) {
+            // First live proxy located - the tunnel is functional. Promote the
+            // tunnel to ready state so callers waiting in waitForNetworkPathReady
+            // unblock immediately.
+            markTunnelReadyAfterWarmup()
+        }
+        updateDiagnostics { current ->
+            current.copy(
+                urlTestTested = testedNow,
+                urlTestAlive = aliveNow,
+                urlTestSelectedTag = selectedNow,
+                isTunnelWarmingUp = !_isTunnelReadyState.value,
+                stageLabel = when {
+                    selectedNow != null -> "VPN активен"
+                    current.lastError != null -> current.stageLabel
+                    else -> "VPN: подбираю сервер"
+                },
+                lastEvent = when {
+                    selectedNow != null && aliveNow == 1 ->
+                        "✓ Найден живой VPN-сервер ($selectedNow). Тестирую остальные на скорость…"
+                    selectedNow != null ->
+                        "✓ Активный VPN: $selectedNow. Живых: $aliveNow / проверено $testedNow из $totalNow"
+                    else ->
+                        "Подбираю VPN-сервер: проверено $testedNow из $totalNow, живых пока 0. Не закрывайте приложение."
+                }
+            )
+        }
+    }
+
+    private fun markTunnelReadyAfterWarmup() {
+        if (_isTunnelReadyState.value) return
+        _isTunnelReadyState.value = true
+        cancelUrlTestWarmup()
     }
 
     fun markTunnelStartFinishedWithoutRunning(message: String) {

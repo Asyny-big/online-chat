@@ -2041,6 +2041,10 @@ private fun ConnectionStatusBanner(
                     append(" • ")
                     append(
                         when {
+                            diagnostics.isTunnelRunning && diagnostics.isTunnelWarmingUp ->
+                                "VPN: подбираю сервер ${diagnostics.urlTestTested}/${diagnostics.urlTestTotal}"
+                            diagnostics.isTunnelRunning && !diagnostics.urlTestSelectedTag.isNullOrBlank() ->
+                                "VPN активен (${diagnostics.urlTestSelectedTag})"
                             diagnostics.isTunnelRunning -> "VPN активен"
                             diagnostics.isRestrictedNetwork -> "VPN не поднят"
                             diagnostics.networkLabel == "Мобильная сеть" &&
@@ -2256,6 +2260,7 @@ private fun ProfileDiagnosticsCard(state: MainUiState) {
 private fun connectionIndicatorColor(state: MainUiState): Color {
     return when {
         !state.tunnelDiagnostics.lastError.isNullOrBlank() -> Color(0xFFEF4444)
+        state.tunnelDiagnostics.isTunnelWarmingUp -> Color(0xFFF59E0B)
         state.isRealtimeConnected -> Color(0xFF4CAF50)
         state.tunnelDiagnostics.isTunnelRunning -> Color(0xFF5EB5F7)
         state.tunnelDiagnostics.isRestrictedNetwork -> Color(0xFFF59E0B)
@@ -2264,11 +2269,15 @@ private fun connectionIndicatorColor(state: MainUiState): Color {
 }
 
 private fun connectionIndicatorLabel(state: MainUiState): String {
+    val diagnostics = state.tunnelDiagnostics
     return when {
-        !state.tunnelDiagnostics.lastError.isNullOrBlank() -> "Ошибка"
+        !diagnostics.lastError.isNullOrBlank() -> "Ошибка"
+        diagnostics.isTunnelWarmingUp && diagnostics.urlTestTotal > 0 ->
+            "VPN ${diagnostics.urlTestTested}/${diagnostics.urlTestTotal}"
+        diagnostics.isTunnelWarmingUp -> "VPN…"
         state.isRealtimeConnected -> "Онлайн"
-        state.tunnelDiagnostics.isTunnelRunning -> "VPN"
-        state.tunnelDiagnostics.isRestrictedNetwork -> "Ожидание"
+        diagnostics.isTunnelRunning -> "VPN"
+        diagnostics.isRestrictedNetwork -> "Ожидание"
         else -> "Оффлайн"
     }
 }

@@ -1,16 +1,14 @@
 {
-  "latestVersion": "1.0-ufo.17",
-  "latestVersionCode": 23,
+  "latestVersion": "1.0-ufo.24",
+  "latestVersionCode": 30,
   "minSupportedVersion": "1.0",
   "minSupportedVersionCode": 1,
   "forceUpdate": false,
   "apkFile": "AnigilatorAI.apk",
-  "apkSha256": "d8cbebeebfe57dcf9eac0b28d845957697f6dc52d23d90933c688e264779d1bb",
+  "apkSha256": "211bc93064c6a49e065f7b4ed2cdcd05dd76f323733d67bcf4751a9cc24b4381",
   "signingCertSha256": [],
   "changelog": [
-    "Исправлена маршрутизация встроенного VPN на мобильных сетях: исходящие соединения sing-box защищаются от зацикливания через VPN.",
-    "Стабилизирован DNS внутри туннеля: запросы идут через sing-box dns-out и direct bootstrap без проблемного DoH fallback.",
-    "Убраны ложные сообщения об ошибке VPN при успешных DNS-ответах и временных urltest-сбоях.",
-    "Улучшена стабильность VPN для сообщений и видеозвонков."
+    "Фикс: ложная красная плашка 'All 3 VLESS config sources failed' больше не появляется когда фоновое обновление кэша на старте упало (например, GitHub режется на Yota whitelist). Если рабочий кэш есть — refresh-сбой просто логируется в logcat и игнорируется. Ошибка показывается ТОЛЬКО когда кэш пуст и обновить нечем.",
+    "Сохранены прошлые улучшения: фоновый refresh при каждом старте app, exhaustive URLTest, warmup до 90 сек, ~470 серверов в пуле."
   ]
 }

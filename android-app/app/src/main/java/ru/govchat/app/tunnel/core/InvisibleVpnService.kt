@@ -8,6 +8,9 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.VpnService
 import android.net.wifi.WifiManager
 import android.os.Build
@@ -44,6 +47,11 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var startJob: Job? = null
     private val protectedSocketLogCount = AtomicInteger(0)
+    private var underlyingNetworkCallback: ConnectivityManager.NetworkCallback? = null
+    // Tags of VLESS proxies whose URLTest probe result has already been reported
+    // to TunnelManager. Prevents double-counting when sing-box prints the same
+    // "unavailable" line multiple times across re-tests.
+    private val countedProbeTags = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     companion object {
         const val ACTION_START = "ru.govchat.app.START_VPN"
@@ -59,6 +67,16 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
         private const val TUN_DNS_SERVER = "172.19.0.2"
         private const val PROTECTED_SOCKET_LOG_LIMIT = 8
         private val ANSI_ESCAPE_REGEX = Regex("\u001B\\[[;\\d]*m")
+        // Patterns for parsing sing-box URLTest log output. Examples:
+        //   outbound/urltest[proxy]: outbound proxy-7 unavailable: dial tcp ...
+        //   ERROR[0001] [2055237127 26ms] outbound/urltest[proxy]: dial tcp ...
+        //   outbound/urltest[proxy]: selected proxy-3
+        private val URL_TEST_UNAVAILABLE_REGEX =
+            Regex("outbound/urltest\\[[^\\]]+]:\\s+outbound\\s+(proxy-\\d+)\\s+unavailable")
+        private val URL_TEST_ALIVE_REGEX =
+            Regex("outbound/urltest\\[[^\\]]+]:\\s+outbound\\s+(proxy-\\d+)\\s+available")
+        private val URL_TEST_SELECTED_REGEX =
+            Regex("outbound/urltest\\[[^\\]]+]:\\s+selected\\s+(proxy-\\d+)")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -89,6 +107,11 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
             TunnelManager.getInstance(applicationContext).reportTunnelEvent("VPN уже активен, повторный запуск пропущен")
             return
         }
+
+        // Reset URLTest progress tracking so the next sing-box run starts with
+        // a clean counter and is not influenced by stale tag dedup state.
+        countedProbeTags.clear()
+        protectedSocketLogCount.set(0)
 
         startRequested = true
         stopRequested = false
@@ -200,6 +223,7 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
             pendingStartJob?.cancel()
         }
 
+        unregisterUnderlyingNetworkCallback()
         runCatching { singBoxRunner.stop() }
             .onFailure { error -> Log.e(TAG, "Error stopping sing-box", error) }
         TunnelManager.getInstance(applicationContext).markTunnelRunning(false)
@@ -277,7 +301,13 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
         }
     }
 
-    override fun clearDNSCache() = Unit
+    override fun clearDNSCache() {
+        // Best-effort hint: when sing-box flushes DNS state we also drop any cached
+        // entries the JVM may hold so subsequent OkHttp/Java networking requests
+        // re-resolve hostnames through the freshly recovered tunnel.
+        runCatching { java.net.InetAddress.getByName("localhost") }
+        Log.d(TAG, "clearDNSCache hook triggered")
+    }
 
     override fun closeDefaultInterfaceMonitor(listener: InterfaceUpdateListener) = Unit
 
@@ -376,6 +406,12 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
                 TAG,
                 "openTun established. fd=$fd, mtu=$TUN_MTU, dns=$TUN_DNS_SERVER"
             )
+            // Inform Android about the underlying physical network so capability
+            // propagation, metering, and connectivity callbacks behave correctly
+            // for our VPN. Without this, the VPN network may not advertise
+            // NET_CAPABILITY_INTERNET and apps that observe ConnectivityManager
+            // may believe the device has no internet.
+            registerUnderlyingNetworkCallback()
             return fd
         } catch (error: Throwable) {
             Log.e(TAG, "openTun failed", error)
@@ -428,11 +464,43 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
     override fun writeLog(message: String) {
         val cleanMessage = ANSI_ESCAPE_REGEX.replace(message, "")
         Log.i("sing-box", cleanMessage)
+        // Detect URLTest probe results so the UI can render warmup progress
+        // ("проверено N из M, живых K"). sing-box does not expose a structured
+        // callback for this in the version we bundle, so we parse log lines.
+        captureUrlTestProgress(cleanMessage)
         if (isTransientUrlTestFailure(cleanMessage)) {
             return
         }
         if (isReportableSingBoxFailure(cleanMessage)) {
             TunnelManager.getInstance(applicationContext).reportTunnelFailure(cleanMessage)
+        }
+    }
+
+    private fun captureUrlTestProgress(message: String) {
+        val unavailableMatch = URL_TEST_UNAVAILABLE_REGEX.find(message)
+        if (unavailableMatch != null) {
+            val tag = unavailableMatch.groupValues[1].trim()
+            if (tag.isNotEmpty() && countedProbeTags.add(tag)) {
+                TunnelManager.getInstance(applicationContext).reportProxyProbeResult(tag, alive = false)
+            }
+            return
+        }
+        val aliveMatch = URL_TEST_ALIVE_REGEX.find(message)
+        if (aliveMatch != null) {
+            val tag = aliveMatch.groupValues[1].trim()
+            if (tag.isNotEmpty() && countedProbeTags.add(tag)) {
+                TunnelManager.getInstance(applicationContext).reportProxyProbeResult(tag, alive = true)
+            }
+            return
+        }
+        val selectedMatch = URL_TEST_SELECTED_REGEX.find(message)
+        if (selectedMatch != null) {
+            val tag = selectedMatch.groupValues[1].trim()
+            if (tag.isNotEmpty()) {
+                if (countedProbeTags.add(tag)) {
+                    TunnelManager.getInstance(applicationContext).reportProxyProbeResult(tag, alive = true)
+                }
+            }
         }
     }
 
@@ -470,6 +538,54 @@ class InvisibleVpnService : VpnService(), PlatformInterface {
                     message.contains("connection reset by peer", ignoreCase = true) ||
                     message.contains("context canceled", ignoreCase = true)
                 )
+    }
+
+    private fun registerUnderlyingNetworkCallback() {
+        if (underlyingNetworkCallback != null) return
+        val connectivityManager = getSystemService(ConnectivityManager::class.java) ?: return
+        val request = NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+            .build()
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                applyUnderlyingNetwork(network)
+            }
+
+            override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+                applyUnderlyingNetwork(network)
+            }
+
+            override fun onLost(network: Network) {
+                runCatching { setUnderlyingNetworks(null) }
+                    .onFailure { error -> Log.w(TAG, "Failed to clear underlying networks", error) }
+            }
+        }
+        runCatching {
+            connectivityManager.registerNetworkCallback(request, callback)
+            underlyingNetworkCallback = callback
+            // Seed the underlying network immediately if one is already available so we
+            // don't rely solely on future callbacks while VPN is being negotiated.
+            connectivityManager.activeNetwork?.let { applyUnderlyingNetwork(it) }
+        }.onFailure { error ->
+            Log.w(TAG, "Failed to register underlying network callback", error)
+            underlyingNetworkCallback = null
+        }
+    }
+
+    private fun unregisterUnderlyingNetworkCallback() {
+        val callback = underlyingNetworkCallback ?: return
+        underlyingNetworkCallback = null
+        val connectivityManager = getSystemService(ConnectivityManager::class.java) ?: return
+        runCatching { connectivityManager.unregisterNetworkCallback(callback) }
+            .onFailure { error -> Log.w(TAG, "Failed to unregister underlying network callback", error) }
+        runCatching { setUnderlyingNetworks(null) }
+            .onFailure { error -> Log.w(TAG, "Failed to clear underlying networks on stop", error) }
+    }
+
+    private fun applyUnderlyingNetwork(network: Network) {
+        runCatching { setUnderlyingNetworks(arrayOf(network)) }
+            .onFailure { error -> Log.w(TAG, "Failed to set underlying networks", error) }
     }
 
     private object EmptyNetworkInterfaceIterator : NetworkInterfaceIterator {
